@@ -10,3 +10,6 @@ public/uploads/*
 .impeccable/review
 .impeccable/build
 *.log
+
+.vercel
+.env*
