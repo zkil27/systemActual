@@ -117,7 +117,7 @@ export async function exchangeShopeeCode(code: string, shopId: string) {
   };
 }
 
-async function shopeeGet(
+export async function shopeeGet(
   path: string,
   shopId: string,
   accessToken: string,
@@ -141,7 +141,9 @@ async function shopeeGet(
     sign,
     ...Object.fromEntries(Object.entries(query).map(([k, v]) => [k, String(v)])),
   });
-  const res = await fetch(`${cfg.baseUrl}${path}?${qs.toString()}`);
+  const res = await fetch(`${cfg.baseUrl}${path}?${qs.toString()}`, {
+    signal: AbortSignal.timeout(15_000),
+  });
   const data = await res.json();
   if (!res.ok || data.error) {
     throw new Error(data.message || data.error || `Shopee API error on ${path}`);

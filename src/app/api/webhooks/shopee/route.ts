@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse, after } from "next/server";
-import { Platform } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
-import {
-  shopeeWebhookUrl,
-  syncShopeeConnection,
-  verifyShopeeWebhookSignature,
-} from "@/lib/connectors/shopee";
+import { shopeeWebhookUrl, verifyShopeeWebhookSignature } from "@/lib/connectors/shopee";
+import { runTick } from "@/lib/worker/tick";
+
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
@@ -21,26 +18,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid Shopee signature" }, { status: 401 });
   }
 
-  let payload: { shop_id?: number | string } = {};
   try {
-    payload = JSON.parse(rawBody);
+    JSON.parse(rawBody);
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  // Respond 200 OK immediately and sync asynchronously
+  // Reply now; the push is only a wake-up. The tick pulls whatever changed
+  // since the shop's cursor, so duplicate or out-of-order pushes are harmless.
   after(async () => {
     try {
-      const shopId = payload.shop_id ? String(payload.shop_id) : null;
-      if (!shopId) return;
-      const conn = await prisma.shopConnection.findFirst({
-        where: { platform: Platform.SHOPEE, shopId, isDemo: false },
-      });
-      if (conn) {
-        await syncShopeeConnection(conn.id);
-      }
+      await runTick("webhook");
     } catch (err) {
-      console.error("[Shopee webhook async sync error]", err);
+      console.error("[Shopee webhook tick error]", err);
     }
   });
 

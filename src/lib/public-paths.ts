@@ -13,6 +13,8 @@ const PUBLIC_PREFIXES = [
   "/api/telegram/",
   "/api/schedules/",
   "/api/oauth/",
+  // Authenticated by WORKER_SECRET in the route, not by the owner session.
+  "/api/worker/",
   "/_next/",
 ];
 

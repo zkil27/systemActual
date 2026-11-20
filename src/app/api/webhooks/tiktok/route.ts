@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse, after } from "next/server";
-import { Platform } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
-import {
-  syncTikTokConnection,
-  verifyTikTokWebhookSignature,
-} from "@/lib/connectors/tiktok";
+import { verifyTikTokWebhookSignature } from "@/lib/connectors/tiktok";
+import { runTick } from "@/lib/worker/tick";
+
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
@@ -19,29 +17,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid TikTok signature" }, { status: 401 });
   }
 
-  let payload: { shop_id?: string | number } = {};
   try {
-    payload = JSON.parse(rawBody);
+    JSON.parse(rawBody);
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  // TikTok requires an immediate 200 OK; run the REST reconciliation asynchronously
+  // TikTok needs a 200 within 3 seconds. The webhook is only a wake-up; the
+  // tick pulls changes since the cursor, so retries and duplicates are harmless.
   after(async () => {
     try {
-      const shopId = payload.shop_id ? String(payload.shop_id) : null;
-      const conn = await prisma.shopConnection.findFirst({
-        where: {
-          platform: Platform.TIKTOK,
-          ...(shopId ? { shopId } : {}),
-          isDemo: false,
-        },
-      });
-      if (conn) {
-        await syncTikTokConnection(conn.id);
-      }
+      await runTick("webhook");
     } catch (err) {
-      console.error("[TikTok webhook async sync error]", err);
+      console.error("[TikTok webhook tick error]", err);
     }
   });
 

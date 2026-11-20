@@ -118,6 +118,7 @@ export async function tiktokRequest(opts: {
       "x-tts-access-token": opts.accessToken,
     },
     body: rawBody,
+    signal: AbortSignal.timeout(15_000),
   });
   const data = await res.json();
   if (!res.ok || data.code !== 0) {

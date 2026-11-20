@@ -58,9 +58,9 @@ model StaffMember {
 }
 
 model ShopConnection {
-  id             String         @id @default(cuid())
+  id             String           @id @default(cuid())
   platform       Platform
-  shopId         String         @unique
+  shopId         String           @unique
   shopName       String
   shopCipher     String?
   accessToken    String?
@@ -70,52 +70,56 @@ model ShopConnection {
   tokenErrorAt   DateTime?
   tokenError     String?
   /// Per-shop switch for anything that changes the shop (ship, print, stock). Off by default.
-  writesEnabled  Boolean        @default(false)
+  writesEnabled  Boolean          @default(false)
+  /// Orders updated up to this time are in the ledger. Advanced one window at a time.
+  ordersSyncedTo DateTime?
   lastSyncedAt   DateTime?
-  isDemo         Boolean        @default(false)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  orders         Order[]
+  listings       ListingVariant[]
+  isDemo         Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
   parcels        ReturnParcel[]
 }
 
 model ReturnParcel {
-  id                        String             @id @default(cuid())
-  shopConnectionId          String
-  shopConnection            ShopConnection     @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
-  platform                  Platform
-  orderSn                   String
-  returnSn                  String?
-  forwardTrackingNumber     String?
-  rtsTrackingNumber         String?
-  courier                   String
+  id                    String         @id @default(cuid())
+  shopConnectionId      String
+  shopConnection        ShopConnection @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
+  platform              Platform
+  orderSn               String
+  returnSn              String?
+  forwardTrackingNumber String?
+  rtsTrackingNumber     String?
+  courier               String
 
-  category                  ReturnCategory
-  digitalStatus             DigitalStatus
-  returnReason              String?
-  disputeDeadlineAt         DateTime?
+  category          ReturnCategory
+  digitalStatus     DigitalStatus
+  returnReason      String?
+  disputeDeadlineAt DateTime?
 
-  itemSummary               String
-  variationName             String?
-  quantity                  Int                @default(1)
-  itemImageUrl              String?
-  itemsJson                 Json?
+  itemSummary   String
+  variationName String?
+  quantity      Int     @default(1)
+  itemImageUrl  String?
+  itemsJson     Json?
 
-  orderTotalPhp             Decimal            @db.Decimal(10, 2)
-  estimatedUnitCostPhp      Decimal            @db.Decimal(10, 2)
+  orderTotalPhp        Decimal @db.Decimal(10, 2)
+  estimatedUnitCostPhp Decimal @db.Decimal(10, 2)
 
   orderCreatedAt            DateTime?
   digitalReturnTaggedAt     DateTime?
   courierReturnedToSellerAt DateTime?
   physicallyReceivedAt      DateTime?
 
-  physicalCondition         PhysicalCondition?
-  disputeDraft              String?            @db.Text
+  physicalCondition PhysicalCondition?
+  disputeDraft      String?            @db.Text
 
-  events                    ReturnEvent[]
-  scans                     PhysicalScan[]
+  events ReturnEvent[]
+  scans  PhysicalScan[]
 
-  createdAt                 DateTime           @default(now())
-  updatedAt                 DateTime           @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([platform, orderSn, category])
   @@index([forwardTrackingNumber])
@@ -174,4 +178,91 @@ model AppSettings {
   telegramChatId        String?
   telegramDailyBriefUtc String   @default("12:00")
   updatedAt             DateTime @updatedAt
+}
+
+/// One marketplace order. Kept current by incremental sync; completed and
+/// cancelled orders are deleted after 90 days to stay inside the free database.
+model Order {
+  id                String         @id @default(cuid())
+  shopConnectionId  String
+  shopConnection    ShopConnection @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
+  platform          Platform
+  orderSn           String
+  /// Raw platform status, e.g. READY_TO_SHIP (Shopee) or AWAITING_SHIPMENT (TikTok).
+  status            String
+  isCod             Boolean        @default(false)
+  totalPhp          Decimal        @db.Decimal(12, 2)
+  platformCreatedAt DateTime
+  platformUpdatedAt DateTime
+  /// Shopee pickup_done_time / TikTok rts_time.
+  shippedAt         DateTime?
+  cancelBy          String?
+  cancelReason      String?
+  lines             OrderLine[]
+  packages          Package[]
+  syncedAt          DateTime       @updatedAt
+
+  @@unique([platform, orderSn])
+  @@index([shopConnectionId, status])
+  @@index([status, platformUpdatedAt])
+  @@index([platformCreatedAt])
+}
+
+model OrderLine {
+  id            String  @id @default(cuid())
+  orderId       String
+  order         Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  /// Shopee item_id / TikTok product_id
+  listingId     String
+  /// Shopee model_id ("0" if none) / TikTok sku_id
+  variationId   String
+  name          String
+  variationName String?
+  imageUrl      String?
+  quantity      Int
+  unitPricePhp  Decimal @db.Decimal(12, 2)
+
+  @@index([orderId])
+  @@index([listingId, variationId])
+}
+
+model Package {
+  id             String  @id @default(cuid())
+  orderId        String
+  order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  /// Shopee package_number / TikTok package id
+  packageNumber  String
+  trackingNumber String?
+  carrier        String?
+  channelId      String?
+  /// Raw platform package/logistics status.
+  status         String?
+
+  @@unique([orderId, packageNumber])
+  @@index([trackingNumber])
+}
+
+/// Every listing variation seen on either shop. Filled from order lines.
+model ListingVariant {
+  id               String         @id @default(cuid())
+  shopConnectionId String
+  shopConnection   ShopConnection @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
+  platform         Platform
+  listingId        String
+  variationId      String
+  name             String
+  variationName    String?
+  imageUrl         String?
+  lastSeenAt       DateTime
+
+  @@unique([shopConnectionId, listingId, variationId])
+}
+
+/// Prevents two worker ticks from running at once. A tick that finds the lock
+/// held sets `rerunRequested` so the running tick does one more pass.
+model WorkerLock {
+  id             String   @id
+  lockedUntil    DateTime
+  holder         String?
+  rerunRequested Boolean  @default(false)
 }

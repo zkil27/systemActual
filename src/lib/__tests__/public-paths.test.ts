@@ -21,6 +21,10 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/api/scan/lookup")).toBe(true);
   });
 
+  it("lets the worker tick through (it checks WORKER_SECRET itself)", () => {
+    expect(isPublicPath("/api/worker/tick")).toBe(true);
+  });
+
   it("protects owner pages and owner APIs", () => {
     for (const path of ["/", "/returns", "/settings", "/imports", "/api/dashboard", "/api/returns/abc"]) {
       expect(isPublicPath(path), path).toBe(false);
