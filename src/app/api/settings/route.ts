@@ -112,7 +112,8 @@ export async function POST(req: NextRequest) {
       const pinHash = await hashSecret(data.pin);
       await prisma.staffMember.update({
         where: { id: data.staffId },
-        data: { pinHash },
+        // A new PIN from the owner also clears any lockout.
+        data: { pinHash, failedPinAttempts: 0, pinLockedUntil: null },
       });
       return NextResponse.json({ ok: true });
     }

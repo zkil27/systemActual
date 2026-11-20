@@ -31,7 +31,7 @@ Success means the owner opens **Kyna Ops** on her phone (or checks Telegram) and
 
 ## Positioning
 
-Unlike BigSeller or Seller Center—which bury return dates under order creation dates, lump Failed Delivery with Buyer Returns, assume desktop spreadsheets and SKU maintenance, and rely blindly on courier status—**Kyna Ops** is a mobile-first, zero-SKU daily return truth engine built specifically for fast-moving Philippine fashion sellers on Shopee and TikTok Shop.
+Seller Center buries return dates under order creation dates, lumps Failed Delivery with Buyer Returns, and relies blindly on courier status. **Kyna Ops** is a mobile-first, zero-SKU operations app for fast-moving Philippine fashion sellers on Shopee and TikTok Shop: daily return truth, cash actually credited, cross-shop stock sync, and automated label printing, with no separate ERP.
 
 ## Operating Context
 
@@ -48,11 +48,12 @@ Unlike BigSeller or Seller Center—which bury return dates under order creation
 - **V1 Scope:**
   - Owner mobile-first dashboard with Today/Yesterday/7-Day Manila-time date switching and strict **Failed Delivery** vs. **Return / Refund** separation across all 3 timestamps + automatic **"Courier Marked Returned, Not Scanned Yet"** discrepancy queue.
   - Staff mobile PWA phone-camera barcode scanner (`/scan`) with 4-digit PIN + name picker, product photo/color/size verification, condition buttons, damage photo upload, and strict redaction of all peso/cost fields.
-  - Real Shopee Open Platform v2 & TikTok Shop Open API connectors (OAuth + Webhooks + 15-min polling), plus Shopee/TikTok/BigSeller CSV/XLSX upload and a realistic `kynaph` demo simulator for Day-1 use while API approvals complete.
+  - Real Shopee Open Platform v2 & TikTok Shop Open API connectors (OAuth + Webhooks + 15-min polling), plus Shopee/TikTok CSV/XLSX upload and a realistic `kynaph` demo simulator for Day-1 use while API approvals complete.
   - 1-click structured Shopee/TikTok dispute appeal generator (template-based, zero AI cost).
   - Free Telegram Bot with 8:00 PM Manila scheduled brief and instant commands.
 - **Language & Copy:** **Plain simple English only**—short everyday words, zero technical/ERP jargon.
-- **Explicit V1 Non-Goals (Deferred to V2):** Automated silent thermal label printing (Windows Print Agent), full Escrow/Settlement cash-basis accounting, and LLM/AI API integration.
+- **Now in scope (replacing BigSeller, branch `feat/replace-bigseller`):** automated shipping and silent thermal label printing (Windows print agent), cross-shop stock sync, and a "credited today" cash number.
+- **Non-Goals:** full escrow/settlement accounting (pending-release funnels), BigSeller integration of any kind, and LLM/AI API integration.
 
 ## Brand Commitments
 

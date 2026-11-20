@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { createStaffToken, STAFF_COOKIE, verifySecret } from "@/lib/auth";
+import { lockedMessage, pinFailureUpdate, pinLockRemainingMs } from "@/lib/pin-lockout";
 
 const staffPinSchema = z.object({
   staffId: z.string().min(1),
@@ -40,9 +41,45 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Staff member not found." }, { status: 404 });
     }
 
+    const now = new Date();
+    const lockRemaining = pinLockRemainingMs(member.pinLockedUntil, now);
+    if (lockRemaining > 0) {
+      // Don't check the PIN at all while locked.
+      return NextResponse.json({ error: lockedMessage(lockRemaining) }, { status: 429 });
+    }
+
     const ok = await verifySecret(parsed.data.pin, member.pinHash);
     if (!ok) {
-      return NextResponse.json({ error: "Wrong 4-digit PIN. Try again." }, { status: 401 });
+      // Atomic increment so parallel guesses can't undercount.
+      const bumped = await prisma.staffMember.update({
+        where: { id: member.id },
+        data: { failedPinAttempts: { increment: 1 } },
+        select: { failedPinAttempts: true },
+      });
+      const next = pinFailureUpdate(bumped.failedPinAttempts, now);
+      if (next.locked) {
+        await prisma.staffMember.update({
+          where: { id: member.id },
+          data: { failedPinAttempts: next.failedPinAttempts, pinLockedUntil: next.pinLockedUntil },
+        });
+        return NextResponse.json(
+          { error: lockedMessage(next.pinLockedUntil!.getTime() - now.getTime()) },
+          { status: 429 }
+        );
+      }
+      return NextResponse.json(
+        {
+          error: `Wrong PIN. ${next.attemptsLeft} ${next.attemptsLeft === 1 ? "try" : "tries"} left.`,
+        },
+        { status: 401 }
+      );
+    }
+
+    if (member.failedPinAttempts > 0 || member.pinLockedUntil) {
+      await prisma.staffMember.update({
+        where: { id: member.id },
+        data: { failedPinAttempts: 0, pinLockedUntil: null },
+      });
     }
 
     const token = await createStaffToken({

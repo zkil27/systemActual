@@ -3,7 +3,7 @@ import * as XLSX from "xlsx";
 import { DigitalStatus, Platform, ReturnCategory } from "@prisma/client";
 import { parseMarketplaceSpreadsheet } from "@/lib/connectors/csv-importer";
 
-describe("Shopee / TikTok / BigSeller spreadsheet importer", () => {
+describe("Shopee / TikTok spreadsheet importer", () => {
   it("parses mixed Failed Delivery and Buyer Return rows cleanly", () => {
     const sampleRows = [
       {

@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { verifyShopeeWebhookSignature } from "@/lib/connectors/shopee";
 import { verifyTikTokWebhookSignature } from "@/lib/connectors/tiktok";
 
@@ -57,6 +57,39 @@ describe("Marketplace webhook HMAC-SHA256 verification", () => {
         appKey,
         appSecret,
       })
+    ).toBe(false);
+  });
+});
+
+describe("Webhook verification fails closed when keys are missing", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("rejects a Shopee push when SHOPEE_PARTNER_KEY is not set", () => {
+    vi.stubEnv("SHOPEE_PARTNER_KEY", "");
+    const rawBody = JSON.stringify({ code: 3, shop_id: 1 });
+    // Even a signature computed with an empty key must not pass.
+    const sigWithEmptyKey = crypto.createHmac("sha256", "").update(`u|${rawBody}`).digest("hex");
+    expect(
+      verifyShopeeWebhookSignature({ webhookUrl: "u", rawBody, signatureHeader: sigWithEmptyKey })
+    ).toBe(false);
+  });
+
+  it("rejects a TikTok webhook when TIKTOK_APP_KEY / SECRET are not set", () => {
+    vi.stubEnv("TIKTOK_APP_KEY", "");
+    vi.stubEnv("TIKTOK_APP_SECRET", "");
+    const rawBody = JSON.stringify({ type: 1 });
+    const sigWithEmptyKey = crypto.createHmac("sha256", "").update(rawBody).digest("hex");
+    expect(
+      verifyTikTokWebhookSignature({ rawBody, authorizationHeader: sigWithEmptyKey })
+    ).toBe(false);
+  });
+
+  it("rejects a missing signature header even with keys set", () => {
+    expect(
+      verifyShopeeWebhookSignature({ webhookUrl: "u", rawBody: "{}", signatureHeader: null, partnerKey: "k" })
+    ).toBe(false);
+    expect(
+      verifyTikTokWebhookSignature({ rawBody: "{}", authorizationHeader: undefined, appKey: "a", appSecret: "s" })
     ).toBe(false);
   });
 });

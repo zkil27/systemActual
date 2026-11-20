@@ -10,14 +10,13 @@ export async function POST(req: NextRequest) {
   const rawBody = await req.text();
   const authHeader = req.headers.get("authorization");
 
-  if (process.env.TIKTOK_APP_KEY && process.env.TIKTOK_APP_SECRET) {
-    const valid = verifyTikTokWebhookSignature({
-      rawBody,
-      authorizationHeader: authHeader,
-    });
-    if (!valid) {
-      return NextResponse.json({ error: "Invalid TikTok signature" }, { status: 401 });
-    }
+  // Always verify (fail closed). Without TIKTOK_APP_KEY/SECRET every webhook is rejected.
+  const valid = verifyTikTokWebhookSignature({
+    rawBody,
+    authorizationHeader: authHeader,
+  });
+  if (!valid) {
+    return NextResponse.json({ error: "Invalid TikTok signature" }, { status: 401 });
   }
 
   let payload: { shop_id?: string | number } = {};

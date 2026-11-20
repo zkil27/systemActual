@@ -57,6 +57,16 @@ export function verifyShopeeWebhookSignature(params: {
   return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(actual));
 }
 
+/**
+ * The URL Shopee signs is the push URL registered in the Open Platform console,
+ * which may differ from req.url behind Vercel's proxy. Prefer APP_BASE_URL.
+ */
+export function shopeeWebhookUrl(requestUrl: string): string {
+  const base = process.env.APP_BASE_URL?.trim().replace(/\/$/, "");
+  if (!base) return requestUrl;
+  return `${base}/api/webhooks/shopee`;
+}
+
 export function buildShopeeAuthUrl(): string {
   const cfg = getShopeeConfig();
   const path = "/api/v2/shop/auth_partner";

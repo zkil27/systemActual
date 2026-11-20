@@ -1,15 +1,10 @@
 import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
+import { getAuthSecretKey as getSecretKey } from "./auth-secret";
 
 export const OWNER_COOKIE = "kyna_owner_session";
 export const STAFF_COOKIE = "kyna_staff_session";
-
-function getSecretKey(): Uint8Array {
-  const raw =
-    process.env.AUTH_SECRET || "kyna-ops-dev-secret-change-in-production-32chars";
-  return new TextEncoder().encode(raw);
-}
 
 export interface OwnerSessionPayload {
   role: "owner";

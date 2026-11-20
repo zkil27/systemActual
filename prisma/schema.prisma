@@ -52,6 +52,9 @@ model StaffMember {
   active    Boolean        @default(true)
   scans     PhysicalScan[]
   createdAt DateTime       @default(now())
+
+  failedPinAttempts Int       @default(0)
+  pinLockedUntil    DateTime?
 }
 
 model ShopConnection {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
+  shopeeWebhookUrl,
   syncShopeeConnection,
   verifyShopeeWebhookSignature,
 } from "@/lib/connectors/shopee";
@@ -9,17 +10,15 @@ import {
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
   const signature = req.headers.get("authorization");
-  const webhookUrl = req.url;
 
-  if (process.env.SHOPEE_PARTNER_KEY) {
-    const valid = verifyShopeeWebhookSignature({
-      webhookUrl,
-      rawBody,
-      signatureHeader: signature,
-    });
-    if (!valid) {
-      return NextResponse.json({ error: "Invalid Shopee signature" }, { status: 401 });
-    }
+  // Always verify (fail closed). Without SHOPEE_PARTNER_KEY every push is rejected.
+  const valid = verifyShopeeWebhookSignature({
+    webhookUrl: shopeeWebhookUrl(req.url),
+    rawBody,
+    signatureHeader: signature,
+  });
+  if (!valid) {
+    return NextResponse.json({ error: "Invalid Shopee signature" }, { status: 401 });
   }
 
   let payload: { shop_id?: number | string } = {};
