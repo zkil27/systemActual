@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { DigitalStatus, Platform, ReturnCategory } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { classifyReturnCategory, upsertNormalizedReturn } from "./normalizer";
+import { ensureFreshToken } from "./tokens";
 
 export function getShopeeConfig() {
   return {
@@ -67,7 +68,8 @@ export function shopeeWebhookUrl(requestUrl: string): string {
   return `${base}/api/webhooks/shopee`;
 }
 
-export function buildShopeeAuthUrl(): string {
+/** Shopee has no state parameter, but it keeps our query string on the redirect. */
+export function buildShopeeAuthUrl(state: string): string {
   const cfg = getShopeeConfig();
   const path = "/api/v2/shop/auth_partner";
   const timestamp = Math.floor(Date.now() / 1000);
@@ -77,7 +79,9 @@ export function buildShopeeAuthUrl(): string {
     path,
     timestamp,
   });
-  const redirect = encodeURIComponent(`${cfg.appBaseUrl}/api/oauth/shopee/callback`);
+  const redirect = encodeURIComponent(
+    `${cfg.appBaseUrl}/api/oauth/shopee/callback?state=${encodeURIComponent(state)}`
+  );
   return `${cfg.baseUrl}${path}?partner_id=${cfg.partnerId}&timestamp=${timestamp}&sign=${sign}&redirect=${redirect}`;
 }
 
@@ -154,6 +158,7 @@ export async function syncShopeeConnection(connectionId: string): Promise<{ sync
   if (!conn || conn.platform !== Platform.SHOPEE || !conn.accessToken || conn.isDemo) {
     return { synced: 0 };
   }
+  const accessToken = await ensureFreshToken(conn);
 
   let synced = 0;
   const nowSec = Math.floor(Date.now() / 1000);
@@ -165,7 +170,7 @@ export async function syncShopeeConnection(connectionId: string): Promise<{ sync
       const returnResp = await shopeeGet(
         "/api/v2/returns/get_return_list",
         conn.shopId,
-        conn.accessToken,
+        accessToken,
         {
           page_no: pageNo,
           page_size: 100,
@@ -229,7 +234,7 @@ export async function syncShopeeConnection(connectionId: string): Promise<{ sync
       const orderListResp = await shopeeGet(
         "/api/v2/order/get_order_list",
         conn.shopId,
-        conn.accessToken,
+        accessToken,
         {
           time_range_field: "update_time",
           time_from: sevenDaysAgoSec,
@@ -252,7 +257,7 @@ export async function syncShopeeConnection(connectionId: string): Promise<{ sync
       const detailResp = await shopeeGet(
         "/api/v2/order/get_order_detail",
         conn.shopId,
-        conn.accessToken,
+        accessToken,
         {
           order_sn_list: chunk.join(","),
           response_optional_fields: "item_list,package_list,total_amount,shipping_carrier",
@@ -272,7 +277,7 @@ export async function syncShopeeConnection(connectionId: string): Promise<{ sync
           const track = await shopeeGet(
             "/api/v2/logistics/get_tracking_info",
             conn.shopId,
-            conn.accessToken,
+            accessToken,
             {
               order_sn: String(order.order_sn),
               ...(pkg?.package_number ? { package_number: String(pkg.package_number) } : {}),

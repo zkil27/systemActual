@@ -1,34 +1,75 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { exchangeTikTokCode } from "@/lib/connectors/tiktok";
+import { getOwnerSession } from "@/lib/auth";
+import { exchangeTikTokCode, getAuthorizedShops } from "@/lib/connectors/tiktok";
+import { checkOAuthState, clearOAuthStateCookie } from "@/lib/oauth-state";
 
 export async function GET(req: NextRequest) {
+  if (!(await getOwnerSession())) {
+    return NextResponse.redirect(new URL("/login", req.url));
+  }
+  if (!checkOAuthState(req)) {
+    return NextResponse.redirect(new URL("/settings?error=tiktok_state_mismatch", req.url));
+  }
   const code = req.nextUrl.searchParams.get("code");
   if (!code) {
     return NextResponse.redirect(new URL("/settings?error=tiktok_missing_code", req.url));
   }
+  const res = await connectTikTok(req, code);
+  clearOAuthStateCookie(res);
+  return res;
+}
 
+async function connectTikTok(req: NextRequest, code: string): Promise<NextResponse> {
   try {
     const tokens = await exchangeTikTokCode(code);
-    await prisma.shopConnection.upsert({
-      where: { shopId: `tiktok-${tokens.sellerName.toLowerCase().replace(/\W+/g, "-")}` },
-      create: {
-        platform: Platform.TIKTOK,
-        shopId: `tiktok-${tokens.sellerName.toLowerCase().replace(/\W+/g, "-")}`,
-        shopName: tokens.sellerName,
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        tokenExpiresAt: new Date(Date.now() + tokens.expiresIn * 1000),
-        isDemo: false,
-      },
-      update: {
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        tokenExpiresAt: new Date(Date.now() + tokens.expiresIn * 1000),
-        isDemo: false,
-      },
-    });
+    // The real shop_id and shop_cipher come from Get Authorized Shops. Without
+    // the cipher, every shop-scoped API call fails.
+    const shops = await getAuthorizedShops(tokens.accessToken);
+    if (shops.length === 0) {
+      return NextResponse.redirect(new URL("/settings?error=tiktok_no_shops", req.url));
+    }
+
+    const tokenData = {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      tokenExpiresAt: tokens.expiresAt,
+      tokenErrorAt: null,
+      tokenError: null,
+      isDemo: false,
+    };
+
+    for (const shop of shops) {
+      // Older versions stored a made-up "tiktok-<seller>" id. Move that row to
+      // the real id so its parcels stay attached.
+      const existing = await prisma.shopConnection.findUnique({ where: { shopId: shop.id } });
+      const legacy = existing
+        ? null
+        : await prisma.shopConnection.findFirst({
+            where: { platform: Platform.TIKTOK, isDemo: false, shopId: { startsWith: "tiktok-" } },
+          });
+
+      if (legacy) {
+        await prisma.shopConnection.update({
+          where: { id: legacy.id },
+          data: { shopId: shop.id, shopName: shop.name, shopCipher: shop.cipher, ...tokenData },
+        });
+        continue;
+      }
+
+      await prisma.shopConnection.upsert({
+        where: { shopId: shop.id },
+        create: {
+          platform: Platform.TIKTOK,
+          shopId: shop.id,
+          shopName: shop.name,
+          shopCipher: shop.cipher,
+          ...tokenData,
+        },
+        update: { shopName: shop.name, shopCipher: shop.cipher, ...tokenData },
+      });
+    }
     return NextResponse.redirect(new URL("/settings?connected=tiktok", req.url));
   } catch (err) {
     console.error("[TikTok OAuth callback error]", err);

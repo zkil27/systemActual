@@ -45,6 +45,9 @@ export async function GET() {
       isDemo: s.isDemo,
       connected: Boolean(s.accessToken),
       lastSyncedAt: s.lastSyncedAt?.toISOString() ?? null,
+      tokenExpiresAt: s.tokenExpiresAt?.toISOString() ?? null,
+      needsReconnect: Boolean(s.tokenErrorAt),
+      writesEnabled: s.writesEnabled,
     })),
     telegramPreview: formatTelegramDailyBrief(report),
   });

@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { DigitalStatus, Platform, ReturnCategory } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { classifyReturnCategory, upsertNormalizedReturn } from "./normalizer";
+import { ensureFreshToken, tiktokExpiry } from "./tokens";
 
 export function getTikTokConfig() {
   return {
@@ -14,7 +15,7 @@ export function getTikTokConfig() {
 
 export function isTikTokConfigured(): boolean {
   const cfg = getTikTokConfig();
-  return Boolean(cfg.appKey && cfg.appSecret);
+  return Boolean(cfg.appKey && cfg.appSecret && process.env.TIKTOK_SERVICE_ID?.trim());
 }
 
 /**
@@ -62,9 +63,11 @@ export function verifyTikTokWebhookSignature(params: {
   return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(actual));
 }
 
-export function buildTikTokAuthUrl(): string {
-  const cfg = getTikTokConfig();
-  return `${cfg.authUrl}/oauth/authorize?app_key=${encodeURIComponent(cfg.appKey)}&state=kyna_ops_ph`;
+/** Rest-of-world seller authorization link (PH). service_id is on the app page in Partner Center. */
+export function buildTikTokAuthUrl(state: string): string {
+  const serviceId = process.env.TIKTOK_SERVICE_ID?.trim() || "";
+  const base = (process.env.TIKTOK_SELLER_AUTH_URL || "https://services.tiktokshop.com/open/authorize").replace(/\/$/, "");
+  return `${base}?service_id=${encodeURIComponent(serviceId)}&state=${encodeURIComponent(state)}`;
 }
 
 export async function exchangeTikTokCode(code: string) {
@@ -78,9 +81,49 @@ export async function exchangeTikTokCode(code: string) {
   return {
     accessToken: String(data.data.access_token),
     refreshToken: String(data.data.refresh_token),
-    expiresIn: Number(data.data.access_token_expire_in || 604800),
+    // access_token_expire_in is an absolute Unix timestamp, not a duration.
+    expiresAt: tiktokExpiry(data.data.access_token_expire_in, Date.now()),
     sellerName: String(data.data.seller_name || "TikTok Shop PH"),
   };
+}
+
+/**
+ * Signed TikTok Shop API request. `shopCipher` is required for shop-scoped
+ * endpoints and must be omitted for the authorization endpoints.
+ */
+export async function tiktokRequest(opts: {
+  method: "GET" | "POST" | "PUT";
+  path: string;
+  accessToken: string;
+  shopCipher?: string | null;
+  query?: Record<string, string>;
+  body?: Record<string, unknown>;
+  fetchFn?: typeof fetch;
+}) {
+  const cfg = getTikTokConfig();
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const rawBody = opts.body ? JSON.stringify(opts.body) : undefined;
+  const query: Record<string, string> = {
+    app_key: cfg.appKey,
+    timestamp,
+    ...(opts.shopCipher ? { shop_cipher: opts.shopCipher } : {}),
+    ...(opts.query ?? {}),
+  };
+  const sign = signTikTokRequest({ appSecret: cfg.appSecret, path: opts.path, query, rawBody });
+  const qs = new URLSearchParams({ ...query, sign });
+  const res = await (opts.fetchFn ?? fetch)(`${cfg.apiBaseUrl}${opts.path}?${qs.toString()}`, {
+    method: opts.method,
+    headers: {
+      ...(rawBody ? { "Content-Type": "application/json" } : {}),
+      "x-tts-access-token": opts.accessToken,
+    },
+    body: rawBody,
+  });
+  const data = await res.json();
+  if (!res.ok || data.code !== 0) {
+    throw new Error(data.message || `TikTok API error on ${opts.path}`);
+  }
+  return data.data;
 }
 
 async function tiktokPost(
@@ -90,35 +133,37 @@ async function tiktokPost(
   bodyObj: Record<string, unknown>,
   extraQuery?: Record<string, string>
 ) {
-  const cfg = getTikTokConfig();
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const rawBody = JSON.stringify(bodyObj);
-  const query: Record<string, string> = {
-    app_key: cfg.appKey,
-    timestamp,
-    shop_cipher: shopCipher,
-    ...(extraQuery ?? {}),
-  };
-  const sign = signTikTokRequest({
-    appSecret: cfg.appSecret,
-    path,
-    query,
-    rawBody,
+  return tiktokRequest({ method: "POST", path, accessToken, shopCipher, body: bodyObj, query: extraQuery });
+}
+
+export interface AuthorizedShop {
+  id: string;
+  name: string;
+  region: string;
+  cipher: string;
+}
+
+/** Real shop_id and shop_cipher for every shop the seller authorized. */
+export async function getAuthorizedShops(
+  accessToken: string,
+  fetchFn?: typeof fetch
+): Promise<AuthorizedShop[]> {
+  const data = await tiktokRequest({
+    method: "GET",
+    path: "/authorization/202309/shops",
+    accessToken,
+    fetchFn,
   });
-  const qs = new URLSearchParams({ ...query, sign });
-  const res = await fetch(`${cfg.apiBaseUrl}${path}?${qs.toString()}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-tts-access-token": accessToken,
-    },
-    body: rawBody,
-  });
-  const data = await res.json();
-  if (!res.ok || data.code !== 0) {
-    throw new Error(data.message || `TikTok API error on ${path}`);
-  }
-  return data.data;
+  const shops: unknown[] = Array.isArray(data?.shops) ? data.shops : [];
+  return shops
+    .map((s) => s as Record<string, unknown>)
+    .filter((s) => s.id && s.cipher)
+    .map((s) => ({
+      id: String(s.id),
+      name: String(s.name || "TikTok Shop"),
+      region: String(s.region || ""),
+      cipher: String(s.cipher),
+    }));
 }
 
 export async function syncTikTokConnection(connectionId: string): Promise<{ synced: number }> {
@@ -132,6 +177,8 @@ export async function syncTikTokConnection(connectionId: string): Promise<{ sync
   ) {
     return { synced: 0 };
   }
+  const accessToken = await ensureFreshToken(conn);
+  const shopCipher = conn.shopCipher;
 
   let synced = 0;
   const nowSec = Math.floor(Date.now() / 1000);
@@ -143,8 +190,8 @@ export async function syncTikTokConnection(connectionId: string): Promise<{ sync
     for (let page = 0; page < 15; page++) {
       const returnsData = await tiktokPost(
         "/return_refund/202309/returns/search",
-        conn.accessToken,
-        conn.shopCipher,
+        accessToken,
+        shopCipher,
         {
           update_time_ge: sevenDaysAgoSec,
           update_time_lt: nowSec,
@@ -207,8 +254,8 @@ export async function syncTikTokConnection(connectionId: string): Promise<{ sync
     for (let page = 0; page < 15; page++) {
       const ordersData = await tiktokPost(
         "/order/202309/orders/search",
-        conn.accessToken,
-        conn.shopCipher,
+        accessToken,
+        shopCipher,
         {
           update_time_ge: sevenDaysAgoSec,
           update_time_lt: nowSec,

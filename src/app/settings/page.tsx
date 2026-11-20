@@ -8,6 +8,7 @@ import { AppShell } from "@/components/AppShell";
 import { Button, Group } from "@/components/ui/Button";
 import { Disclosure } from "@/components/ui/Disclosure";
 import { toast } from "@/components/ui/Toast";
+import { formatManilaDateTime } from "@/lib/time";
 
 interface SettingsPayload {
   settings: {
@@ -31,6 +32,9 @@ interface SettingsPayload {
     isDemo: boolean;
     connected: boolean;
     lastSyncedAt: string | null;
+    tokenExpiresAt: string | null;
+    needsReconnect: boolean;
+    writesEnabled: boolean;
   }>;
   telegramPreview: string;
 }
@@ -107,9 +111,17 @@ function Switch({
   );
 }
 
-function storeStatus(connected: boolean, keysReady: boolean): string {
-  if (connected) return "Connected";
+type ShopRow = SettingsPayload["shops"][number];
+
+function storeStatus(shop: ShopRow | undefined, keysReady: boolean): string {
+  if (shop?.needsReconnect) return "Reconnect";
+  if (shop?.connected) return "Connected";
   return keysReady ? "Connect" : "Waiting for keys";
+}
+
+function storeDetail(shop: ShopRow | undefined): string | null {
+  if (!shop?.connected || shop.needsReconnect || !shop.tokenExpiresAt) return null;
+  return `Renews ${formatManilaDateTime(new Date(shop.tokenExpiresAt))}`;
 }
 
 export default function SettingsPage() {
@@ -237,20 +249,30 @@ export default function SettingsPage() {
         <section>
           <GroupLabel>Stores</GroupLabel>
           <Group className="divide-y divide-hairline">
-            <a href="/api/oauth/shopee/start" className={rowLinkClass}>
-              <span className="text-[17px] text-ink">Shopee PH</span>
-              <span className="flex items-center gap-1 text-[16px] text-ink-3">
-                {storeStatus(Boolean(shopee?.connected), Boolean(data?.integrations.shopeeEnvReady))}
-                <ChevronRight className="h-5 w-5" />
-              </span>
-            </a>
-            <a href="/api/oauth/tiktok/start" className={rowLinkClass}>
-              <span className="text-[17px] text-ink">TikTok Shop PH</span>
-              <span className="flex items-center gap-1 text-[16px] text-ink-3">
-                {storeStatus(Boolean(tiktok?.connected), Boolean(data?.integrations.tiktokEnvReady))}
-                <ChevronRight className="h-5 w-5" />
-              </span>
-            </a>
+            {(
+              [
+                { label: "Shopee PH", href: "/api/oauth/shopee/start", shop: shopee, keys: data?.integrations.shopeeEnvReady },
+                { label: "TikTok Shop PH", href: "/api/oauth/tiktok/start", shop: tiktok, keys: data?.integrations.tiktokEnvReady },
+              ] as const
+            ).map((row) => {
+              const detail = storeDetail(row.shop);
+              return (
+                <a key={row.label} href={row.href} className={rowLinkClass}>
+                  <span className="flex flex-col">
+                    <span className="text-[17px] text-ink">{row.label}</span>
+                    {detail && <span className="text-[13px] text-ink-3">{detail}</span>}
+                  </span>
+                  <span
+                    className={`flex items-center gap-1 text-[16px] ${
+                      row.shop?.needsReconnect ? "font-semibold text-missing-ink" : "text-ink-3"
+                    }`}
+                  >
+                    {storeStatus(row.shop, Boolean(row.keys))}
+                    <ChevronRight className="h-5 w-5" />
+                  </span>
+                </a>
+              );
+            })}
             <Link href="/imports" className={rowLinkClass}>
               <span className="text-[17px] text-ink">Upload a file</span>
               <ChevronRight className="h-5 w-5 text-ink-3" />

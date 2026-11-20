@@ -66,6 +66,11 @@ model ShopConnection {
   accessToken    String?
   refreshToken   String?
   tokenExpiresAt DateTime?
+  /// Set when token refresh starts failing; cleared on the next success. Used to alert once.
+  tokenErrorAt   DateTime?
+  tokenError     String?
+  /// Per-shop switch for anything that changes the shop (ship, print, stock). Off by default.
+  writesEnabled  Boolean        @default(false)
   lastSyncedAt   DateTime?
   isDemo         Boolean        @default(false)
   createdAt      DateTime       @default(now())
