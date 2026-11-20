@@ -1,0 +1,267 @@
+---
+name: Kyna Ops
+description: Calm, spacious phone-first returns tracker for a Philippine fashion seller and her warehouse staff.
+colors:
+  ground: "#f4f7f8"
+  surface: "#ffffff"
+  surface-subtle: "#f8fafb"
+  ink: "#0f172a"
+  ink-2: "#475569"
+  ink-3: "#556477"
+  hairline: "#e2e8f0"
+  hairline-strong: "#cbd5e1"
+  brand: "#0f766e"
+  brand-hover: "#115e59"
+  brand-soft: "#f0fdfa"
+  missing: "#dc2626"
+  missing-ink: "#991b1b"
+  missing-soft: "#fef2f2"
+  arrived: "#047857"
+  arrived-soft: "#ecfdf5"
+  failed: "#b45309"
+  failed-soft: "#fef3c7"
+  refund: "#1d4ed8"
+  refund-soft: "#dbeafe"
+typography:
+  large-title:
+    fontFamily: "Public Sans, system-ui, sans-serif"
+    fontSize: "34px"
+    fontWeight: 800
+    lineHeight: 1.1
+    letterSpacing: "-0.025em"
+  title:
+    fontFamily: "Public Sans, system-ui, sans-serif"
+    fontSize: "20px"
+    fontWeight: 800
+    lineHeight: 1.25
+    letterSpacing: "-0.01em"
+  stat:
+    fontFamily: "Public Sans, system-ui, sans-serif"
+    fontSize: "34px"
+    fontWeight: 800
+    lineHeight: 1
+    letterSpacing: "-0.02em"
+  body:
+    fontFamily: "Public Sans, system-ui, sans-serif"
+    fontSize: "17px"
+    fontWeight: 400
+    lineHeight: 1.4
+  row-title:
+    fontFamily: "Public Sans, system-ui, sans-serif"
+    fontSize: "16px"
+    fontWeight: 600
+    lineHeight: 1.35
+  caption:
+    fontFamily: "Public Sans, system-ui, sans-serif"
+    fontSize: "15px"
+    fontWeight: 400
+    lineHeight: 1.35
+rounded:
+  control: "12px"
+  card: "16px"
+  sheet: "22px"
+  full: "9999px"
+spacing:
+  xs: "8px"
+  sm: "12px"
+  md: "16px"
+  lg: "20px"
+  xl: "32px"
+components:
+  button-primary:
+    backgroundColor: "{colors.brand}"
+    textColor: "{colors.surface}"
+    rounded: "{rounded.control}"
+    height: "48px"
+  button-primary-hover:
+    backgroundColor: "{colors.brand-hover}"
+  button-secondary:
+    backgroundColor: "#f1f5f9"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.control}"
+    height: "48px"
+  card:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.card}"
+    padding: "20px"
+  missing-status:
+    backgroundColor: "{colors.missing}"
+    textColor: "{colors.surface}"
+    rounded: "{rounded.card}"
+    padding: "16px 20px"
+  segmented-control:
+    backgroundColor: "#e2e8f0b3"
+    rounded: "{rounded.control}"
+    height: "44px"
+  sheet:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.sheet}"
+  tab-bar:
+    backgroundColor: "#ffffffd9"
+    height: "60px"
+  keypad-key:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.full}"
+    size: "72px"
+---
+
+# Design System: Kyna Ops
+
+## Overview
+
+Kyna Ops is an Operate surface: a shop owner checks it between live selling and courier drop-offs, and six packers use it at the receiving table. It follows Apple's interface conventions without copying iOS chrome:
+
+- a large page title that shrinks into the top bar on scroll
+- one focus per screen
+- grouped white content on a soft grey ground
+- 20px side margins
+- bottom sheets for detail
+- motion only where something changed
+
+Each screen answers one question with as few words as possible:
+
+- **Home:** is anything missing, and what came back today?
+- **Returns:** find a parcel.
+- **Scan:** check this parcel in.
+- **Settings:** change a rule.
+
+Anything secondary sits one tap away in a sheet or a folded row. Nothing was removed. It moved.
+
+The product rules stay fixed:
+
+- Failed delivery and Buyer return are always separate.
+- All three stages (Tagged or Requested, Sent back, Arrived) are visible on Home.
+- Garment photos lead every row.
+- Staff on `/scan` never see peso values.
+- Labels are plain English.
+
+## Colors
+
+The palette is unchanged from the Clean Merchant Standard. Color carries meaning only. It is never decoration.
+
+| Token | Value | Role |
+| :--- | :--- | :--- |
+| `ground` | `#f4f7f8` | Page canvas, bars at rest |
+| `surface` | `#ffffff` | Cards, grouped lists, sheets, keypad keys |
+| `ink` / `ink-2` / `ink-3` | `#0f172a` / `#475569` / `#556477` | Text: primary, secondary, muted. `ink-3` passes 4.5:1 on both ground and the search field |
+| `hairline` | `#e2e8f0` | Inset row separators |
+| `brand` | `#0f766e` | Primary buttons, active tab, links, focus ring, sheet timeline |
+| `missing` | `#dc2626` | The Missing status card and missing counts |
+| `arrived` | `#047857` | "Arrived" numbers, scan-saved card |
+| `failed` / `refund` | `#b45309` / `#1d4ed8` | Category dots only (amber = Failed delivery, blue = Buyer return) |
+
+- Status always pairs color with a dot and a word (`StatusText`, `StatusPill`).
+- Secondary text on a colored fill uses white or a tint of that hue, never grey.
+
+## Typography
+
+- **Font:** Public Sans (400, 500, 600, 700, 800), self-hosted by Next's font loader.
+- **Numerals:** every count, PIN digit, tracking number and peso value uses `tabular-nums`.
+
+Fixed pixel scale, modelled on iOS text styles:
+
+| Style | Size / weight | Use |
+| :--- | :--- | :--- |
+| Large title | 34 / 800 | One per screen |
+| Stat | 34 / 800 | The 3 stage numbers on each category card |
+| Status number | 44 / 800 | The Missing count |
+| Title | 20 / 800 | Section and sheet headings |
+| Body | 17 / 400 | Settings rows, Most returned row |
+| Row title | 16 / 600 | Parcel rows |
+| Caption | 15 / 400 | Second line of a row, helper lines |
+
+Inputs are 16px or larger, which stops iOS from zooming in on focus.
+
+## Layout
+
+- **Phone (`< 768px`):**
+  - 20px side margins and 32px between sections.
+  - A 48px top bar holds icon actions. It's transparent at rest, and turns white at 80% with blur and a hairline once the large title scrolls under it.
+  - A 60px translucent tab bar holds Today, Missing, Scan and More, with safe-area padding.
+- **Desktop (`>= 768px`):**
+  - The tab bar hides and the top bar shows the wordmark and inline navigation.
+  - Content is centred at `max-w-3xl`. Home's two category cards sit side by side.
+- **Home-screen app:**
+  - `display: standalone` manifest with 192, 512 and maskable icons, generated in code.
+  - Both `mobile-web-app-capable` and `apple-mobile-web-app-capable` tags, plus `viewport-fit=cover`.
+  - `.safe-top` and `.safe-bottom` pad around the notch and home indicator.
+  - The status bar style is `default`, which gives dark text over the white header. `black-translucent` would make the clock white against a light UI.
+- **Touch targets:** 44px minimum. Rows are 52–76px. The scanner's keypad keys are 72px.
+
+## Elevation & Depth
+
+Shadows always have an offset and a soft blur. There are three levels:
+
+- `--shadow-card`: resting cards and grouped lists.
+- `--shadow-float`: hover lift and the toast.
+- `--shadow-sheet`: bottom sheets.
+
+The Missing card and the scanner's main button use a tinted shadow in their own hue. Blur is used for bar material only: the top bar once collapsed, and the tab bar.
+
+## Shapes
+
+- Radii: 12px for controls and inputs, 16px for cards, 22px for sheets and the scanner tile. Fully rounded for pills, segmented thumbs, keypad keys and switches.
+- Grouped lists use inset separators that start at the text, so the photos read as one column.
+
+## Components
+
+Shared building blocks live in `src/components/ui/`:
+
+- **Button / ButtonLink:** primary, secondary, plain and danger variants, 48px (md) or 56px (lg) tall. All use `.pressable`.
+- **Group / SectionHeader:** the white grouped container, and a title with an optional trailing link.
+- **SegmentedControl:** equal-width segments. A white thumb slides under the selection, and it fades out when a custom date is picked.
+- **Sheet:** a bottom sheet on phones and a centred panel on desktop.
+  - Slides up. Closes on a downward swipe of the handle (`shouldDismiss`), a backdrop tap, the close button or Escape.
+  - Focus moves into the sheet, stays there on Tab, and goes back to where it was on close. Body scroll is locked while open.
+  - It keeps its last content while sliding away.
+- **Disclosure:** a folded row whose body renders only while open.
+- **AnimatedNumber:** counts to each new value over 400ms with ease-out-expo. Screen readers get the final value.
+- **ItemThumb:** the garment photo in sm, md, lg and xl sizes, with a shirt icon as fallback.
+- **StatusPill / StatusText:** one status per parcel from `getParcelStatus`. Priority is Missing, then Issue, Arrived, Overdue and On the way.
+- **Toast:** a single dark capsule under the top bar that leaves after 2.6s. It replaces the old inline notice banners.
+
+Composite components:
+
+- **ParcelRow:** photo, name, then one line with status · category · size/colour, and a chevron.
+- **CategorySheet:** couriers, the Shopee/TikTok split, item cost at stake, and "See parcels".
+- **ParcelDetailSheet:**
+  - photo and size pill, then status
+  - a 3-stage timeline
+  - one dispute action: copy, with the message itself folded
+  - folded order details
+
+## Motion
+
+Motion follows Apple's HIG: it has a purpose, it's short, it never blocks input, and it's optional.
+
+| Moment | Motion | Time |
+| :--- | :--- | :--- |
+| Press any control | scale 0.97 (`.pressable`) | 120ms |
+| Page opens | fade + 8px rise on `<main>`; the tab bar stays still | 250ms |
+| Counts load or change | count up (`AnimatedNumber`) | 400ms |
+| Missing ↔ All clear | crossfade | 250ms |
+| Segmented / tab / filter selection | highlight slides | 200ms |
+| Sheet open / close | slide on `cubic-bezier(0.32,0.72,0,1)` + backdrop fade | 350ms / 280ms |
+| Wrong PIN or wrong password | shake + Android vibration | 300ms |
+| PIN dot filled, badge change | pop | 260ms |
+| Scan saved | checkmark draws in on a green card + vibration; the scanner stays usable | 400ms |
+| Sync | spin, then a checkmark pop + toast | — |
+
+- Returns rows rise in 30ms apart on first load only. Filter changes swap in place.
+- With `prefers-reduced-motion: reduce`:
+  - Slides, scales and shakes turn off.
+  - The page rise, list rise and pop become plain fades.
+  - Press feedback becomes an opacity dip.
+  - Counts show the final value straight away.
+
+## Do's and Don'ts
+
+- **Do** show one number per stage with one word under it. Put the breakdown in the sheet.
+- **Do** keep Failed delivery and Buyer return in separate cards, rows and sheets.
+- **Do** use `StatusText` in rows and `StatusPill` in sheets, so a status reads the same everywhere.
+- **Do** put helper text behind a tap, or cut it.
+- **Don't** add eyebrows, icon tiles above headings, or cards inside cards. Inside a sheet, use hairline rows.
+- **Don't** show peso values anywhere on `/scan`.
+- **Don't** show demo credentials outside development. Login and `/scan` check `NODE_ENV === "development"` inline, so production builds drop the strings.
+- **Don't** add motion to things people repeat all day without a state change behind it.

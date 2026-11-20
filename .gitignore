@@ -1,0 +1,12 @@
+node_modules
+.next
+out
+.env
+.env.local
+.env.*.local
+public/uploads/*
+!public/uploads/.gitkeep
+.impeccable/mocks
+.impeccable/review
+.impeccable/build
+*.log

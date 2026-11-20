@@ -1,0 +1,8 @@
+import { renderAppIcon } from "@/lib/brand/app-icon";
+
+export const size = { width: 64, height: 64 };
+export const contentType = "image/png";
+
+export default function Icon() {
+  return renderAppIcon(64, { glyphScale: 0.6, rounded: true });
+}

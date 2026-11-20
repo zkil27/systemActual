@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+:root {
+  --ground: #f4f7f8;
+  --surface: #ffffff;
+  --surface-subtle: #f8fafb;
+  --ink: #0f172a;
+  --ink-secondary: #475569;
+  --ink-muted: #64748b;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --teal: #0f766e;
+  --teal-hover: #115e59;
+  --teal-soft: #ecfdf5;
+  --amber-ink: #b45309;
+  --amber-soft: #fef3c7;
+  --cobalt-ink: #1d4ed8;
+  --cobalt-soft: #dbeafe;
+  --emerald-ink: #047857;
+  --emerald-soft: #ecfdf5;
+  --crimson: #dc2626;
+  --crimson-ink: #991b1b;
+  --crimson-soft: #fef2f2;
+}
+
+@layer base {
+  html {
+    background-color: var(--ground);
+    color: var(--ink);
+    -webkit-tap-highlight-color: transparent;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-public-sans), system-ui, -apple-system, sans-serif;
+    min-height: 100dvh;
+    caret-color: var(--teal);
+  }
+
+  ::selection {
+    background-color: #ccfbf1;
+    color: #134e4a;
+  }
+
+  a,
+  button,
+  input,
+  select,
+  textarea {
+    outline-color: var(--teal);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--teal);
+    outline-offset: 2px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 9999px;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.safe-bottom {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}

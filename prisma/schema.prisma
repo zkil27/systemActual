@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Platform {
+  SHOPEE
+  TIKTOK
+}
+
+enum ReturnCategory {
+  FAILED_DELIVERY
+  RETURN_REFUND
+}
+
+enum DigitalStatus {
+  FAILED_DELIVERY_TAGGED
+  RETURNING_TO_SELLER
+  RETURN_REQUESTED
+  RETURN_IN_TRANSIT
+  COURIER_RETURNED
+  DISPUTED
+  RESOLVED_REFUNDED
+  CANCELLED_RETURN
+}
+
+enum PhysicalCondition {
+  GOOD_RESTOCKABLE
+  DAMAGED_PACKAGING
+  DAMAGED_ITEM
+  WRONG_OR_SWAPPED_ITEM
+  MISSING_PIECE
+}
+
+model OwnerUser {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime @default(now())
+}
+
+model StaffMember {
+  id        String         @id @default(cuid())
+  name      String         @unique
+  pinHash   String
+  active    Boolean        @default(true)
+  scans     PhysicalScan[]
+  createdAt DateTime       @default(now())
+}
+
+model ShopConnection {
+  id             String         @id @default(cuid())
+  platform       Platform
+  shopId         String         @unique
+  shopName       String
+  shopCipher     String?
+  accessToken    String?
+  refreshToken   String?
+  tokenExpiresAt DateTime?
+  lastSyncedAt   DateTime?
+  isDemo         Boolean        @default(false)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  parcels        ReturnParcel[]
+}
+
+model ReturnParcel {
+  id                        String             @id @default(cuid())
+  shopConnectionId          String
+  shopConnection            ShopConnection     @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
+  platform                  Platform
+  orderSn                   String
+  returnSn                  String?
+  forwardTrackingNumber     String?
+  rtsTrackingNumber         String?
+  courier                   String
+
+  category                  ReturnCategory
+  digitalStatus             DigitalStatus
+  returnReason              String?
+  disputeDeadlineAt         DateTime?
+
+  itemSummary               String
+  variationName             String?
+  quantity                  Int                @default(1)
+  itemImageUrl              String?
+  itemsJson                 Json?
+
+  orderTotalPhp             Decimal            @db.Decimal(10, 2)
+  estimatedUnitCostPhp      Decimal            @db.Decimal(10, 2)
+
+  orderCreatedAt            DateTime?
+  digitalReturnTaggedAt     DateTime?
+  courierReturnedToSellerAt DateTime?
+  physicallyReceivedAt      DateTime?
+
+  physicalCondition         PhysicalCondition?
+  disputeDraft              String?            @db.Text
+
+  events                    ReturnEvent[]
+  scans                     PhysicalScan[]
+
+  createdAt                 DateTime           @default(now())
+  updatedAt                 DateTime           @updatedAt
+
+  @@unique([platform, orderSn, category])
+  @@index([forwardTrackingNumber])
+  @@index([rtsTrackingNumber])
+  @@index([digitalReturnTaggedAt])
+  @@index([courierReturnedToSellerAt])
+  @@index([physicallyReceivedAt])
+  @@index([category, digitalStatus])
+}
+
+model ReturnEvent {
+  id             String       @id @default(cuid())
+  parcelId       String
+  parcel         ReturnParcel @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+  source         String
+  rawStatus      String
+  description    String?
+  eventTimestamp DateTime
+  rawPayloadJson Json?
+  createdAt      DateTime     @default(now())
+
+  @@unique([parcelId, source, rawStatus, eventTimestamp])
+  @@index([parcelId, eventTimestamp])
+}
+
+model PhysicalScan {
+  id             String            @id @default(cuid())
+  parcelId       String
+  parcel         ReturnParcel      @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+  staffMemberId  String
+  staffMember    StaffMember       @relation(fields: [staffMemberId], references: [id])
+  scannedBarcode String
+  condition      PhysicalCondition
+  notes          String?
+  photoUrls      String[]
+  scannedAt      DateTime          @default(now())
+
+  @@index([scannedAt])
+}
+
+model ImportJob {
+  id           String   @id @default(cuid())
+  fileName     String
+  sourceHint   String
+  totalRows    Int
+  importedRows Int
+  skippedRows  Int
+  createdAt    DateTime @default(now())
+}
+
+model AppSettings {
+  id                    String   @id @default("default")
+  defaultUnitCostPhp    Decimal  @default(82.00) @db.Decimal(10, 2)
+  defaultSellingPrice   Decimal  @default(199.00) @db.Decimal(10, 2)
+  overdueRtsDays        Int      @default(10)
+  telegramChatId        String?
+  telegramDailyBriefUtc String   @default("12:00")
+  updatedAt             DateTime @updatedAt
+}

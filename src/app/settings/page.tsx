@@ -1,0 +1,355 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { ChevronRight } from "lucide-react";
+import { AppShell } from "@/components/AppShell";
+import { Button, Group } from "@/components/ui/Button";
+import { Disclosure } from "@/components/ui/Disclosure";
+import { toast } from "@/components/ui/Toast";
+
+interface SettingsPayload {
+  settings: {
+    defaultUnitCostPhp: number;
+    defaultSellingPrice: number;
+    overdueRtsDays: number;
+    telegramChatId: string;
+    telegramDailyBriefUtc: string;
+  };
+  integrations: {
+    shopeeEnvReady: boolean;
+    tiktokEnvReady: boolean;
+    telegramBotReady: boolean;
+  };
+  staff: Array<{ id: string; name: string; active: boolean }>;
+  shops: Array<{
+    id: string;
+    platform: "SHOPEE" | "TIKTOK";
+    shopId: string;
+    shopName: string;
+    isDemo: boolean;
+    connected: boolean;
+    lastSyncedAt: string | null;
+  }>;
+  telegramPreview: string;
+}
+
+function GroupLabel({ children }: { children: React.ReactNode }) {
+  return <h2 className="mb-2 px-4 text-[15px] font-semibold text-ink-3">{children}</h2>;
+}
+
+const rowClass = "flex min-h-[52px] items-center justify-between gap-4 px-4";
+const rowLinkClass = `${rowClass} transition-colors duration-150 hover:bg-slate-50 active:bg-slate-100`;
+
+function NumberRow({
+  label,
+  prefix,
+  suffix,
+  value,
+  onChange,
+}: {
+  label: string;
+  prefix?: string;
+  suffix?: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <label className={rowClass}>
+      <span className="text-[17px] text-ink">{label}</span>
+      <span className="flex items-center gap-1 text-[17px] text-ink-3">
+        {prefix}
+        <input
+          type="number"
+          inputMode="numeric"
+          min={0}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          // Width follows the digits so "₱" and "days" sit right beside the number.
+          style={{ width: `${Math.max(value.length, 1) + 1}ch` }}
+          className="tabular-nums bg-transparent text-right text-[17px] font-semibold text-ink focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        />
+        {suffix}
+      </span>
+    </label>
+  );
+}
+
+/** iOS-style switch. */
+function Switch({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 ${
+        checked ? "bg-brand" : "bg-slate-300"
+      }`}
+    >
+      <span
+        data-motion="slide"
+        className={`absolute left-0.5 top-0.5 h-[27px] w-[27px] rounded-full bg-white shadow-[0_2px_4px_rgb(15_23_42/0.2)] transition-transform duration-200 ease-[var(--ease-ios)] ${
+          checked ? "translate-x-5" : "translate-x-0"
+        }`}
+      />
+    </button>
+  );
+}
+
+function storeStatus(connected: boolean, keysReady: boolean): string {
+  if (connected) return "Connected";
+  return keysReady ? "Connect" : "Waiting for keys";
+}
+
+export default function SettingsPage() {
+  const router = useRouter();
+  const [data, setData] = useState<SettingsPayload | null>(null);
+  const [unitCost, setUnitCost] = useState("82");
+  const [sellingPrice, setSellingPrice] = useState("199");
+  const [overdueDays, setOverdueDays] = useState("10");
+  const [telegramChatId, setTelegramChatId] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [newStaffName, setNewStaffName] = useState("");
+  const [newStaffPin, setNewStaffPin] = useState("");
+  const [addingStaff, setAddingStaff] = useState(false);
+
+  async function loadSettings() {
+    const res = await fetch("/api/settings");
+    if (res.ok) {
+      const payload: SettingsPayload = await res.json();
+      setData(payload);
+      setUnitCost(String(payload.settings.defaultUnitCostPhp));
+      setSellingPrice(String(payload.settings.defaultSellingPrice));
+      setOverdueDays(String(payload.settings.overdueRtsDays));
+      setTelegramChatId(payload.settings.telegramChatId);
+    }
+  }
+
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  const dirty =
+    data !== null &&
+    (unitCost !== String(data.settings.defaultUnitCostPhp) ||
+      sellingPrice !== String(data.settings.defaultSellingPrice) ||
+      overdueDays !== String(data.settings.overdueRtsDays) ||
+      telegramChatId !== data.settings.telegramChatId);
+
+  async function saveGeneral(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_settings",
+          defaultUnitCostPhp: Number(unitCost),
+          defaultSellingPrice: Number(sellingPrice),
+          overdueRtsDays: Number(overdueDays),
+          telegramChatId,
+        }),
+      });
+      if (!res.ok) {
+        toast("Couldn't save", "error");
+        return;
+      }
+      toast("Saved");
+      await loadSettings();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleAddStaff(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newStaffName.trim() || !/^\d{4}$/.test(newStaffPin)) {
+      toast("Add a name and a 4-digit PIN", "error");
+      return;
+    }
+    setAddingStaff(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "add_staff", staffName: newStaffName.trim(), pin: newStaffPin }),
+      });
+      if (!res.ok) {
+        toast("That name is already used", "error");
+        return;
+      }
+      setNewStaffName("");
+      setNewStaffPin("");
+      toast("Staff added");
+      await loadSettings();
+    } finally {
+      setAddingStaff(false);
+    }
+  }
+
+  async function handleToggleStaff(staffId: string, active: boolean) {
+    // Flip right away; the server confirms on reload.
+    setData((d) =>
+      d ? { ...d, staff: d.staff.map((s) => (s.id === staffId ? { ...s, active } : s)) } : d
+    );
+    await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "toggle_staff", staffId, active }),
+    });
+    await loadSettings();
+  }
+
+  async function handleSendTestTelegram() {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "send_test_telegram" }),
+    });
+    const out = await res.json();
+    if (out.ok) toast("Sent to Telegram");
+    else toast(out.error || "Add your Telegram chat ID first", "error");
+  }
+
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.replace("/login");
+  }
+
+  const shopee = data?.shops.find((s) => s.platform === "SHOPEE" && !s.isDemo);
+  const tiktok = data?.shops.find((s) => s.platform === "TIKTOK" && !s.isDemo);
+
+  return (
+    <AppShell title="Settings">
+      <div className="space-y-8">
+        <section>
+          <GroupLabel>Stores</GroupLabel>
+          <Group className="divide-y divide-hairline">
+            <a href="/api/oauth/shopee/start" className={rowLinkClass}>
+              <span className="text-[17px] text-ink">Shopee PH</span>
+              <span className="flex items-center gap-1 text-[16px] text-ink-3">
+                {storeStatus(Boolean(shopee?.connected), Boolean(data?.integrations.shopeeEnvReady))}
+                <ChevronRight className="h-5 w-5" />
+              </span>
+            </a>
+            <a href="/api/oauth/tiktok/start" className={rowLinkClass}>
+              <span className="text-[17px] text-ink">TikTok Shop PH</span>
+              <span className="flex items-center gap-1 text-[16px] text-ink-3">
+                {storeStatus(Boolean(tiktok?.connected), Boolean(data?.integrations.tiktokEnvReady))}
+                <ChevronRight className="h-5 w-5" />
+              </span>
+            </a>
+            <Link href="/imports" className={rowLinkClass}>
+              <span className="text-[17px] text-ink">Upload a file</span>
+              <ChevronRight className="h-5 w-5 text-ink-3" />
+            </Link>
+          </Group>
+        </section>
+
+        <form onSubmit={saveGeneral} className="space-y-8">
+          <section>
+            <GroupLabel>Costs</GroupLabel>
+            <Group className="divide-y divide-hairline">
+              <NumberRow label="Item cost" prefix="₱" value={unitCost} onChange={setUnitCost} />
+              <NumberRow label="Selling price" prefix="₱" value={sellingPrice} onChange={setSellingPrice} />
+              <NumberRow label="Overdue after" suffix="days" value={overdueDays} onChange={setOverdueDays} />
+            </Group>
+          </section>
+
+          <section>
+            <GroupLabel>Telegram summary at 8 PM</GroupLabel>
+            <Group className="divide-y divide-hairline">
+              <label className={rowClass}>
+                <span className="shrink-0 text-[17px] text-ink">Chat ID</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={telegramChatId}
+                  onChange={(e) => setTelegramChatId(e.target.value)}
+                  placeholder="Send /start to the bot"
+                  className="tabular-nums min-w-0 flex-1 bg-transparent text-right text-[17px] text-ink focus:outline-none"
+                />
+              </label>
+              <button type="button" onClick={handleSendTestTelegram} className={`${rowLinkClass} w-full text-left`}>
+                <span className="text-[17px] text-brand">Send a test</span>
+              </button>
+              {data?.telegramPreview && (
+                <Disclosure
+                  summaryClassName={rowLinkClass}
+                  label={<span className="text-[17px] text-ink">Tonight&apos;s message</span>}
+                >
+                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap px-4 pb-4 font-sans text-[15px] leading-relaxed text-ink-2">
+                    {data.telegramPreview}
+                  </pre>
+                </Disclosure>
+              )}
+            </Group>
+          </section>
+
+          {dirty && (
+            <Button type="submit" full disabled={saving} className="anim-rise-in">
+              {saving ? "Saving…" : "Save changes"}
+            </Button>
+          )}
+        </form>
+
+        <section>
+          <GroupLabel>Warehouse staff</GroupLabel>
+          <Group className="divide-y divide-hairline">
+            {(data?.staff ?? []).map((s) => (
+              <div key={s.id} className={rowClass}>
+                <span className={`text-[17px] ${s.active ? "text-ink" : "text-ink-3"}`}>{s.name}</span>
+                <Switch
+                  checked={s.active}
+                  onChange={(next) => handleToggleStaff(s.id, next)}
+                  label={`${s.name} can use the scanner`}
+                />
+              </div>
+            ))}
+            <form onSubmit={handleAddStaff} className="flex items-center gap-2 px-4 py-2">
+              <input
+                type="text"
+                value={newStaffName}
+                onChange={(e) => setNewStaffName(e.target.value)}
+                placeholder="New staff name"
+                aria-label="New staff name"
+                className="h-11 min-w-0 flex-1 bg-transparent text-[17px] text-ink focus:outline-none"
+              />
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={4}
+                value={newStaffPin}
+                onChange={(e) => setNewStaffPin(e.target.value.replace(/\D/g, ""))}
+                placeholder="PIN"
+                aria-label="4-digit PIN"
+                className="tabular-nums h-11 w-16 rounded-[10px] bg-slate-100 text-center text-[17px] font-semibold tracking-widest text-ink focus:outline-none focus:ring-2 focus:ring-brand"
+              />
+              <Button type="submit" variant="plain" disabled={addingStaff} className="h-11 px-3">
+                Add
+              </Button>
+            </form>
+          </Group>
+        </section>
+
+        <Group>
+          <button type="button" onClick={handleLogout} className={`${rowLinkClass} w-full`}>
+            <span className="text-[17px] text-missing">Sign out</span>
+          </button>
+        </Group>
+      </div>
+    </AppShell>
+  );
+}
