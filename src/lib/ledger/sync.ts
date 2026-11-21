@@ -4,7 +4,7 @@ import { shopeeGet } from "@/lib/connectors/shopee";
 import { tiktokRequest } from "@/lib/connectors/tiktok";
 import { ensureFreshToken } from "@/lib/connectors/tokens";
 import { mapShopeeOrder, mapTikTokOrder, type NormalizedOrder } from "./normalize";
-import { saveOrder } from "./store";
+import { loadExistingOrders, saveOrder } from "./store";
 import { nextSyncWindow, type SyncWindow } from "./window";
 
 export interface OrderSyncResult {
@@ -107,19 +107,29 @@ export async function syncOrders(conn: ShopConnection, deadline: number): Promis
   let saved = 0;
   let windows = 0;
   // TikTok pages come sorted by update_time ascending, so everything up to the
-  // last saved order is done. Keeping that point lets a window too busy for one
-  // tick finish over several ticks instead of restarting from its start forever.
+  // last processed order is done. Keeping that point lets a window too busy for
+  // one tick finish over several ticks instead of restarting from its start.
   const canResumeMidWindow = conn.platform === Platform.TIKTOK;
-  let lastSavedAt: Date | null = null;
+  const seenListings = new Set<string>();
+  let lastProcessedAt: Date | null = null;
 
   try {
     for (;;) {
       const w = nextSyncWindow(cursor, new Date());
       for await (const batch of pages(conn, accessToken, w, deadline)) {
+        if (!batch.length) continue;
+        const existingBySn = await loadExistingOrders(
+          conn.platform,
+          batch.map((o) => o.orderSn)
+        );
         for (const order of batch) {
           if (canResumeMidWindow) checkDeadline(deadline);
-          if ((await saveOrder(conn.id, conn.platform, order)) === "saved") saved++;
-          lastSavedAt = order.updatedAt;
+          const outcome = await saveOrder(conn.id, conn.platform, order, new Date(), {
+            existing: existingBySn.get(order.orderSn) ?? null,
+            seenListings,
+          });
+          if (outcome === "saved") saved++;
+          lastProcessedAt = order.updatedAt;
         }
       }
       cursor = w.to;
@@ -133,14 +143,124 @@ export async function syncOrders(conn: ShopConnection, deadline: number): Promis
     }
   } catch (err) {
     if (err instanceof OutOfTime) {
-      if (canResumeMidWindow && lastSavedAt && (!cursor || lastSavedAt > cursor)) {
+      if (canResumeMidWindow && lastProcessedAt && (!cursor || lastProcessedAt > cursor)) {
         await prisma.shopConnection.update({
           where: { id: conn.id },
-          data: { ordersSyncedTo: lastSavedAt },
+          data: { ordersSyncedTo: lastProcessedAt },
         });
       }
       return { saved, windows, caughtUp: false };
     }
     throw err;
   }
+}
+
+const SHOPEE_READY_LOOKBACK_MS = 14 * 24 * 3600_000;
+
+/**
+ * Pulls live ready-to-ship orders directly from every connected shop into the
+ * ledger (by status, independent of `ordersSyncedTo`). Used by wave planning
+ * so previews and waves stay accurate even if incremental sync is behind.
+ * Returns `${shopConnectionId}:${orderSn}` keys for orders verified live now.
+ */
+export async function syncReadyOrders(deadline: number): Promise<Set<string>> {
+  const fresh = new Set<string>();
+  const shops = await prisma.shopConnection.findMany({
+    where: { isDemo: false, accessToken: { not: null } },
+    orderBy: { platform: "asc" },
+  });
+  const seenListings = new Set<string>();
+
+  for (const shop of shops) {
+    if (Date.now() >= deadline) break;
+    if (shop.platform === Platform.TIKTOK && !shop.shopCipher) continue;
+    let token: string;
+    try {
+      token = await ensureFreshToken(shop);
+    } catch (err) {
+      console.error("[syncReadyOrders] token", shop.shopName, err);
+      continue;
+    }
+
+    try {
+      if (shop.platform === Platform.TIKTOK) {
+        let pageToken = "";
+        for (;;) {
+          checkDeadline(deadline);
+          const data = await tiktokRequest({
+            method: "POST",
+            path: "/order/202309/orders/search",
+            accessToken: token,
+            shopCipher: shop.shopCipher,
+            query: { page_size: "50", ...(pageToken ? { page_token: pageToken } : {}) },
+            body: { order_status: "AWAITING_SHIPMENT" },
+          });
+          const batch: NormalizedOrder[] = (Array.isArray(data?.orders) ? data.orders : []).map(mapTikTokOrder);
+          if (batch.length) {
+            const existingBySn = await loadExistingOrders(
+              Platform.TIKTOK,
+              batch.map((o) => o.orderSn)
+            );
+            for (const order of batch) {
+              checkDeadline(deadline);
+              await saveOrder(shop.id, Platform.TIKTOK, order, new Date(), {
+                existing: existingBySn.get(order.orderSn) ?? null,
+                seenListings,
+              });
+              fresh.add(`${shop.id}:${order.orderSn}`);
+            }
+          }
+          if (!data?.next_page_token) break;
+          pageToken = String(data.next_page_token);
+        }
+      } else if (shop.platform === Platform.SHOPEE) {
+        const now = new Date();
+        const from = new Date(now.getTime() - SHOPEE_READY_LOOKBACK_MS);
+        for (const orderStatus of ["READY_TO_SHIP", "RETRY_SHIP"]) {
+          let cursor = "";
+          for (;;) {
+            checkDeadline(deadline);
+            const list = await shopeeGet("/api/v2/order/get_order_list", shop.shopId, token, {
+              time_range_field: "create_time",
+              time_from: sec(from),
+              time_to: sec(now),
+              order_status: orderStatus,
+              page_size: 100,
+              ...(cursor ? { cursor } : {}),
+            });
+            const sns: string[] = (list?.order_list ?? []).map((o: { order_sn: string }) => String(o.order_sn));
+            for (let i = 0; i < sns.length; i += 50) {
+              checkDeadline(deadline);
+              const detail = await shopeeGet("/api/v2/order/get_order_detail", shop.shopId, token, {
+                order_sn_list: sns.slice(i, i + 50).join(","),
+                response_optional_fields: SHOPEE_DETAIL_FIELDS,
+              });
+              const batch: NormalizedOrder[] = (detail?.order_list ?? []).map(mapShopeeOrder);
+              if (batch.length) {
+                const existingBySn = await loadExistingOrders(
+                  Platform.SHOPEE,
+                  batch.map((o) => o.orderSn)
+                );
+                for (const order of batch) {
+                  checkDeadline(deadline);
+                  await saveOrder(shop.id, Platform.SHOPEE, order, new Date(), {
+                    existing: existingBySn.get(order.orderSn) ?? null,
+                    seenListings,
+                  });
+                  fresh.add(`${shop.id}:${order.orderSn}`);
+                }
+              }
+            }
+            if (!list?.more || !list?.next_cursor) break;
+            cursor = String(list.next_cursor);
+          }
+        }
+      }
+    } catch (err) {
+      if (err instanceof OutOfTime) break;
+      console.error("[syncReadyOrders]", shop.shopName, err);
+    }
+  }
+
+  return fresh;
 }

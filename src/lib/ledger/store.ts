@@ -1,25 +1,66 @@
 import { Prisma, type Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { FINAL_ORDER_STATUSES, shouldApplyOrderUpdate, type NormalizedOrder } from "./normalize";
+import {
+  FINAL_ORDER_STATUSES,
+  isOrderUnchanged,
+  shouldApplyOrderUpdate,
+  type NormalizedOrder,
+  type OrderComparisonSnapshot,
+} from "./normalize";
 import { ensureGarmentFor } from "@/lib/catalog/garments";
 
 export const ORDER_RETENTION_DAYS = 90;
 
+const existingSelect = {
+  id: true,
+  orderSn: true,
+  platformUpdatedAt: true,
+  status: true,
+  cancelRequested: true,
+  shippedAt: true,
+  packages: { select: { packageNumber: true, status: true, trackingNumber: true } },
+} satisfies Prisma.OrderSelect;
+
+export type ExistingOrderSnapshot = OrderComparisonSnapshot & { id: string; orderSn: string };
+
+/** Loads existing snapshots for a page of orders in one query so overlap skips take milliseconds. */
+export async function loadExistingOrders(
+  platform: Platform,
+  orderSns: string[]
+): Promise<Map<string, ExistingOrderSnapshot>> {
+  if (!orderSns.length) return new Map();
+  const rows = await prisma.order.findMany({
+    where: { platform, orderSn: { in: orderSns } },
+    select: existingSelect,
+  });
+  return new Map(rows.map((r) => [r.orderSn, r]));
+}
+
 /**
  * Writes one order with its lines and packages. Idempotent: saving the same
- * payload twice leaves the same rows. Older updates never overwrite newer ones.
+ * payload twice leaves the same rows. Older or unchanged updates are skipped.
  */
 export async function saveOrder(
   shopConnectionId: string,
   platform: Platform,
   n: NormalizedOrder,
-  now: Date = new Date()
-): Promise<"saved" | "stale"> {
-  const existing = await prisma.order.findUnique({
-    where: { platform_orderSn: { platform, orderSn: n.orderSn } },
-    select: { id: true, platformUpdatedAt: true },
-  });
+  now: Date = new Date(),
+  opts?: {
+    /** Pass `null` when pre-checked as absent, or the snapshot when present. */
+    existing?: ExistingOrderSnapshot | null;
+    /** Listings already ensured in this sync pass (avoids redundant upserts per order). */
+    seenListings?: Set<string>;
+  }
+): Promise<"saved" | "stale" | "unchanged"> {
+  const existing =
+    opts && "existing" in opts
+      ? opts.existing ?? null
+      : await prisma.order.findUnique({
+          where: { platform_orderSn: { platform, orderSn: n.orderSn } },
+          select: existingSelect,
+        });
   if (existing && !shouldApplyOrderUpdate(existing.platformUpdatedAt, n.updatedAt)) return "stale";
+  if (existing && isOrderUnchanged(existing, n)) return "unchanged";
 
   const orderData = {
     status: n.status,
@@ -85,6 +126,8 @@ export async function saveOrder(
 
   for (const l of n.lines) {
     if (!l.listingId || !l.variationId) continue;
+    const listingKey = `${shopConnectionId}:${l.listingId}:${l.variationId}`;
+    if (opts?.seenListings?.has(listingKey)) continue;
     const listing = {
       name: l.name,
       variationName: l.variationName,
@@ -103,6 +146,7 @@ export async function saveOrder(
       update: { ...listing, imageUrl: l.imageUrl ?? undefined },
     });
     if (!lv.garmentVariantId) await ensureGarmentFor(lv);
+    opts?.seenListings?.add(listingKey);
   }
 
   return "saved";

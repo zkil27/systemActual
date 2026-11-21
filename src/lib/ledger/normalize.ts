@@ -174,5 +174,34 @@ export function shouldApplyOrderUpdate(existingUpdatedAt: Date | null | undefine
   return !existingUpdatedAt || incoming.getTime() >= existingUpdatedAt.getTime();
 }
 
+export interface OrderComparisonSnapshot {
+  platformUpdatedAt: Date;
+  status: string;
+  cancelRequested: boolean;
+  shippedAt: Date | null;
+  packages: Array<{ packageNumber: string; status: string | null; trackingNumber: string | null }>;
+}
+
+/**
+ * True when the stored order already matches this snapshot (same update_time,
+ * status, cancel flag, ship time and packages), so re-writing it in an overlap
+ * window would be wasted work.
+ */
+export function isOrderUnchanged(existing: OrderComparisonSnapshot, incoming: NormalizedOrder): boolean {
+  if (existing.platformUpdatedAt.getTime() !== incoming.updatedAt.getTime()) return false;
+  if (existing.status !== incoming.status) return false;
+  if (existing.cancelRequested !== incoming.cancelRequested) return false;
+  if ((existing.shippedAt?.getTime() ?? null) !== (incoming.shippedAt?.getTime() ?? null)) return false;
+  if (existing.packages.length !== incoming.packages.length) return false;
+  const byNum = new Map(existing.packages.map((p) => [p.packageNumber, p]));
+  for (const p of incoming.packages) {
+    const prev = byNum.get(p.packageNumber);
+    if (!prev) return false;
+    if (prev.status !== p.status) return false;
+    if (p.trackingNumber && prev.trackingNumber !== p.trackingNumber) return false;
+  }
+  return true;
+}
+
 /** Statuses after which an order can be deleted once it's old enough. */
 export const FINAL_ORDER_STATUSES = ["COMPLETED", "CANCELLED"];

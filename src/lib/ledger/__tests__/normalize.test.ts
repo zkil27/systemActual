@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapShopeeOrder, mapTikTokOrder, shouldApplyOrderUpdate } from "@/lib/ledger/normalize";
+import { isOrderUnchanged, mapShopeeOrder, mapTikTokOrder, shouldApplyOrderUpdate } from "@/lib/ledger/normalize";
 import { nextSyncWindow, INITIAL_LOOKBACK_MS, MAX_WINDOW_MS, OVERLAP_MS } from "@/lib/ledger/window";
 import {
   shopeeCancelledAfterPickup,
@@ -82,6 +82,37 @@ describe("re-syncing is a no-op", () => {
     expect(shouldApplyOrderUpdate(stored, stored)).toBe(true);
     expect(shouldApplyOrderUpdate(null, stored)).toBe(true);
   });
+
+  it("detects unchanged snapshots so overlap windows skip redundant writes", () => {
+    const incoming = mapTikTokOrder(tiktokTwoUnitOrder);
+    const stored = {
+      platformUpdatedAt: new Date(incoming.updatedAt.getTime()),
+      status: incoming.status,
+      cancelRequested: incoming.cancelRequested,
+      shippedAt: incoming.shippedAt,
+      packages: incoming.packages.map((p) => ({
+        packageNumber: p.packageNumber,
+        status: p.status,
+        trackingNumber: p.trackingNumber,
+      })),
+    };
+    expect(isOrderUnchanged(stored, incoming)).toBe(true);
+    expect(isOrderUnchanged({ ...stored, status: "AWAITING_COLLECTION" }, incoming)).toBe(false);
+    expect(isOrderUnchanged({ ...stored, cancelRequested: true }, incoming)).toBe(false);
+    expect(
+      isOrderUnchanged(stored, {
+        ...incoming,
+        packages: [{ ...incoming.packages[0], trackingNumber: "JT999" }],
+      })
+    ).toBe(false);
+    // Keep existing tracking number if incoming omits it
+    expect(
+      isOrderUnchanged(
+        { ...stored, packages: [{ ...stored.packages[0], trackingNumber: "JT999" }] },
+        incoming
+      )
+    ).toBe(true);
+  });
 });
 
 describe("nextSyncWindow", () => {
@@ -92,6 +123,20 @@ describe("nextSyncWindow", () => {
     expect(w.from.getTime()).toBe(now.getTime() - INITIAL_LOOKBACK_MS);
     expect(w.to.getTime() - w.from.getTime()).toBe(MAX_WINDOW_MS);
     expect(w.last).toBe(false);
+  });
+
+  it("accepts a larger window size for sparser backfills like returns", () => {
+    const lookback = 21 * 24 * 3600_000;
+    const win = 3 * 24 * 3600_000;
+    let cursor: Date | null = null;
+    let windows = 0;
+    for (;;) {
+      const w = nextSyncWindow(cursor, now, lookback, win);
+      cursor = w.to;
+      windows++;
+      if (w.last) break;
+    }
+    expect(windows).toBeLessThanOrEqual(8);
   });
 
   it("moves forward from the cursor with a small overlap", () => {

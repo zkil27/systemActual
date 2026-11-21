@@ -1,5 +1,6 @@
 import { Platform, Prisma, WaveStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { syncReadyOrders } from "@/lib/ledger/sync";
 import { recheckOrders } from "./recheck";
 import {
   MAX_WAVE_SIZE,
@@ -40,6 +41,11 @@ export async function buildWavePreview(opts: {
   const now = opts.now ?? new Date();
   const cutoff = new Date(now.getTime() - MIN_ORDER_AGE_MS);
 
+  // Pull live ready-to-ship orders from the shops first so the wave stays
+  // accurate even if the incremental ledger sync is still catching up.
+  const liveSyncDeadline = Date.now() + Math.max(0, opts.deadline - Date.now()) * 0.5;
+  const freshLiveKeys = await syncReadyOrders(liveSyncDeadline);
+
   const [tooNew, candidates] = await Promise.all([
     prisma.order.count({ where: { ...readyWhere(), platformCreatedAt: { gt: cutoff } } }),
     prisma.order.findMany({
@@ -50,8 +56,20 @@ export async function buildWavePreview(opts: {
     }),
   ]);
 
-  const rechecked =
-    opts.recheck === false ? new Set(candidates.map((c) => c.id)) : await recheckOrders(candidates, opts.deadline);
+  let rechecked: Set<string>;
+  if (opts.recheck === false) {
+    rechecked = new Set(candidates.map((c) => c.id));
+  } else {
+    rechecked = new Set<string>();
+    const needRecheck: typeof candidates = [];
+    for (const c of candidates) {
+      if (freshLiveKeys.has(`${c.shopConnectionId}:${c.orderSn}`)) rechecked.add(c.id);
+      else needRecheck.push(c);
+    }
+    if (needRecheck.length) {
+      for (const id of await recheckOrders(needRecheck, opts.deadline)) rechecked.add(id);
+    }
+  }
 
   const orders = await prisma.order.findMany({
     where: { id: { in: [...rechecked] } },
