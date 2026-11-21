@@ -187,13 +187,15 @@ model ImportJob {
 }
 
 model AppSettings {
-  id                    String   @id @default("default")
-  defaultUnitCostPhp    Decimal  @default(82.00) @db.Decimal(10, 2)
-  defaultSellingPrice   Decimal  @default(199.00) @db.Decimal(10, 2)
-  overdueRtsDays        Int      @default(10)
-  telegramChatId        String?
-  telegramDailyBriefUtc String   @default("12:00")
-  updatedAt             DateTime @updatedAt
+  id                        String   @id @default("default")
+  defaultUnitCostPhp        Decimal  @default(82.00) @db.Decimal(10, 2)
+  defaultSellingPrice       Decimal  @default(199.00) @db.Decimal(10, 2)
+  overdueRtsDays            Int      @default(10)
+  /// What one return/failed-delivery shipment costs the seller (Shopee PH charges it since June 2025).
+  returnShippingEstimatePhp Decimal  @default(40.00) @db.Decimal(10, 2)
+  telegramChatId            String?
+  telegramDailyBriefUtc     String   @default("12:00")
+  updatedAt                 DateTime @updatedAt
 }
 
 /// One marketplace order. Kept current by incremental sync; completed and

@@ -91,7 +91,7 @@ export async function buildTelegramReply(rawInput: string): Promise<string> {
       `• Driver Says Returned Today: ${fd.courierReturnedCount}`,
       `• Actually Arrived Today: ${fd.physicallyArrivedCount}`,
       `• Shopee: ${fd.shopeeTaggedCount} | TikTok: ${fd.tiktokTaggedCount}`,
-      `• Est. Unit Cost at Risk: PHP ${fd.taggedEstCostPhp.toLocaleString("en-PH")}`,
+      `• Cost at Risk (item + return shipping): PHP ${fd.taggedEstCostPhp.toLocaleString("en-PH")}`,
     ];
     if (fd.byCourier.length > 0) {
       lines.push(``);

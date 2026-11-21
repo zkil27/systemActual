@@ -28,6 +28,7 @@ export async function GET() {
       defaultUnitCostPhp: Number(settings.defaultUnitCostPhp),
       defaultSellingPrice: Number(settings.defaultSellingPrice),
       overdueRtsDays: settings.overdueRtsDays,
+      returnShippingEstimatePhp: Number(settings.returnShippingEstimatePhp),
       telegramChatId: settings.telegramChatId || "",
       telegramDailyBriefUtc: settings.telegramDailyBriefUtc,
     },
@@ -58,6 +59,7 @@ const updateSettingsSchema = z.object({
   defaultUnitCostPhp: z.number().min(1).max(100000).optional(),
   defaultSellingPrice: z.number().min(1).max(100000).optional(),
   overdueRtsDays: z.number().int().min(1).max(60).optional(),
+  returnShippingEstimatePhp: z.number().min(0).max(10000).optional(),
   telegramChatId: z.string().max(64).optional(),
   staffId: z.string().optional(),
   staffName: z.string().min(1).max(40).optional(),
@@ -82,6 +84,7 @@ export async function POST(req: NextRequest) {
           defaultUnitCostPhp: data.defaultUnitCostPhp ?? 82,
           defaultSellingPrice: data.defaultSellingPrice ?? 199,
           overdueRtsDays: data.overdueRtsDays ?? 10,
+          returnShippingEstimatePhp: data.returnShippingEstimatePhp ?? 40,
           telegramChatId: data.telegramChatId?.trim() || null,
         },
         update: {
@@ -93,6 +96,9 @@ export async function POST(req: NextRequest) {
             : {}),
           ...(data.overdueRtsDays !== undefined
             ? { overdueRtsDays: data.overdueRtsDays }
+            : {}),
+          ...(data.returnShippingEstimatePhp !== undefined
+            ? { returnShippingEstimatePhp: data.returnShippingEstimatePhp }
             : {}),
           ...(data.telegramChatId !== undefined
             ? { telegramChatId: data.telegramChatId.trim() || null }

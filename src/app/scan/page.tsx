@@ -113,6 +113,7 @@ export default function ScanPage() {
   const [lookingUp, setLookingUp] = useState(false);
   const [lookupError, setLookupError] = useState("");
   const [matchedParcel, setMatchedParcel] = useState<StaffSafeParcel | null>(null);
+  const [choices, setChoices] = useState<StaffSafeParcel[]>([]);
   const [lastScannedCode, setLastScannedCode] = useState("");
 
   const [selectedCondition, setSelectedCondition] = useState<string>(DEFAULT_CONDITION);
@@ -177,6 +178,17 @@ export default function ScanPage() {
     };
   }, [stopCamera]);
 
+  const openParcel = useCallback((parcel: StaffSafeParcel) => {
+    setChoices([]);
+    setMatchedParcel(parcel);
+    setSelectedCondition(DEFAULT_CONDITION);
+    setNotes("");
+    setPhotos([]);
+    setSaved(null);
+    playBeep(parcel.alreadyScanned ? "warn" : "ok");
+    haptic(12);
+  }, []);
+
   const lookupBarcode = useCallback(
     async (rawCode: string) => {
       const code = rawCode.trim();
@@ -186,35 +198,39 @@ export default function ScanPage() {
       try {
         const res = await fetch(`/api/scan/lookup?code=${encodeURIComponent(code)}`);
         const data = await res.json();
+        setChoices([]);
         if (!res.ok || !data.found) {
           playBeep("error");
           haptic([30, 40, 30]);
           setMatchedParcel(null);
-          setLookupError(`No return found for ${code}. Try the last 6 digits.`);
+          setLookupError(data.error || `No return found for ${code}. Try the last 6 digits.`);
           return;
         }
         await stopCamera();
-        setMatchedParcel(data.parcel);
         setLastScannedCode(code);
-        setSelectedCondition(DEFAULT_CONDITION);
-        setNotes("");
-        setPhotos([]);
-        setSaved(null);
-        playBeep(data.parcel.alreadyScanned ? "warn" : "ok");
-        haptic(12);
+        if (Array.isArray(data.matches)) {
+          // Several parcels share this code: staff pick the one in their hand.
+          setMatchedParcel(null);
+          setChoices(data.matches);
+          playBeep("warn");
+          haptic(12);
+          return;
+        }
+        openParcel(data.parcel);
       } catch {
         setLookupError("No connection. Try again.");
       } finally {
         setLookingUp(false);
       }
     },
-    [stopCamera]
+    [stopCamera, openParcel]
   );
 
   async function startCamera() {
     setCameraError("");
     setLookupError("");
     setMatchedParcel(null);
+    setChoices([]);
     setCameraOpen(true);
 
     setTimeout(async () => {
@@ -570,6 +586,38 @@ export default function ScanPage() {
               <p role="alert" className="anim-fade-in px-1 text-[15px] font-semibold text-missing-ink">
                 {lookupError}
               </p>
+            )}
+
+            {choices.length > 0 && (
+              <div className="anim-rise-in space-y-2" role="group" aria-label="Pick the parcel in your hand">
+                <p className="px-1 text-[15px] font-semibold text-ink-2">
+                  {choices.length} parcels match {lastScannedCode}. Tap the one in your hand.
+                </p>
+                <ul className="divide-y divide-hairline overflow-hidden rounded-[var(--radius-card)] bg-white shadow-[var(--shadow-card)]">
+                  {choices.map((c) => (
+                    <li key={c.id}>
+                      <button
+                        type="button"
+                        onClick={() => openParcel(c)}
+                        className="pressable flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left hover:bg-black/[0.02]"
+                      >
+                        <ItemThumb src={c.itemImageUrl} alt={c.itemSummary} size="md" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[16px] font-semibold text-ink">
+                            {c.quantity}× {c.itemSummary}
+                          </span>
+                          <span className="block truncate text-[14px] text-ink-3">
+                            {[categoryLabel(c.category), c.variationName, shortCourier(c.courier)]
+                              .filter(Boolean)
+                              .join(" · ")}
+                            {c.alreadyScanned ? " · already scanned" : ""}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
 
             {pendingMissing > 0 && (

@@ -85,7 +85,7 @@ export function CategorySheet({
 
           <RowGroup>
             <Row
-              label="Item cost at stake"
+              label="Cost at stake (item + shipping back)"
               value={formatPeso(shown.stats.taggedEstCostPhp)}
               tone="text-ink"
             />

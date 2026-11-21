@@ -1,7 +1,11 @@
 import { PhysicalCondition, Platform, ReturnCategory } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getManilaRangeBounds, isWithinBounds } from "@/lib/time";
-import { isMissingDiscrepancy as isMissing, isOverdueRts as isOverdue } from "@/lib/returns/rules";
+import {
+  costAtRiskPhp,
+  isMissingDiscrepancy as isMissing,
+  isOverdueRts as isOverdue,
+} from "@/lib/returns/rules";
 
 export interface CategoryDailyTruth {
   taggedCount: number;
@@ -121,6 +125,7 @@ export async function getDailyTruthReport(options?: {
 
   const defaultUnitCostPhp = Number(settings?.defaultUnitCostPhp ?? 82);
   const overdueRtsDays = settings?.overdueRtsDays ?? 10;
+  const returnShippingEstimatePhp = Number(settings?.returnShippingEstimatePhp ?? 40);
   const now = new Date();
   const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
@@ -158,7 +163,10 @@ export async function getDailyTruthReport(options?: {
     const bucket =
       p.category === ReturnCategory.FAILED_DELIVERY ? failedDelivery : returnRefund;
     const cMap = courierMaps[p.category];
-    const cost = Number(p.estimatedUnitCostPhp);
+    const cost = costAtRiskPhp(
+      { estimatedUnitCostPhp: Number(p.estimatedUnitCostPhp), expectsPhysicalReturn: p.expectsPhysicalReturn },
+      returnShippingEstimatePhp
+    );
 
     const taggedInRange = isWithinBounds(p.digitalReturnTaggedAt, start, end);
     const courierReturnedInRange = isWithinBounds(p.courierReturnedToSellerAt, start, end);

@@ -15,6 +15,7 @@ interface SettingsPayload {
     defaultUnitCostPhp: number;
     defaultSellingPrice: number;
     overdueRtsDays: number;
+    returnShippingEstimatePhp: number;
     telegramChatId: string;
     telegramDailyBriefUtc: string;
   };
@@ -130,6 +131,7 @@ export default function SettingsPage() {
   const [unitCost, setUnitCost] = useState("82");
   const [sellingPrice, setSellingPrice] = useState("199");
   const [overdueDays, setOverdueDays] = useState("10");
+  const [returnShipping, setReturnShipping] = useState("40");
   const [telegramChatId, setTelegramChatId] = useState("");
   const [saving, setSaving] = useState(false);
   const [newStaffName, setNewStaffName] = useState("");
@@ -144,6 +146,7 @@ export default function SettingsPage() {
       setUnitCost(String(payload.settings.defaultUnitCostPhp));
       setSellingPrice(String(payload.settings.defaultSellingPrice));
       setOverdueDays(String(payload.settings.overdueRtsDays));
+      setReturnShipping(String(payload.settings.returnShippingEstimatePhp));
       setTelegramChatId(payload.settings.telegramChatId);
     }
   }
@@ -157,6 +160,7 @@ export default function SettingsPage() {
     (unitCost !== String(data.settings.defaultUnitCostPhp) ||
       sellingPrice !== String(data.settings.defaultSellingPrice) ||
       overdueDays !== String(data.settings.overdueRtsDays) ||
+      returnShipping !== String(data.settings.returnShippingEstimatePhp) ||
       telegramChatId !== data.settings.telegramChatId);
 
   async function saveGeneral(e: React.FormEvent) {
@@ -171,6 +175,7 @@ export default function SettingsPage() {
           defaultUnitCostPhp: Number(unitCost),
           defaultSellingPrice: Number(sellingPrice),
           overdueRtsDays: Number(overdueDays),
+          returnShippingEstimatePhp: Number(returnShipping),
           telegramChatId,
         }),
       });
@@ -286,6 +291,7 @@ export default function SettingsPage() {
             <Group className="divide-y divide-hairline">
               <NumberRow label="Item cost" prefix="₱" value={unitCost} onChange={setUnitCost} />
               <NumberRow label="Selling price" prefix="₱" value={sellingPrice} onChange={setSellingPrice} />
+              <NumberRow label="Shipping back" prefix="₱" value={returnShipping} onChange={setReturnShipping} />
               <NumberRow label="Overdue after" suffix="days" value={overdueDays} onChange={setOverdueDays} />
             </Group>
           </section>

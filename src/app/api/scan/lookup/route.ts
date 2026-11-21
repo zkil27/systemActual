@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getScannerSession, redactParcelForStaff } from "@/lib/auth";
+import { MIN_SUFFIX_LENGTH, resolveScanMatch } from "@/lib/returns/scan-match";
+
+const MAX_CHOICES = 6;
 
 export async function GET(req: NextRequest) {
   const session = await getScannerSession();
@@ -19,7 +22,9 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const exact = await prisma.returnParcel.findFirst({
+  // Both waybills: failed deliveries, Return on the Spot and in-transit returns
+  // come back on the original one; normal buyer returns on a new one.
+  const exact = await prisma.returnParcel.findMany({
     where: {
       OR: [
         { rtsTrackingNumber: { equals: code, mode: "insensitive" } },
@@ -29,27 +34,36 @@ export async function GET(req: NextRequest) {
       ],
     },
     orderBy: { updatedAt: "desc" },
+    take: MAX_CHOICES,
   });
 
-  if (exact) {
-    return NextResponse.json({ found: true, parcel: redactParcelForStaff(exact) });
+  // Last-digits fallback for smudged labels. Fetch 2 to tell "one" from "several".
+  const suffix =
+    exact.length === 0 && code.length >= MIN_SUFFIX_LENGTH
+      ? await prisma.returnParcel.findMany({
+          where: {
+            OR: [
+              { rtsTrackingNumber: { endsWith: code, mode: "insensitive" } },
+              { forwardTrackingNumber: { endsWith: code, mode: "insensitive" } },
+              { orderSn: { endsWith: code, mode: "insensitive" } },
+            ],
+          },
+          take: 2,
+        })
+      : [];
+
+  const match = resolveScanMatch(exact, suffix);
+  switch (match.kind) {
+    case "one":
+      return NextResponse.json({ found: true, parcel: redactParcelForStaff(match.parcel) });
+    case "pick":
+      return NextResponse.json({ found: true, matches: match.parcels.map(redactParcelForStaff) });
+    case "ambiguous":
+      return NextResponse.json(
+        { found: false, error: `More than one parcel ends in ${code}. Scan the full barcode.` },
+        { status: 409 }
+      );
+    default:
+      return NextResponse.json({ found: false, parcel: null }, { status: 404 });
   }
-
-  // Fallback suffix/partial match (super helpful when a thermal barcode is smudged and staff types the last 6 digits)
-  const partial = await prisma.returnParcel.findFirst({
-    where: {
-      OR: [
-        { rtsTrackingNumber: { endsWith: code, mode: "insensitive" } },
-        { forwardTrackingNumber: { endsWith: code, mode: "insensitive" } },
-        { orderSn: { endsWith: code, mode: "insensitive" } },
-      ],
-    },
-    orderBy: { updatedAt: "desc" },
-  });
-
-  if (!partial) {
-    return NextResponse.json({ found: false, parcel: null }, { status: 404 });
-  }
-
-  return NextResponse.json({ found: true, parcel: redactParcelForStaff(partial) });
 }

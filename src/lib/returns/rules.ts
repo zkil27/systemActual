@@ -57,3 +57,15 @@ export function overdueWhere(overdueDays: number, now: Date = new Date()): Prism
     digitalReturnTaggedAt: { lte: new Date(now.getTime() - overdueDays * 24 * 3600_000) },
   };
 }
+
+/**
+ * Money at risk for one parcel: the item cost (₱82 × quantity by default, set
+ * when the parcel is created) plus the return shipping the seller is charged.
+ * Refund-only returns have no return shipment, only the item.
+ */
+export function costAtRiskPhp(
+  p: { estimatedUnitCostPhp: number; expectsPhysicalReturn: boolean },
+  returnShippingEstimatePhp: number
+): number {
+  return p.estimatedUnitCostPhp + (p.expectsPhysicalReturn ? returnShippingEstimatePhp : 0);
+}
