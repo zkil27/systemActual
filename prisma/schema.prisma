@@ -58,28 +58,30 @@ model StaffMember {
 }
 
 model ShopConnection {
-  id             String           @id @default(cuid())
-  platform       Platform
-  shopId         String           @unique
-  shopName       String
-  shopCipher     String?
-  accessToken    String?
-  refreshToken   String?
-  tokenExpiresAt DateTime?
+  id              String           @id @default(cuid())
+  platform        Platform
+  shopId          String           @unique
+  shopName        String
+  shopCipher      String?
+  accessToken     String?
+  refreshToken    String?
+  tokenExpiresAt  DateTime?
   /// Set when token refresh starts failing; cleared on the next success. Used to alert once.
-  tokenErrorAt   DateTime?
-  tokenError     String?
+  tokenErrorAt    DateTime?
+  tokenError      String?
   /// Per-shop switch for anything that changes the shop (ship, print, stock). Off by default.
-  writesEnabled  Boolean          @default(false)
+  writesEnabled   Boolean          @default(false)
   /// Orders updated up to this time are in the ledger. Advanced one window at a time.
-  ordersSyncedTo DateTime?
-  lastSyncedAt   DateTime?
-  orders         Order[]
-  listings       ListingVariant[]
-  isDemo         Boolean          @default(false)
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  parcels        ReturnParcel[]
+  ordersSyncedTo  DateTime?
+  /// Return/refund requests updated up to this time are synced.
+  returnsSyncedTo DateTime?
+  lastSyncedAt    DateTime?
+  orders          Order[]
+  listings        ListingVariant[]
+  isDemo          Boolean          @default(false)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  parcels         ReturnParcel[]
 }
 
 model ReturnParcel {
@@ -115,13 +117,27 @@ model ReturnParcel {
   physicalCondition PhysicalCondition?
   disputeDraft      String?            @db.Text
 
+  /// "F:<orderSn>" for a failed delivery (incl. Shopee Return on the Spot),
+  /// "R:<returnSn>" for a buyer return. Several returns on one order stay separate.
+  dedupeKey             String
+  /// False for refund-only returns: nothing is shipped back, so it can't be missing/overdue.
+  expectsPhysicalReturn Boolean   @default(true)
+  /// Shopee return_refund_request_type: 0 normal, 1 in-transit, 2 Return on the Spot.
+  returnRequestType     Int?
+  /// TikTok return_type, or Shopee "RETURN_AND_REFUND" / "REFUND_ONLY".
+  returnType            String?
+  /// When courier tracking was last checked. Open parcels are refreshed however old.
+  lastCheckedAt         DateTime?
+
   events ReturnEvent[]
   scans  PhysicalScan[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([platform, orderSn, category])
+  @@unique([platform, dedupeKey])
+  @@index([platform, orderSn])
+  @@index([lastCheckedAt])
   @@index([forwardTrackingNumber])
   @@index([rtsTrackingNumber])
   @@index([digitalReturnTaggedAt])
@@ -183,24 +199,26 @@ model AppSettings {
 /// One marketplace order. Kept current by incremental sync; completed and
 /// cancelled orders are deleted after 90 days to stay inside the free database.
 model Order {
-  id                String         @id @default(cuid())
-  shopConnectionId  String
-  shopConnection    ShopConnection @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
-  platform          Platform
-  orderSn           String
+  id                      String         @id @default(cuid())
+  shopConnectionId        String
+  shopConnection          ShopConnection @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
+  platform                Platform
+  orderSn                 String
   /// Raw platform status, e.g. READY_TO_SHIP (Shopee) or AWAITING_SHIPMENT (TikTok).
-  status            String
-  isCod             Boolean        @default(false)
-  totalPhp          Decimal        @db.Decimal(12, 2)
-  platformCreatedAt DateTime
-  platformUpdatedAt DateTime
+  status                  String
+  isCod                   Boolean        @default(false)
+  totalPhp                Decimal        @db.Decimal(12, 2)
+  platformCreatedAt       DateTime
+  platformUpdatedAt       DateTime
   /// Shopee pickup_done_time / TikTok rts_time.
-  shippedAt         DateTime?
-  cancelBy          String?
-  cancelReason      String?
-  lines             OrderLine[]
-  packages          Package[]
-  syncedAt          DateTime       @updatedAt
+  shippedAt               DateTime?
+  cancelBy                String?
+  cancelReason            String?
+  /// Set once a cancelled-after-shipping order has been checked for a failed delivery.
+  failedDeliveryCheckedAt DateTime?
+  lines                   OrderLine[]
+  packages                Package[]
+  syncedAt                DateTime       @updatedAt
 
   @@unique([platform, orderSn])
   @@index([shopConnectionId, status])

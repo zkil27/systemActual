@@ -1,9 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getOwnerSession } from "@/lib/auth";
 import { exchangeTikTokCode, getAuthorizedShops } from "@/lib/connectors/tiktok";
 import { checkOAuthState, clearOAuthStateCookie } from "@/lib/oauth-state";
+import { runTick } from "@/lib/worker/tick";
+
+export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
   if (!(await getOwnerSession())) {
@@ -70,6 +73,7 @@ async function connectTikTok(req: NextRequest, code: string): Promise<NextRespon
         update: { shopName: shop.name, shopCipher: shop.cipher, ...tokenData },
       });
     }
+    after(() => runTick("manual").catch((err) => console.error("[TikTok first sync error]", err)));
     return NextResponse.redirect(new URL("/settings?connected=tiktok", req.url));
   } catch (err) {
     console.error("[TikTok OAuth callback error]", err);

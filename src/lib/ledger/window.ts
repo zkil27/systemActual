@@ -17,10 +17,14 @@ export interface SyncWindow {
   last: boolean;
 }
 
-export function nextSyncWindow(cursor: Date | null, now: Date): SyncWindow {
+export function nextSyncWindow(
+  cursor: Date | null,
+  now: Date,
+  initialLookbackMs: number = INITIAL_LOOKBACK_MS
+): SyncWindow {
   const start = cursor
     ? new Date(cursor.getTime() - OVERLAP_MS)
-    : new Date(now.getTime() - INITIAL_LOOKBACK_MS);
+    : new Date(now.getTime() - initialLookbackMs);
   const end = Math.min(start.getTime() + MAX_WINDOW_MS, now.getTime());
   return { from: start, to: new Date(end), last: end >= now.getTime() };
 }

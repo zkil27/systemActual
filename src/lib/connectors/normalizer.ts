@@ -5,6 +5,16 @@ import {
   ReturnCategory,
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { returnDedupeKey } from "@/lib/returns/keys";
+
+export interface NormalizedReturnItem {
+  name: string;
+  variationName: string | null;
+  quantity: number;
+  imageUrl: string | null;
+  listingId?: string | null;
+  variationId?: string | null;
+}
 
 export interface NormalizedReturnInput {
   shopConnectionId: string;
@@ -22,12 +32,16 @@ export interface NormalizedReturnInput {
   variationName?: string | null;
   quantity?: number;
   itemImageUrl?: string | null;
-  itemsJson?: unknown;
+  /** Every line item. itemSummary/variationName/image describe the first one. */
+  items?: NormalizedReturnItem[];
   orderTotalPhp: number;
   estimatedUnitCostPhp?: number;
   orderCreatedAt?: Date | null;
   digitalReturnTaggedAt?: Date | null;
   courierReturnedToSellerAt?: Date | null;
+  expectsPhysicalReturn?: boolean;
+  returnRequestType?: number | null;
+  returnType?: string | null;
   source: string;
   rawStatus: string;
   eventDescription?: string | null;
@@ -36,8 +50,9 @@ export interface NormalizedReturnInput {
 }
 
 /**
- * Pure classification helper separating Failed Delivery (COD / Undelivered RTS)
- * from Buyer Return / Refund.
+ * Text-based fallback classifier, used only for spreadsheet imports, which
+ * have no structured return-type fields. API data is classified from platform
+ * fields in src/lib/returns/classify.ts instead.
  */
 export function classifyReturnCategory(input: {
   platform: Platform;
@@ -48,64 +63,29 @@ export function classifyReturnCategory(input: {
   const status = (input.rawStatus ?? "").toUpperCase();
   const reason = (input.reason ?? "").toLowerCase();
 
-  // Explicit failed-delivery / COD refusal markers win even if platform created an internal reverse ID
-  const failedDeliveryPatterns = [
-    "FAILED_DELIVERY",
-    "DELIVERY_FAILED",
-    "LOGISTICS_DELIVERY_FAILED",
-    "UNABLE_TO_DELIVER",
-    "UNDELIVERED",
-    "RETURNING_TO_SELLER",
-    "RETURN_TO_SELLER",
-    "RETURNED_TO_SELLER",
-    "COD_REFUSED",
-    "RTS",
-  ];
-  const failedReasonPatterns = [
-    "failed delivery",
-    "delivery failed",
-    "buyer refused",
-    "refused cod",
-    "recipient unreachable",
-    "cannot contact",
-    "wrong address",
-    "unclaimed",
-    "delivery attempt",
-    "return to seller",
-    "rts",
-  ];
+  // Whole-word matches only: "rts" must not match "shirts", "skirts" or "shorts".
+  const failedDeliveryStatus =
+    /(FAILED_DELIVERY|DELIVERY_FAILED|UNABLE_TO_DELIVER|UNDELIVERED|RETURNING_TO_SELLER|RETURNED?_TO_SELLER|COD_REFUSED)/.test(
+      status
+    ) || /\bRTS\b/.test(status);
+  const failedDeliveryReason =
+    /(failed delivery|delivery failed|buyer refused|refused cod|recipient unreachable|cannot contact|wrong address|unclaimed|delivery attempt|return to seller)/.test(
+      reason
+    ) || /\brts\b/.test(reason);
 
   const hasBuyerClaimReason =
-    reason.includes("wrong size") ||
-    reason.includes("wrong item") ||
-    reason.includes("damaged") ||
-    reason.includes("defective") ||
-    reason.includes("missing") ||
-    reason.includes("change of mind") ||
-    reason.includes("changed mind") ||
-    reason.includes("not as described") ||
-    reason.includes("buyer return") ||
-    reason.includes("refund");
+    /(wrong size|wrong item|damaged|defective|missing|change of mind|changed mind|not as described|buyer return|refund)/.test(
+      reason
+    );
 
   if (hasBuyerClaimReason) return ReturnCategory.RETURN_REFUND;
-
-  if (
-    failedDeliveryPatterns.some((p) => status.includes(p)) ||
-    failedReasonPatterns.some((p) => reason.includes(p))
-  ) {
-    return ReturnCategory.FAILED_DELIVERY;
-  }
-
+  if (failedDeliveryStatus || failedDeliveryReason) return ReturnCategory.FAILED_DELIVERY;
   if (
     input.hasBuyerReturnSn ||
-    status.includes("RETURN_REQUEST") ||
-    status.includes("REFUND") ||
-    status.includes("AFTER_SALE") ||
-    status.includes("BUYER_RETURN")
+    /(RETURN_REQUEST|REFUND|AFTER_SALE|BUYER_RETURN)/.test(status)
   ) {
     return ReturnCategory.RETURN_REFUND;
   }
-
   return ReturnCategory.FAILED_DELIVERY;
 }
 
@@ -146,27 +126,42 @@ export function isDiscrepancyParcel(parcel: {
   return Boolean(parcel.courierReturnedToSellerAt && !parcel.physicallyReceivedAt);
 }
 
+/** Statuses that a later, less-informed poll must not move a parcel back from. */
+const PROGRESS_RANK: Partial<Record<DigitalStatus, number>> = {
+  [DigitalStatus.FAILED_DELIVERY_TAGGED]: 0,
+  [DigitalStatus.RETURN_REQUESTED]: 0,
+  [DigitalStatus.RETURNING_TO_SELLER]: 1,
+  [DigitalStatus.RETURN_IN_TRANSIT]: 1,
+  [DigitalStatus.COURIER_RETURNED]: 2,
+};
+
+export function mergeDigitalStatus(existing: DigitalStatus | undefined, incoming: DigitalStatus): DigitalStatus {
+  if (!existing) return incoming;
+  const a = PROGRESS_RANK[existing];
+  const b = PROGRESS_RANK[incoming];
+  // Only the "on its way" ladder is ordered; outcomes (refunded, disputed,
+  // cancelled) always win, since they come from the platform's own decision.
+  if (a !== undefined && b !== undefined && b < a) return existing;
+  return incoming;
+}
+
 /**
- * Idempotently upserts a normalized return parcel and appends an audit event.
+ * Idempotently upserts a return parcel and appends an audit event. Keyed by
+ * returnDedupeKey(): one row per buyer return, one per failed-delivery order.
  */
 export async function upsertNormalizedReturn(input: NormalizedReturnInput) {
   const settings = await prisma.appSettings.findUnique({ where: { id: "default" } });
   const defaultUnitCost = Number(settings?.defaultUnitCostPhp ?? 82);
-  const qty = Math.max(1, input.quantity ?? 1);
+  const items = input.items?.length ? input.items : null;
+  const qty = Math.max(1, items ? items.reduce((n, i) => n + i.quantity, 0) : input.quantity ?? 1);
   const unitCostTotal =
     input.estimatedUnitCostPhp !== undefined
       ? input.estimatedUnitCostPhp
       : defaultUnitCost * qty;
 
-  const existing = await prisma.returnParcel.findUnique({
-    where: {
-      platform_orderSn_category: {
-        platform: input.platform,
-        orderSn: input.orderSn,
-        category: input.category,
-      },
-    },
-  });
+  const dedupeKey = returnDedupeKey(input.category, input.returnSn, input.orderSn);
+  const where = { platform_dedupeKey: { platform: input.platform, dedupeKey } };
+  const existing = await prisma.returnParcel.findUnique({ where });
 
   const digitalReturnTaggedAt = pickEarliestTimestamp(
     existing?.digitalReturnTaggedAt,
@@ -181,40 +176,45 @@ export async function upsertNormalizedReturn(input: NormalizedReturnInput) {
         : null)
   );
 
+  const digitalStatus = mergeDigitalStatus(
+    existing?.digitalStatus,
+    courierReturnedToSellerAt && input.digitalStatus !== DigitalStatus.RESOLVED_REFUNDED &&
+      input.digitalStatus !== DigitalStatus.DISPUTED && input.digitalStatus !== DigitalStatus.CANCELLED_RETURN
+      ? DigitalStatus.COURIER_RETURNED
+      : input.digitalStatus
+  );
+
   const courier = normalizeCourierName(input.courier);
+  const itemsJson = items ? (items as unknown as Prisma.InputJsonValue) : undefined;
 
   const parcel = await prisma.returnParcel.upsert({
-    where: {
-      platform_orderSn_category: {
-        platform: input.platform,
-        orderSn: input.orderSn,
-        category: input.category,
-      },
-    },
+    where,
     create: {
       shopConnectionId: input.shopConnectionId,
       platform: input.platform,
       orderSn: input.orderSn,
+      dedupeKey,
       returnSn: input.returnSn ?? null,
       forwardTrackingNumber: input.forwardTrackingNumber?.trim() || null,
       rtsTrackingNumber: input.rtsTrackingNumber?.trim() || null,
       courier,
       category: input.category,
-      digitalStatus: input.digitalStatus,
+      digitalStatus,
       returnReason: input.returnReason ?? null,
       disputeDeadlineAt: input.disputeDeadlineAt ?? null,
       itemSummary: input.itemSummary.trim() || "Fashion Item",
       variationName: input.variationName?.trim() || null,
       quantity: qty,
       itemImageUrl: input.itemImageUrl ?? null,
-      itemsJson: input.itemsJson
-        ? (input.itemsJson as Prisma.InputJsonValue)
-        : Prisma.JsonNull,
+      itemsJson: itemsJson ?? Prisma.JsonNull,
       orderTotalPhp: new Prisma.Decimal(input.orderTotalPhp.toFixed(2)),
       estimatedUnitCostPhp: new Prisma.Decimal(unitCostTotal.toFixed(2)),
       orderCreatedAt: input.orderCreatedAt ?? null,
       digitalReturnTaggedAt,
       courierReturnedToSellerAt,
+      expectsPhysicalReturn: input.expectsPhysicalReturn ?? true,
+      returnRequestType: input.returnRequestType ?? null,
+      returnType: input.returnType ?? null,
     },
     update: {
       returnSn: input.returnSn ?? existing?.returnSn ?? null,
@@ -223,7 +223,7 @@ export async function upsertNormalizedReturn(input: NormalizedReturnInput) {
       rtsTrackingNumber:
         input.rtsTrackingNumber?.trim() || existing?.rtsTrackingNumber || null,
       courier: courier !== "Other Courier" ? courier : existing?.courier ?? courier,
-      digitalStatus: input.digitalStatus,
+      digitalStatus,
       returnReason: input.returnReason ?? existing?.returnReason ?? null,
       disputeDeadlineAt: input.disputeDeadlineAt ?? existing?.disputeDeadlineAt ?? null,
       itemSummary:
@@ -233,8 +233,12 @@ export async function upsertNormalizedReturn(input: NormalizedReturnInput) {
       variationName: input.variationName ?? existing?.variationName ?? null,
       quantity: qty,
       itemImageUrl: input.itemImageUrl ?? existing?.itemImageUrl ?? null,
+      ...(itemsJson ? { itemsJson } : {}),
       digitalReturnTaggedAt,
       courierReturnedToSellerAt,
+      ...(input.expectsPhysicalReturn !== undefined ? { expectsPhysicalReturn: input.expectsPhysicalReturn } : {}),
+      ...(input.returnRequestType !== undefined ? { returnRequestType: input.returnRequestType } : {}),
+      ...(input.returnType !== undefined ? { returnType: input.returnType } : {}),
     },
   });
 

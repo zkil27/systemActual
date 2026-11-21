@@ -1,9 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getOwnerSession } from "@/lib/auth";
-import { exchangeShopeeCode, syncShopeeConnection } from "@/lib/connectors/shopee";
+import { exchangeShopeeCode } from "@/lib/connectors/shopee";
 import { checkOAuthState, clearOAuthStateCookie } from "@/lib/oauth-state";
+import { runTick } from "@/lib/worker/tick";
+
+export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
   if (!(await getOwnerSession())) {
@@ -33,7 +36,7 @@ async function connectShopee(req: NextRequest, code: string, shopId: string): Pr
       tokenError: null,
       isDemo: false,
     };
-    const conn = await prisma.shopConnection.upsert({
+    await prisma.shopConnection.upsert({
       where: { shopId },
       create: {
         platform: Platform.SHOPEE,
@@ -43,12 +46,8 @@ async function connectShopee(req: NextRequest, code: string, shopId: string): Pr
       },
       update: tokenData,
     });
-    try {
-      await syncShopeeConnection(conn.id);
-    } catch (err) {
-      // Connected fine; the first sync can retry on the next tick.
-      console.error("[Shopee first sync error]", err);
-    }
+    // First sync starts right away; any part that doesn't finish continues on the next tick.
+    after(() => runTick("manual").catch((err) => console.error("[Shopee first sync error]", err)));
     return NextResponse.redirect(new URL("/settings?connected=shopee", req.url));
   } catch (err) {
     console.error("[Shopee OAuth callback error]", err);

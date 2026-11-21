@@ -1,0 +1,233 @@
+import { DigitalStatus, Platform, ReturnCategory } from "@prisma/client";
+import { describe, expect, it } from "vitest";
+import { classifyReturnCategory, mergeDigitalStatus } from "@/lib/connectors/normalizer";
+import {
+  classifyTikTokReturn,
+  findDeliveryFailed,
+  findReturnedToSeller,
+  isFailedDeliveryCandidate,
+} from "@/lib/returns/classify";
+import { returnDedupeKey } from "@/lib/returns/keys";
+import { mapFailedDelivery, mapShopeeReturn, mapTikTokReturn, tiktokTrackingEvents } from "@/lib/returns/map";
+import { isExpectedAtDoor, isMissingDiscrepancy, isOverdueRts } from "@/lib/returns/rules";
+import {
+  shopeeInTransitReturn,
+  shopeeNormalReturn,
+  shopeeRefundOnly,
+  shopeeReturnOnTheSpot,
+  shopeeReverseDelivered,
+  shopeeReverseWarehouse,
+  tiktokRefundOnly,
+  tiktokReturnAndRefund,
+} from "./fixtures";
+
+const ctx = { shopConnectionId: "shop1", forwardTrackingNumber: "SPXFWD123", orderCarrier: "SPX Express" };
+
+describe("Shopee returns are classified from platform fields", () => {
+  it("Return on the Spot is a failed delivery, coming back on the original waybill", () => {
+    const p = mapShopeeReturn(shopeeReturnOnTheSpot, ctx);
+    expect(p.category).toBe(ReturnCategory.FAILED_DELIVERY);
+    expect(p.returnRequestType).toBe(2);
+    expect(p.expectsPhysicalReturn).toBe(true);
+    expect(p.forwardTrackingNumber).toBe("SPXFWD123");
+    expect(p.rtsTrackingNumber).toBeNull();
+    expect(p.digitalStatus).toBe(DigitalStatus.RETURNING_TO_SELLER);
+    expect(returnDedupeKey(p.category, p.returnSn, p.orderSn)).toBe(`F:${p.orderSn}`);
+  });
+
+  it("a normal return is a buyer return with the new waybill from reverse tracking", () => {
+    const p = mapShopeeReturn(shopeeNormalReturn, { ...ctx, reverse: shopeeReverseDelivered });
+    expect(p.category).toBe(ReturnCategory.RETURN_REFUND);
+    expect(p.rtsTrackingNumber).toBe("SPXRET000222");
+    expect(p.courierReturnedToSellerAt?.getTime()).toBe(1795200000 * 1000);
+    expect(p.disputeDeadlineAt?.getTime()).toBe(1795300000 * 1000);
+  });
+
+  it("falls back to the return list tracking number before reverse info arrives", () => {
+    expect(mapShopeeReturn(shopeeNormalReturn, ctx).rtsTrackingNumber).toBe("SPXRET000111");
+  });
+
+  it("an in-transit return is a buyer return on the original waybill", () => {
+    const p = mapShopeeReturn(shopeeInTransitReturn, ctx);
+    expect(p.category).toBe(ReturnCategory.RETURN_REFUND);
+    expect(p.rtsTrackingNumber).toBeNull();
+    expect(p.forwardTrackingNumber).toBe("SPXFWD123");
+  });
+
+  it("refund-only is not expected at the door", () => {
+    const p = mapShopeeReturn(shopeeRefundOnly, ctx);
+    expect(p.expectsPhysicalReturn).toBe(false);
+    expect(p.returnType).toBe("REFUND_ONLY");
+  });
+
+  it("REFUND_PAID alone never means the courier delivered it back (old bug)", () => {
+    const p = mapShopeeReturn({ ...shopeeNormalReturn, status: "REFUND_PAID" }, ctx);
+    expect(p.courierReturnedToSellerAt).toBeNull();
+    expect(p.digitalStatus).toBe(DigitalStatus.RESOLVED_REFUNDED);
+  });
+
+  it("with warehouse validation, uses the warehouse→seller leg", () => {
+    const p = mapShopeeReturn(shopeeNormalReturn, { ...ctx, reverse: shopeeReverseWarehouse });
+    expect(p.rtsTrackingNumber).toBe("SPXRTS-TO-SELLER");
+    expect(p.courierReturnedToSellerAt).toBeNull();
+  });
+
+  it("cancelled requests are not expected", () => {
+    const p = mapShopeeReturn({ ...shopeeNormalReturn, status: "CANCELLED" }, ctx);
+    expect(isExpectedAtDoor({ expectsPhysicalReturn: p.expectsPhysicalReturn!, digitalStatus: p.digitalStatus })).toBe(false);
+  });
+});
+
+describe("TikTok returns", () => {
+  it("merges per-unit lines and keeps the return waybill", () => {
+    const p = mapTikTokReturn(tiktokReturnAndRefund, ctx);
+    expect(p.category).toBe(ReturnCategory.RETURN_REFUND);
+    expect(p.quantity).toBe(2);
+    expect(p.items).toHaveLength(1);
+    expect(p.rtsTrackingNumber).toBe("JTRET0001");
+    expect(p.digitalStatus).toBe(DigitalStatus.RETURN_IN_TRANSIT);
+    expect(p.courierReturnedToSellerAt).toBeNull();
+  });
+
+  it("REFUND type is refund-only", () => {
+    const p = mapTikTokReturn(tiktokRefundOnly, ctx);
+    expect(p.expectsPhysicalReturn).toBe(false);
+    expect(p.courierReturnedToSellerAt).toBeNull();
+  });
+
+  it("a completed return-and-refund means the seller has the parcel", () => {
+    expect(classifyTikTokReturn({ return_type: "RETURN_AND_REFUND", return_status: "RETURN_OR_REFUND_REQUEST_COMPLETE" }).courierDelivered).toBe(true);
+    expect(classifyTikTokReturn({ return_type: "RETURN_AND_REFUND", return_status: "RETURN_OR_REFUND_REQUEST_CANCEL" }).digitalStatus).toBe(
+      DigitalStatus.CANCELLED_RETURN
+    );
+  });
+});
+
+describe("failed deliveries from the order ledger", () => {
+  const shippedAt = new Date("2026-11-15T02:00:00Z");
+
+  it("only orders cancelled after the courier had them", () => {
+    expect(isFailedDeliveryCandidate({ status: "CANCELLED", shippedAt, packageStatuses: ["LOGISTICS_DELIVERY_FAILED"] })).toBe(true);
+    expect(isFailedDeliveryCandidate({ status: "CANCELLED", shippedAt: null, packageStatuses: [] })).toBe(false);
+    expect(isFailedDeliveryCandidate({ status: "SHIPPED", shippedAt, packageStatuses: [] })).toBe(false);
+    expect(isFailedDeliveryCandidate({ status: "CANCELLED", shippedAt, packageStatuses: ["LOGISTICS_LOST"] })).toBe(false);
+  });
+
+  it("Shopee TO_RETURN is never treated as a failed delivery", () => {
+    expect(isFailedDeliveryCandidate({ status: "TO_RETURN", shippedAt, packageStatuses: [] })).toBe(false);
+  });
+
+  it("maps the order with every line and the courier timestamps", () => {
+    const events = tiktokTrackingEvents({
+      tracking: [
+        { description: "Out for delivery", update_time_millis: 1795000000000 },
+        { description: "Delivery attempt failed - buyer refused", update_time_millis: 1795010000000 },
+        { description: "Parcel returned to seller", update_time_millis: 1795400000000 },
+      ],
+    });
+    const p = mapFailedDelivery(Platform.TIKTOK, "shop1", {
+      orderSn: "577086512123700000",
+      status: "CANCELLED",
+      totalPhp: 398,
+      platformCreatedAt: new Date("2026-11-14T00:00:00Z"),
+      platformUpdatedAt: new Date("2026-11-20T00:00:00Z"),
+      cancelReason: "Package delivery failed",
+      lines: [
+        { name: "Ribbed Top", variationName: "Black, M", imageUrl: null, quantity: 1, listingId: "a", variationId: "1" },
+        { name: "Wide Leg Pants", variationName: "Beige, L", imageUrl: null, quantity: 1, listingId: "b", variationId: "2" },
+      ],
+      packages: [{ trackingNumber: "JT0012345678", carrier: "J&T Express" }],
+    }, events);
+    expect(p.category).toBe(ReturnCategory.FAILED_DELIVERY);
+    expect(p.itemSummary).toBe("Ribbed Top +1 more");
+    expect(p.quantity).toBe(2);
+    expect(p.forwardTrackingNumber).toBe("JT0012345678");
+    expect(p.digitalReturnTaggedAt?.getTime()).toBe(1795010000000);
+    expect(p.courierReturnedToSellerAt?.getTime()).toBe(1795400000000);
+    expect(p.digitalStatus).toBe(DigitalStatus.COURIER_RETURNED);
+  });
+
+  it("Return on the Spot and the cancelled order merge into one parcel", () => {
+    const ros = mapShopeeReturn(shopeeReturnOnTheSpot, ctx);
+    expect(returnDedupeKey(ros.category, ros.returnSn, ros.orderSn)).toBe(
+      returnDedupeKey(ReturnCategory.FAILED_DELIVERY, null, shopeeReturnOnTheSpot.order_sn)
+    );
+  });
+});
+
+describe("keys", () => {
+  it("two returns on one order stay separate", () => {
+    expect(returnDedupeKey(ReturnCategory.RETURN_REFUND, "R1", "O1")).not.toBe(
+      returnDedupeKey(ReturnCategory.RETURN_REFUND, "R2", "O1")
+    );
+  });
+});
+
+describe("tracking text", () => {
+  const ev = (description: string, t: number) => ({ time: new Date(t), description });
+  it("finds the earliest delivered-back event", () => {
+    expect(findReturnedToSeller([ev("In transit", 1), ev("Successfully returned to seller", 5), ev("Returned to seller", 9)])?.getTime()).toBe(5);
+    expect(findReturnedToSeller([ev("Delivered to buyer", 1)])).toBeNull();
+  });
+  it("finds the failed-delivery event", () => {
+    expect(findDeliveryFailed([ev("Delivery unsuccessful: consignee refused", 3)])?.getTime()).toBe(3);
+  });
+});
+
+describe("spreadsheet text classifier", () => {
+  it("'rts' no longer matches shirts, skirts or shorts", () => {
+    for (const reason of ["Customer ordered 3 shirts", "skirts too long", "Shorts"]) {
+      expect(
+        classifyReturnCategory({ platform: Platform.SHOPEE, hasBuyerReturnSn: true, rawStatus: "REQUESTED", reason }),
+        reason
+      ).toBe(ReturnCategory.RETURN_REFUND);
+    }
+    expect(classifyReturnCategory({ platform: Platform.SHOPEE, rawStatus: "RTS", reason: null })).toBe(
+      ReturnCategory.FAILED_DELIVERY
+    );
+  });
+});
+
+describe("status never moves backwards", () => {
+  it("keeps COURIER_RETURNED over a stale in-transit poll, lets outcomes win", () => {
+    expect(mergeDigitalStatus(DigitalStatus.COURIER_RETURNED, DigitalStatus.RETURN_IN_TRANSIT)).toBe(DigitalStatus.COURIER_RETURNED);
+    expect(mergeDigitalStatus(DigitalStatus.COURIER_RETURNED, DigitalStatus.RESOLVED_REFUNDED)).toBe(DigitalStatus.RESOLVED_REFUNDED);
+    expect(mergeDigitalStatus(undefined, DigitalStatus.RETURN_REQUESTED)).toBe(DigitalStatus.RETURN_REQUESTED);
+  });
+});
+
+describe("missing / overdue rules", () => {
+  const now = new Date("2026-11-21T02:00:00Z");
+  const base = {
+    category: ReturnCategory.FAILED_DELIVERY,
+    digitalStatus: DigitalStatus.RETURNING_TO_SELLER,
+    expectsPhysicalReturn: true,
+    digitalReturnTaggedAt: new Date("2026-11-08T00:00:00Z"),
+    courierReturnedToSellerAt: null,
+    physicallyReceivedAt: null,
+  };
+
+  it("a failed delivery 13 days out is overdue", () => {
+    expect(isOverdueRts(base, 10, now)).toBe(true);
+  });
+
+  it("refund-only and cancelled parcels are never missing or overdue", () => {
+    const delivered = { ...base, courierReturnedToSellerAt: new Date("2026-11-20T00:00:00Z") };
+    expect(isMissingDiscrepancy(delivered)).toBe(true);
+    expect(isMissingDiscrepancy({ ...delivered, expectsPhysicalReturn: false })).toBe(false);
+    expect(isMissingDiscrepancy({ ...delivered, digitalStatus: DigitalStatus.CANCELLED_RETURN })).toBe(false);
+    expect(isOverdueRts({ ...base, expectsPhysicalReturn: false }, 10, now)).toBe(false);
+  });
+});
+
+describe("open parcels are refreshed however old", () => {
+  it("still rechecks a parcel tagged 20 days ago (the old sync stopped at 7)", async () => {
+    const { openParcelsWhere } = await import("@/lib/returns/sync");
+    const now = new Date("2026-11-21T02:00:00Z").getTime();
+    const where = openParcelsWhere("shop1", now);
+    const since = (where.digitalReturnTaggedAt as { gte: Date }).gte.getTime();
+    const twentyDaysAgo = now - 20 * 24 * 3600_000;
+    expect(twentyDaysAgo).toBeGreaterThanOrEqual(since);
+    expect(where.expectsPhysicalReturn).toBe(true);
+  });
+});

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getScannerSession } from "@/lib/auth";
 import { getManilaDayBounds, getManilaTodayStr } from "@/lib/time";
+import { missingWhere } from "@/lib/returns/rules";
 
 export async function GET() {
   const session = await getScannerSession();
@@ -35,12 +36,7 @@ export async function GET() {
         },
       },
     }),
-    prisma.returnParcel.count({
-      where: {
-        courierReturnedToSellerAt: { not: null },
-        physicallyReceivedAt: null,
-      },
-    }),
+    prisma.returnParcel.count({ where: missingWhere }),
   ]);
 
   return NextResponse.json({

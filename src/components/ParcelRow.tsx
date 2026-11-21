@@ -14,6 +14,8 @@ export interface ParcelRowData {
   physicalCondition: string | null;
   isMissingDiscrepancy: boolean;
   isOverdueRts?: boolean;
+  expectsPhysicalReturn?: boolean;
+  digitalStatus?: string;
 }
 
 /**

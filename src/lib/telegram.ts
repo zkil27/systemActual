@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getDailyTruthReport } from "@/lib/analytics/daily-returns";
 import { formatTelegramDailyBrief } from "@/lib/reports/brief";
 import { formatManilaDateTime } from "@/lib/time";
+import { missingWhere, overdueWhere } from "@/lib/returns/rules";
 
 export async function sendTelegramMessage(chatId: string, text: string): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
@@ -38,10 +39,7 @@ export async function buildTelegramReply(rawInput: string): Promise<string> {
 
   if (text.startsWith("/missing") || text.includes("missing") || text.includes("kulang") || text.includes("wala pa")) {
     const missing = await prisma.returnParcel.findMany({
-      where: {
-        courierReturnedToSellerAt: { not: null },
-        physicallyReceivedAt: null,
-      },
+      where: missingWhere,
       orderBy: { courierReturnedToSellerAt: "desc" },
       take: 15,
     });
@@ -66,14 +64,8 @@ export async function buildTelegramReply(rawInput: string): Promise<string> {
   if (text.startsWith("/overdue") || text.includes("overdue") || text.includes("stuck")) {
     const settings = await prisma.appSettings.findUnique({ where: { id: "default" } });
     const days = settings?.overdueRtsDays ?? 10;
-    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const overdue = await prisma.returnParcel.findMany({
-      where: {
-        category: "FAILED_DELIVERY",
-        physicallyReceivedAt: null,
-        courierReturnedToSellerAt: null,
-        digitalReturnTaggedAt: { lte: cutoff },
-      },
+      where: overdueWhere(days),
       orderBy: { digitalReturnTaggedAt: "asc" },
       take: 15,
     });

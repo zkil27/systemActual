@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { buildDisputeAppealDraft } from "@/lib/reports/dispute-template";
+import { isMissingDiscrepancy } from "@/lib/returns/rules";
 
 export async function GET(
   _req: NextRequest,
@@ -27,9 +28,7 @@ export async function GET(
         ...parcel,
         orderTotalPhp: Number(parcel.orderTotalPhp),
         estimatedUnitCostPhp: Number(parcel.estimatedUnitCostPhp),
-        isMissingDiscrepancy: Boolean(
-          parcel.courierReturnedToSellerAt && !parcel.physicallyReceivedAt
-        ),
+        isMissingDiscrepancy: isMissingDiscrepancy(parcel),
       },
     });
   } catch (err) {

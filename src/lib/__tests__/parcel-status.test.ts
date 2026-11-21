@@ -52,6 +52,12 @@ describe("getParcelStatus", () => {
     ).toBe("Missing");
   });
 
+  it("shows refund-only and cancelled parcels as not coming back", () => {
+    expect(getParcelStatus({ ...base, expectsPhysicalReturn: false }).label).toBe("Refund only");
+    expect(getParcelStatus({ ...base, digitalStatus: "CANCELLED_RETURN" }).label).toBe("Cancelled");
+    expect(getParcelStatus({ ...base, expectsPhysicalReturn: true }).label).toBe("On the way");
+  });
+
   it("is Overdue only when not yet arrived", () => {
     expect(getParcelStatus({ ...base, isOverdueRts: true }).label).toBe("Overdue");
     expect(

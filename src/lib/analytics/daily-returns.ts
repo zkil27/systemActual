@@ -1,6 +1,7 @@
 import { PhysicalCondition, Platform, ReturnCategory } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { daysSince, getManilaRangeBounds, isWithinBounds } from "@/lib/time";
+import { getManilaRangeBounds, isWithinBounds } from "@/lib/time";
+import { isMissingDiscrepancy as isMissing, isOverdueRts as isOverdue } from "@/lib/returns/rules";
 
 export interface CategoryDailyTruth {
   taggedCount: number;
@@ -65,6 +66,7 @@ export interface DailyTruthReport {
     isMissingDiscrepancy: boolean;
     isOverdueRts: boolean;
     isUrgentDeadline: boolean;
+    expectsPhysicalReturn: boolean;
     scannedByName: string | null;
   }>;
   shops: Array<{
@@ -162,14 +164,8 @@ export async function getDailyTruthReport(options?: {
     const courierReturnedInRange = isWithinBounds(p.courierReturnedToSellerAt, start, end);
     const arrivedInRange = isWithinBounds(p.physicallyReceivedAt, start, end);
 
-    const isMissingDiscrepancy = Boolean(
-      p.courierReturnedToSellerAt && !p.physicallyReceivedAt
-    );
-    const isOverdueRts =
-      p.category === ReturnCategory.FAILED_DELIVERY &&
-      !p.physicallyReceivedAt &&
-      !p.courierReturnedToSellerAt &&
-      daysSince(p.digitalReturnTaggedAt, now) >= overdueRtsDays;
+    const isMissingDiscrepancy = isMissing(p);
+    const isOverdueRts = isOverdue(p, overdueRtsDays, now);
     const isUrgentDeadline = Boolean(
       p.disputeDeadlineAt &&
         p.disputeDeadlineAt.getTime() > now.getTime() - 2 * 60 * 60 * 1000 &&
@@ -267,6 +263,7 @@ export async function getDailyTruthReport(options?: {
         isMissingDiscrepancy,
         isOverdueRts,
         isUrgentDeadline,
+        expectsPhysicalReturn: p.expectsPhysicalReturn,
         scannedByName: p.scans[0]?.staffMember.name ?? null,
       });
     }

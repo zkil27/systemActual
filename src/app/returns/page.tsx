@@ -26,6 +26,8 @@ interface ReturnRow {
   physicalCondition: string | null;
   isMissingDiscrepancy: boolean;
   isOverdueRts: boolean;
+  expectsPhysicalReturn: boolean;
+  digitalStatus: string;
 }
 
 /** Scrolling filter chips with one highlight that slides to the selected chip. */

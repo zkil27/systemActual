@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PhysicalCondition, Prisma, ReturnCategory } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { daysSince } from "@/lib/time";
+import { isMissingDiscrepancy, isOverdueRts, missingWhere, overdueWhere } from "@/lib/returns/rules";
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,17 +11,15 @@ export async function GET(req: NextRequest) {
 
     const settings = await prisma.appSettings.findUnique({ where: { id: "default" } });
     const overdueDays = settings?.overdueRtsDays ?? 10;
-    const overdueCutoff = new Date(Date.now() - overdueDays * 24 * 60 * 60 * 1000);
 
-    const where: Prisma.ReturnParcelWhereInput = {};
+    let where: Prisma.ReturnParcelWhereInput = {};
 
     if (filter === "failed") {
       where.category = ReturnCategory.FAILED_DELIVERY;
     } else if (filter === "refund") {
       where.category = ReturnCategory.RETURN_REFUND;
     } else if (filter === "missing") {
-      where.courierReturnedToSellerAt = { not: null };
-      where.physicallyReceivedAt = null;
+      where = { ...missingWhere };
     } else if (filter === "issues") {
       where.physicalCondition = {
         in: [
@@ -31,10 +29,7 @@ export async function GET(req: NextRequest) {
         ],
       };
     } else if (filter === "overdue") {
-      where.category = ReturnCategory.FAILED_DELIVERY;
-      where.physicallyReceivedAt = null;
-      where.courierReturnedToSellerAt = null;
-      where.digitalReturnTaggedAt = { lte: overdueCutoff };
+      where = overdueWhere(overdueDays);
     }
 
     if (q) {
@@ -88,12 +83,9 @@ export async function GET(req: NextRequest) {
         physicallyReceivedAt: p.physicallyReceivedAt?.toISOString() ?? null,
         physicalCondition: p.physicalCondition,
         disputeDeadlineAt: p.disputeDeadlineAt?.toISOString() ?? null,
-        isMissingDiscrepancy: Boolean(p.courierReturnedToSellerAt && !p.physicallyReceivedAt),
-        isOverdueRts:
-          p.category === ReturnCategory.FAILED_DELIVERY &&
-          !p.physicallyReceivedAt &&
-          !p.courierReturnedToSellerAt &&
-          daysSince(p.digitalReturnTaggedAt, now) >= overdueDays,
+        isMissingDiscrepancy: isMissingDiscrepancy(p),
+        isOverdueRts: isOverdueRts(p, overdueDays, now),
+        expectsPhysicalReturn: p.expectsPhysicalReturn,
         isUrgentDeadline: Boolean(
           p.disputeDeadlineAt &&
             p.disputeDeadlineAt.getTime() > now.getTime() - 2 * 60 * 60 * 1000 &&
