@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { shopeePostFile } from "@/lib/connectors/shopee";
 import { ensureFreshToken } from "@/lib/connectors/tokens";
 import { DOC_TYPE } from "./shopee-rules";
+import { tiktokLabel } from "./tiktok-rules";
+import { tiktokShippingDocument } from "./tiktok-engine";
 
 /** The shop's own label PDF, fetched when the PC prints it (never stored). */
 export async function fetchLabelPdf(packageId: string): Promise<Buffer> {
@@ -20,5 +22,13 @@ export async function fetchLabelPdf(packageId: string): Promise<Buffer> {
       order_list: [{ order_sn: pkg.order.orderSn, package_number: pkg.packageNumber }],
     });
   }
-  throw new Error("TikTok labels aren't available yet.");
+
+  // TikTok: ask for a fresh label URL (they expire after 24 h), then download it.
+  const { url } = tiktokLabel(await tiktokShippingDocument(shop, token, pkg.packageNumber));
+  if (!url) throw new Error("TikTok didn't return a label.");
+  const res = await fetch(url, { signal: AbortSignal.timeout(30_000), redirect: "follow" });
+  if (!res.ok) throw new Error(`Couldn't download the TikTok label (${res.status})`);
+  const pdf = Buffer.from(await res.arrayBuffer());
+  if (pdf.subarray(0, 4).toString("latin1") !== "%PDF") throw new Error("TikTok's label wasn't a PDF.");
+  return pdf;
 }

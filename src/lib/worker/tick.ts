@@ -10,6 +10,7 @@ import { recordShipments } from "@/lib/stock/ledger";
 import { pushStock } from "@/lib/stock/push";
 import { sendDailyBriefIfDue } from "@/lib/reports/daily-brief";
 import { advanceShopeeWaves } from "@/lib/shipping/shopee-engine";
+import { advanceTikTokWaves } from "@/lib/shipping/tiktok-engine";
 import { finishDoneWaves } from "@/lib/waves/run";
 import { runLocked } from "./lock";
 
@@ -122,7 +123,11 @@ async function tickOnce(deadline: number): Promise<{ shops: ShopTickResult[]; pr
 
   // Waves: arrange shipment, tracking numbers, labels. Only for shops whose write switch is on.
   try {
-    await advanceShopeeWaves(deadline);
+    const waveTotals = new Map<string, number>();
+    // Split the remaining time so one shop's big wave can't starve the other.
+    const half = Date.now() + (deadline - Date.now()) / 2;
+    await advanceShopeeWaves(half, waveTotals);
+    await advanceTikTokWaves(deadline, waveTotals);
     await finishDoneWaves();
   } catch (err) {
     console.error("[tick] waves", err);

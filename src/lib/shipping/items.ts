@@ -1,0 +1,135 @@
+import { PrintJobKind, WaveItemStatus, WaveStatus, type Platform, type Prisma } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
+import { MAX_ATTEMPTS } from "./shopee-rules";
+
+/**
+ * Shared wave-item steps for both shops, so the "maybe shipped" and release
+ * rules are the same everywhere:
+ *  - release = the package may go into a later wave. Only for packages the
+ *    shop clearly did NOT ship.
+ *  - anything that may have shipped keeps its lock forever.
+ */
+export const itemInclude = { package: { include: { order: true } } } satisfies Prisma.WaveItemInclude;
+export type Item = Prisma.WaveItemGetPayload<{ include: typeof itemInclude }>;
+
+export const BATCH = 50;
+export const later = (ms: number) => new Date(Date.now() + ms);
+
+/** This shop's items in running waves at `status`, due now, in wave/label order. */
+export async function dueItems(
+  platform: Platform,
+  shopId: string,
+  status: WaveItemStatus,
+  extra: Prisma.WaveItemWhereInput = {}
+): Promise<Item[]> {
+  return prisma.waveItem.findMany({
+    where: {
+      status,
+      platform,
+      activePackageId: { not: null },
+      wave: { status: WaveStatus.RUNNING },
+      package: { order: { shopConnectionId: shopId } },
+      OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }],
+      ...extra,
+    },
+    include: itemInclude,
+    orderBy: [{ wave: { createdAt: "asc" } }, { position: "asc" }],
+    take: BATCH,
+  });
+}
+
+export async function hasRunningItems(platform: Platform, shopId: string) {
+  return (
+    (await prisma.waveItem.count({
+      where: { platform, wave: { status: WaveStatus.RUNNING }, package: { order: { shopConnectionId: shopId } } },
+    })) > 0
+  );
+}
+
+/** Ends items (terminal). */
+export async function finish(items: Item[], status: WaveItemStatus, error: string | null, release: boolean) {
+  if (!items.length) return;
+  await prisma.waveItem.updateMany({
+    where: { id: { in: items.map((i) => i.id) } },
+    data: { status, error, nextAttemptAt: null, ...(release ? { activePackageId: null } : {}) },
+  });
+}
+
+/** Not done: try again later, or give up after MAX_ATTEMPTS. */
+export async function retry(items: Item[], ms: number, reason: string, giveUp: { release: boolean }) {
+  for (const i of items) {
+    const attempts = i.attempts + 1;
+    await prisma.waveItem.update({
+      where: { id: i.id },
+      data:
+        attempts >= MAX_ATTEMPTS
+          ? { status: WaveItemStatus.FAILED, error: reason, attempts, nextAttemptAt: null, ...(giveUp.release ? { activePackageId: null } : {}) }
+          : { attempts, error: reason, nextAttemptAt: later(ms) },
+    });
+  }
+}
+
+/** Waiting on something outside our control (re-check, too new): no try is used up. */
+export async function wait(items: Item[], ms: number, reason: string) {
+  if (!items.length) return;
+  await prisma.waveItem.updateMany({
+    where: { id: { in: items.map((i) => i.id) } },
+    data: { error: reason, nextAttemptAt: later(ms) },
+  });
+}
+
+export async function advance(items: Item[], status: WaveItemStatus, data: Prisma.WaveItemUpdateManyMutationInput = {}) {
+  if (!items.length) return;
+  await prisma.waveItem.updateMany({
+    where: { id: { in: items.map((i) => i.id) } },
+    data: { status, attempts: 0, error: null, nextAttemptAt: null, ...data },
+  });
+}
+
+/** Mark "we're asking the shop to ship these" BEFORE the call. */
+export async function markShipRequested(items: Item[]) {
+  await prisma.waveItem.updateMany({
+    where: { id: { in: items.map((i) => i.id) } },
+    data: { shipRequestedAt: new Date() },
+  });
+}
+
+/**
+ * Label is ready: move the item to LABEL_READY and queue exactly one print
+ * job (the status condition makes a repeat a no-op).
+ */
+export async function queueLabel(
+  item: Item,
+  from: WaveItemStatus,
+  waveTotals: Map<string, number>,
+  now: Date,
+  trackingNumber?: string
+) {
+  if (!waveTotals.has(item.waveId)) {
+    waveTotals.set(item.waveId, await prisma.waveItem.count({ where: { waveId: item.waveId } }));
+  }
+  await prisma.$transaction(async (tx) => {
+    const moved = await tx.waveItem.updateMany({
+      where: { id: item.id, status: from },
+      data: {
+        status: WaveItemStatus.LABEL_READY,
+        attempts: 0,
+        error: null,
+        nextAttemptAt: null,
+        ...(trackingNumber ? { trackingNumber } : {}),
+      },
+    });
+    if (moved.count !== 1) return;
+    if (trackingNumber) await tx.package.update({ where: { id: item.packageId }, data: { trackingNumber } });
+    await tx.printJob.create({
+      data: {
+        kind: PrintJobKind.LABEL,
+        title: `Label ${item.position + 1}/${waveTotals.get(item.waveId)} · ${item.package.order.orderSn}`,
+        packageId: item.packageId,
+        waveId: item.waveId,
+        position: item.position,
+        createdAt: now,
+      },
+    });
+  });
+}
