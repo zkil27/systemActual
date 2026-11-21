@@ -1,15 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronRight, Link2, Search } from "lucide-react";
+import { ChevronRight, Link2, Search, Sparkles, Star } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Button, Group } from "@/components/ui/Button";
 import { ItemThumb } from "@/components/ui/ItemThumb";
 import { Sheet } from "@/components/ui/Sheet";
 import { toast } from "@/components/ui/Toast";
+import { useLiveRefresh } from "@/lib/ui/use-live-refresh";
 import type { CatalogGarment, CatalogVariant } from "@/lib/catalog/garments";
 
 type Platform = "SHOPEE" | "TIKTOK";
+type ItemFilter = "all" | "low" | "unlinked" | "check";
 
 interface ShopInfo {
   id: string;
@@ -18,6 +20,31 @@ interface ShopInfo {
   connected: boolean;
   stockImportStatus: string | null;
   stockImportedAt: string | null;
+}
+
+interface BumpStatus {
+  connected: boolean;
+  shopName: string | null;
+  enabled: boolean;
+  slotsTotal: number;
+  pinnedItemIds: string[];
+  boosted: Array<{
+    itemId: string;
+    name: string;
+    imageUrl: string | null;
+    cooldownSecond: number;
+    endsAt: string;
+  }>;
+  lastBumpedAt: string | null;
+  lastCheckedAt: string | null;
+  lastError: string | null;
+}
+
+function formatCooldown(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m left`;
+  return `${Math.max(1, m)}m left`;
 }
 
 const SHOP_LABEL: Record<Platform, string> = { SHOPEE: "Shopee", TIKTOK: "TikTok" };
@@ -162,6 +189,8 @@ function StockRow({
 export default function ItemsPage() {
   const [garments, setGarments] = useState<CatalogGarment[] | null>(null);
   const [shops, setShops] = useState<ShopInfo[]>([]);
+  const [bump, setBump] = useState<BumpStatus | null>(null);
+  const [filter, setFilter] = useState<ItemFilter>("all");
   const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [linkFrom, setLinkFrom] = useState<CatalogGarment | null>(null);
@@ -174,6 +203,7 @@ export default function ItemsPage() {
     const data = await res.json();
     setGarments(data.garments);
     setShops(data.shops);
+    setBump(data.bump ?? null);
   }, []);
 
   useEffect(() => {
@@ -181,26 +211,52 @@ export default function ItemsPage() {
   }, [load]);
 
   const importing = shops.some((s) => s.stockImportStatus === "RUNNING");
+  useLiveRefresh({ enabled: !importing, onRefresh: load });
   useEffect(() => {
     if (!importing) return;
-    const t = setInterval(load, 5000);
-    return () => clearInterval(t);
+    const tick = () => {
+      if (!document.hidden) void load();
+    };
+    const onVisibility = () => {
+      if (!document.hidden) void load();
+    };
+    const t = setInterval(tick, 5000);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [importing, load]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return (garments ?? []).filter((g) => !q || g.name.toLowerCase().includes(q));
-  }, [garments, query]);
+    return (garments ?? []).filter((g) => {
+      if (q && !g.name.toLowerCase().includes(q)) return false;
+      if (filter === "low") return g.variants.some((v) => v.available !== null && v.available <= 5);
+      if (filter === "unlinked") return g.platforms.length === 1;
+      if (filter === "check") return g.variants.some(variantNeedsCheck);
+      return true;
+    });
+  }, [garments, query, filter]);
 
   const open = garments?.find((g) => g.id === openId) ?? null;
   const unconfirmed = (garments ?? []).flatMap((g) => g.variants).filter((v) => v.startingStock === null && v.stock.suggested !== null);
   const needsCheck = (garments ?? []).flatMap((g) => g.variants).filter(variantNeedsCheck).length;
+  const hasUnlinked = (garments ?? []).some((g) => g.platforms.length === 1);
+  const bothConnected = shops.filter((s) => s.connected).length >= 2;
 
   async function run(body: Record<string, unknown>, done: string) {
     setBusy(true);
     try {
       const data = await post(body);
-      toast(done.replace("{n}", String(data.confirmed ?? data.paired ?? "")));
+      if (data.error) toast(data.error, "error");
+      else if (done) {
+        toast(
+          done
+            .replace("{n}", String(data.confirmed ?? data.paired ?? data.linkedGarments ?? data.bumped ?? ""))
+            .replace("{s}", String(data.confirmedStock ?? ""))
+        );
+      }
       await load();
       return data;
     } catch (e) {
@@ -213,6 +269,10 @@ export default function ItemsPage() {
   const otherPlatform = (g: CatalogGarment): Platform | null =>
     g.platforms.length === 1 ? (g.platforms[0] === "SHOPEE" ? "TIKTOK" : "SHOPEE") : null;
 
+  const shopeeListingIdFor = (g: CatalogGarment) =>
+    g.listings.find((l) => l.platform === "SHOPEE")?.listingId ?? null;
+  const pinnedSet = new Set(bump?.pinnedItemIds ?? []);
+
   return (
     <AppShell title="Items & stock">
       <div className="space-y-6">
@@ -223,20 +283,94 @@ export default function ItemsPage() {
             <div className="space-y-3">
               <p className="text-[15px] text-ink-2">
                 {shops.some((s) => s.stockImportedAt)
-                  ? "Stock was read from your shops. Nothing was changed on them."
+                  ? "Stock syncs from your shops and links matching Shopee & TikTok items automatically."
                   : "Read every listing and its stock from Shopee and TikTok. Nothing is changed on the shops."}
               </p>
-              <Button
-                full
-                variant={shops.some((s) => s.stockImportedAt) ? "secondary" : "primary"}
-                disabled={busy || !shops.some((s) => s.connected)}
-                onClick={() => run({ action: "start_import" }, "Started")}
-              >
-                {shops.some((s) => s.stockImportedAt) ? "Read stock again" : "Get stock from shops"}
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  full={!bothConnected || !hasUnlinked}
+                  variant={shops.some((s) => s.stockImportedAt) ? "secondary" : "primary"}
+                  disabled={busy || !shops.some((s) => s.connected)}
+                  onClick={() => run({ action: "start_import" }, "Started")}
+                  className={bothConnected && hasUnlinked ? "flex-1" : undefined}
+                >
+                  {shops.some((s) => s.stockImportedAt) ? "Read stock again" : "Get stock from shops"}
+                </Button>
+                {bothConnected && hasUnlinked && (
+                  <Button
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() => run({ action: "auto_link" }, "Linked {n} items")}
+                    className="flex-1"
+                  >
+                    <Sparkles className="mr-1.5 h-4 w-4" />
+                    Auto-link twins
+                  </Button>
+                )}
+              </div>
             </div>
           )}
         </Group>
+
+        {bump?.connected && (
+          <Group className="space-y-3 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-[17px] font-bold text-ink">Shopee Auto-Bump</h2>
+                <p className="text-[13px] text-ink-3 tabular-nums">
+                  {bump.boosted.length}/{bump.slotsTotal} slots active · rotates every 4 hours
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={bump.enabled}
+                aria-label="Shopee Auto-Bump"
+                disabled={busy}
+                onClick={() => run({ action: "toggle_bump", enabled: !bump.enabled }, bump.enabled ? "Auto-bump off" : "Auto-bump on")}
+                className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 ${
+                  bump.enabled ? "bg-brand" : "bg-slate-300"
+                }`}
+              >
+                <span
+                  data-motion="slide"
+                  className={`absolute left-0.5 top-0.5 h-[27px] w-[27px] rounded-full bg-white shadow-[0_2px_4px_rgb(15_23_42/0.2)] transition-transform duration-200 ease-[var(--ease-ios)] ${
+                    bump.enabled ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
+
+            {bump.boosted.length > 0 && (
+              <ul className="divide-y divide-hairline rounded-[var(--radius-control)] bg-slate-50 px-3">
+                {bump.boosted.map((b) => (
+                  <li key={b.itemId} className="flex items-center justify-between gap-3 py-2">
+                    <span className="min-w-0 truncate text-[14px] font-medium text-ink">{b.name}</span>
+                    <span className="shrink-0 text-[13px] font-semibold text-brand tabular-nums">
+                      {formatCooldown(b.cooldownSecond)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {bump.lastError && <p className="text-[13px] font-semibold text-missing-ink">{bump.lastError}</p>}
+
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[13px] text-ink-3">
+                Tap ★ on any Shopee item below to prioritize it.
+              </span>
+              <Button
+                variant="secondary"
+                disabled={busy || bump.boosted.length >= bump.slotsTotal}
+                onClick={() => run({ action: "bump_now" }, "Bumped {n} items")}
+                className="h-10 shrink-0 px-3"
+              >
+                {bump.boosted.length >= bump.slotsTotal ? "Slots full" : "Bump now"}
+              </Button>
+            </div>
+          </Group>
+        )}
 
         {linkFrom && (
           <div className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] bg-brand-soft px-4 py-3">
@@ -249,16 +383,44 @@ export default function ItemsPage() {
           </div>
         )}
 
-        <label className="relative block">
-          <span className="sr-only">Search items</span>
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-ink-3" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search items"
-            className="h-12 w-full rounded-[var(--radius-control)] bg-white pl-11 pr-4 text-[16px] text-ink shadow-[var(--shadow-card)] focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
-          />
-        </label>
+        <div className="space-y-2.5">
+          <div className="no-scrollbar -mx-5 flex gap-1.5 overflow-x-auto px-5" role="group" aria-label="Filter items">
+            {(
+              [
+                { id: "all", label: "All" },
+                { id: "low", label: "Low stock (≤5)" },
+                { id: "unlinked", label: "One shop only" },
+                { id: "check", label: `To check${needsCheck ? ` (${needsCheck})` : ""}` },
+              ] as const
+            ).map((f) => {
+              const active = filter === f.id;
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setFilter(f.id)}
+                  className={`h-9 shrink-0 rounded-full px-3.5 text-[13px] font-semibold transition-colors ${
+                    active ? "bg-ink text-white" : "bg-white text-ink-2 shadow-[var(--shadow-card)]"
+                  }`}
+                >
+                  {f.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <label className="relative block">
+            <span className="sr-only">Search items</span>
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-ink-3" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search items"
+              className="h-12 w-full rounded-[var(--radius-control)] bg-white pl-11 pr-4 text-[16px] text-ink shadow-[var(--shadow-card)] focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
+            />
+          </label>
+        </div>
 
         {garments === null ? (
           <div className="h-40 animate-pulse rounded-[var(--radius-card)] bg-slate-200/60" aria-busy="true" />
@@ -272,8 +434,13 @@ export default function ItemsPage() {
               {shown.map((g) => {
                 const linkTarget = linkFrom && linkFrom.id !== g.id && otherPlatform(linkFrom) === g.platforms[0] && g.platforms.length === 1;
                 const checks = g.variants.filter(variantNeedsCheck).length;
+                const shopeeItemId = shopeeListingIdFor(g);
+                const isPinned = shopeeItemId ? pinnedSet.has(shopeeItemId) : false;
                 return (
-                  <li key={g.id} className="flex items-center gap-3 px-4 py-3">
+                  <li
+                    key={g.id}
+                    className="flex items-center gap-2 px-4 py-3 [content-visibility:auto] [contain-intrinsic-size:auto_76px]"
+                  >
                     <button
                       type="button"
                       onClick={() => (linkTarget ? setLinkTo(g) : setOpenId(g.id))}
@@ -294,7 +461,20 @@ export default function ItemsPage() {
                         <ChevronRight className="h-5 w-5 shrink-0 text-ink-3" />
                       )}
                     </button>
-                    {!linkFrom && otherPlatform(g) && shops.filter((s) => s.connected).length > 1 && (
+                    {!linkFrom && shopeeItemId && bump?.connected && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => run({ action: "pin_bump", itemId: shopeeItemId }, isPinned ? "Unpinned from bump" : "Pinned for auto-bump")}
+                        aria-label={isPinned ? `Unpin ${g.name} from auto-bump` : `Pin ${g.name} for auto-bump`}
+                        className={`pressable flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-amber-50 ${
+                          isPinned ? "text-amber-500" : "text-slate-300 hover:text-amber-500"
+                        }`}
+                      >
+                        <Star className="h-5 w-5" fill={isPinned ? "currentColor" : "none"} />
+                      </button>
+                    )}
+                    {!linkFrom && otherPlatform(g) && bothConnected && (
                       <button
                         type="button"
                         onClick={() => setLinkFrom(g)}

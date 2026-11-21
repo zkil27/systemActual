@@ -1,9 +1,9 @@
-import { Prisma, PrintJobKind, WaveItemStatus, WaveStatus } from "@prisma/client";
+import { Platform, Prisma, PrintJobKind, WaveItemStatus, WaveStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { notifyOwnerTelegram } from "@/lib/telegram";
 import { formatManilaTime } from "@/lib/time";
 import { buildWavePreview } from "./build";
-import { dueWaveSlot, parseWaveTimes, retryUpdate } from "./schedule";
+import { dueWaveSlot, isContinuousWave, parseWaveTimes, retryUpdate } from "./schedule";
 
 /** A preview older than this must be planned again before shipping. */
 export const PREVIEW_MAX_AGE_MS = 30 * 60_000;
@@ -73,11 +73,22 @@ export async function startWave(waveId: string, now: Date = new Date()) {
 }
 
 /** Plan and start a wave in one go (Ship now button, and scheduled waves). */
-export async function shipNow(trigger: "MANUAL" | "SCHEDULED", now: Date = new Date()) {
+export async function shipNow(
+  trigger: "MANUAL" | "SCHEDULED",
+  now: Date = new Date(),
+  filters?: { platform?: Platform; courier?: string }
+) {
   if (await prisma.wave.count({ where: { status: WaveStatus.RUNNING } })) {
     throw new WaveStartError("A wave is already shipping. Wait for it to finish.");
   }
-  const { waveId, summary } = await buildWavePreview({ deadline: Date.now() + 20_000, trigger, now, recheck: false });
+  const { waveId, summary } = await buildWavePreview({
+    deadline: Date.now() + 20_000,
+    trigger,
+    now,
+    recheck: false,
+    platform: filters?.platform,
+    courier: filters?.courier,
+  });
   if (summary.total === 0) {
     await prisma.wave.delete({ where: { id: waveId } });
     return { waveId: null, shipping: 0, summary };
@@ -94,7 +105,8 @@ export async function shipNow(trigger: "MANUAL" | "SCHEDULED", now: Date = new D
 export async function maybeStartScheduledWave(now: Date = new Date()) {
   const settings = await prisma.appSettings.findUnique({ where: { id: "default" } });
   if (!settings?.wavesAutoEnabled) return null;
-  const slot = dueWaveSlot(now, parseWaveTimes(settings.waveTimes), settings.lastWaveSlot);
+  const continuous = isContinuousWave(settings.waveTimes);
+  const slot = dueWaveSlot(now, parseWaveTimes(settings.waveTimes), settings.lastWaveSlot, continuous);
   if (!slot) return null;
   if (await prisma.wave.count({ where: { status: WaveStatus.RUNNING } })) return null;
   if (!(await prisma.shopConnection.count({ where: { isDemo: false, writesEnabled: true, accessToken: { not: null } } }))) {
@@ -155,10 +167,12 @@ export async function finishDoneWaves(now: Date = new Date()) {
   return finished;
 }
 
-/** The PC printed a label: that package is done. */
-export async function markLabelPrinted(waveId: string, packageId: string) {
+/** The PC printed one or more labels (single or batched): those packages are done. */
+export async function markLabelPrinted(waveId: string, packageIds: string | string[]) {
+  const ids = Array.isArray(packageIds) ? packageIds : [packageIds];
+  if (!ids.length) return;
   await prisma.waveItem.updateMany({
-    where: { waveId, packageId, status: WaveItemStatus.LABEL_READY },
+    where: { waveId, packageId: { in: ids }, status: WaveItemStatus.LABEL_READY },
     data: { status: WaveItemStatus.PRINTED },
   });
 }

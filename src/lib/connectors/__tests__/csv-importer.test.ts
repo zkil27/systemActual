@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
 import { DigitalStatus, Platform, ReturnCategory } from "@prisma/client";
-import { parseMarketplaceSpreadsheet } from "@/lib/connectors/csv-importer";
+import { detectAndParseSpreadsheet, parseMarketplaceSpreadsheet } from "@/lib/connectors/csv-importer";
 
 describe("Shopee / TikTok spreadsheet importer", () => {
   it("parses mixed Failed Delivery and Buyer Return rows cleanly", () => {
@@ -53,5 +53,61 @@ describe("Shopee / TikTok spreadsheet importer", () => {
     expect(rows[1].category).toBe(ReturnCategory.RETURN_REFUND);
     expect(rows[1].returnSn).toBe("RET-TT-99");
     expect(rows[1].rtsTrackingNumber).toBe("JT999888");
+  });
+
+  it("auto-detects Orders and Product Stock spreadsheets", () => {
+    const orderSheet = XLSX.utils.json_to_sheet([
+      {
+        "Order ID": "261121ORD1",
+        "Order Status": "To Ship",
+        "Shipping Option": "J&T Express",
+        "Tracking Number": "JT12345",
+        "Product Name": "Ribbed Top",
+        "Variation Name": "Black, M",
+        Quantity: 2,
+        "Order Total": 398,
+      },
+    ]);
+    const orderWb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(orderWb, orderSheet, "Orders");
+    const orderRes = detectAndParseSpreadsheet(
+      XLSX.write(orderWb, { type: "buffer", bookType: "xlsx" }) as Buffer,
+      Platform.SHOPEE
+    );
+    expect(orderRes.kind).toBe("orders");
+    if (orderRes.kind === "orders") {
+      expect(orderRes.orders).toHaveLength(1);
+      expect(orderRes.orders[0].order.status).toBe("READY_TO_SHIP");
+      expect(orderRes.orders[0].order.lines[0].quantity).toBe(2);
+    }
+
+    const stockSheet = XLSX.utils.json_to_sheet([
+      {
+        "Product ID": "P999",
+        "Variation ID": "V1",
+        "Product Name": "Pleated Skirt",
+        Variation: "White, S",
+        Stock: 35,
+      },
+    ]);
+    const stockWb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(stockWb, stockSheet, "Stock");
+    const stockRes = detectAndParseSpreadsheet(
+      XLSX.write(stockWb, { type: "buffer", bookType: "xlsx" }) as Buffer,
+      Platform.TIKTOK
+    );
+    expect(stockRes.kind).toBe("stock");
+    if (stockRes.kind === "stock") {
+      expect(stockRes.items).toEqual([
+        {
+          platform: Platform.TIKTOK,
+          listingId: "P999",
+          variationId: "V1",
+          name: "Pleated Skirt",
+          variationName: "White, S",
+          availableStock: 35,
+        },
+      ]);
+    }
   });
 });

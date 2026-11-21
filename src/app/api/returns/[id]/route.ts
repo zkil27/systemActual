@@ -11,11 +11,38 @@ export async function GET(
     const { id } = await context.params;
     const parcel = await prisma.returnParcel.findUnique({
       where: { id },
-      include: {
-        events: { orderBy: { eventTimestamp: "desc" } },
+      select: {
+        id: true,
+        platform: true,
+        orderSn: true,
+        forwardTrackingNumber: true,
+        rtsTrackingNumber: true,
+        courier: true,
+        category: true,
+        digitalStatus: true,
+        expectsPhysicalReturn: true,
+        returnReason: true,
+        itemSummary: true,
+        variationName: true,
+        quantity: true,
+        itemImageUrl: true,
+        orderTotalPhp: true,
+        estimatedUnitCostPhp: true,
+        digitalReturnTaggedAt: true,
+        courierReturnedToSellerAt: true,
+        physicallyReceivedAt: true,
+        physicalCondition: true,
+        disputeDraft: true,
         scans: {
           orderBy: { scannedAt: "desc" },
-          include: { staffMember: { select: { name: true } } },
+          select: {
+            id: true,
+            condition: true,
+            notes: true,
+            photoUrls: true,
+            scannedAt: true,
+            staffMember: { select: { name: true } },
+          },
         },
       },
     });

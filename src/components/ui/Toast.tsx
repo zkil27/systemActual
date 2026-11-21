@@ -30,7 +30,7 @@ function subscribe(listener: () => void) {
 }
 
 /** Mount once per screen. Floats under the top bar and leaves after 2.6s. */
-export function Toaster() {
+export function Toaster({ className = "" }: { className?: string }) {
   const state = useSyncExternalStore(
     subscribe,
     () => current,
@@ -52,7 +52,7 @@ export function Toaster() {
   return (
     <div
       aria-live="polite"
-      className="pointer-events-none fixed inset-x-0 z-[60] flex justify-center px-4"
+      className={`pointer-events-none fixed inset-x-0 z-[60] flex justify-center px-4 ${className}`}
       style={{ top: "calc(env(safe-area-inset-top) + 64px)" }}
     >
       {state && (

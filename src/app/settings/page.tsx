@@ -39,7 +39,7 @@ interface SettingsPayload {
     needsReconnect: boolean;
     writesEnabled: boolean;
   }>;
-  telegramPreview: string;
+  telegramPreview?: string;
 }
 
 function GroupLabel({ children }: { children: React.ReactNode }) {
@@ -140,6 +140,22 @@ export default function SettingsPage() {
   const [newStaffName, setNewStaffName] = useState("");
   const [newStaffPin, setNewStaffPin] = useState("");
   const [addingStaff, setAddingStaff] = useState(false);
+  const [telegramPreview, setTelegramPreview] = useState<string | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+
+  async function loadTelegramPreview() {
+    if (telegramPreview !== null || loadingPreview) return;
+    setLoadingPreview(true);
+    try {
+      const res = await fetch("/api/settings?preview=1");
+      if (res.ok) {
+        const out = await res.json();
+        setTelegramPreview(out.telegramPreview ?? "");
+      }
+    } finally {
+      setLoadingPreview(false);
+    }
+  }
 
   async function loadSettings() {
     const res = await fetch("/api/settings");
@@ -172,7 +188,7 @@ export default function SettingsPage() {
     if (
       active &&
       !window.confirm(
-        `Let Kyna Ops change ${label}? It will update stock (and later ship orders and print labels). Turn BigSeller's stock sync off for this shop first.`
+        `Let Kyna Ops update ${label}? It will sync stock, ship orders, and print labels automatically.`
       )
     ) {
       return;
@@ -277,163 +293,172 @@ export default function SettingsPage() {
   const tiktok = data?.shops.find((s) => s.platform === "TIKTOK" && !s.isDemo);
 
   return (
-    <AppShell title="Settings">
-      <div className="space-y-8">
-        <section>
-          <GroupLabel>Stores</GroupLabel>
-          <Group className="divide-y divide-hairline">
-            {(
-              [
-                { label: "Shopee PH", href: "/api/oauth/shopee/start", shop: shopee, keys: data?.integrations.shopeeEnvReady },
-                { label: "TikTok Shop PH", href: "/api/oauth/tiktok/start", shop: tiktok, keys: data?.integrations.tiktokEnvReady },
-              ] as const
-            ).map((row) => {
-              const detail = storeDetail(row.shop);
-              return (
-                <a key={row.label} href={row.href} className={rowLinkClass}>
-                  <span className="flex flex-col">
-                    <span className="text-[17px] text-ink">{row.label}</span>
-                    {detail && <span className="text-[13px] text-ink-3">{detail}</span>}
-                  </span>
-                  <span
-                    className={`flex items-center gap-1 text-[16px] ${
-                      row.shop?.needsReconnect ? "font-semibold text-missing-ink" : "text-ink-3"
-                    }`}
-                  >
-                    {storeStatus(row.shop, Boolean(row.keys))}
-                    <ChevronRight className="h-5 w-5" />
-                  </span>
-                </a>
-              );
-            })}
-            {[shopee, tiktok]
-              .filter((s): s is ShopRow => Boolean(s?.connected))
-              .map((s) => {
-                const label = s.platform === "SHOPEE" ? "Shopee" : "TikTok";
+    <AppShell title="Settings" width="wide">
+      <div className="space-y-8 lg:grid lg:grid-cols-2 lg:items-start lg:gap-8 lg:space-y-0">
+        <div className="space-y-8">
+          <section>
+            <GroupLabel>Stores</GroupLabel>
+            <Group className="divide-y divide-hairline">
+              {(
+                [
+                  { label: "Shopee PH", href: "/api/oauth/shopee/start", shop: shopee, keys: data?.integrations.shopeeEnvReady },
+                  { label: "TikTok Shop PH", href: "/api/oauth/tiktok/start", shop: tiktok, keys: data?.integrations.tiktokEnvReady },
+                ] as const
+              ).map((row) => {
+                const detail = storeDetail(row.shop);
                 return (
-                  <div key={s.id} className={rowClass}>
+                  <a key={row.label} href={row.href} className={rowLinkClass}>
                     <span className="flex flex-col">
-                      <span className="text-[17px] text-ink">Update {label} from Kyna Ops</span>
-                      <span className="text-[13px] text-ink-3">{s.writesEnabled ? "On: stock is sent to the shop" : "Off: nothing is changed on the shop"}</span>
+                      <span className="text-[17px] text-ink">{row.label}</span>
+                      {detail && <span className="text-[13px] text-ink-3">{detail}</span>}
                     </span>
-                    <Switch
-                      checked={s.writesEnabled}
-                      onChange={(next) => setShopWrites(s.id, label, next)}
-                      label={`Update ${label} from Kyna Ops`}
-                    />
-                  </div>
+                    <span
+                      className={`flex items-center gap-1 text-[16px] ${
+                        row.shop?.needsReconnect ? "font-semibold text-missing-ink" : "text-ink-3"
+                      }`}
+                    >
+                      {storeStatus(row.shop, Boolean(row.keys))}
+                      <ChevronRight className="h-5 w-5" />
+                    </span>
+                  </a>
                 );
               })}
-            <Link href="/items" className={rowLinkClass}>
-              <span className="text-[17px] text-ink">Items &amp; stock</span>
-              <ChevronRight className="h-5 w-5 text-ink-3" />
-            </Link>
-            <Link href="/waves" className={rowLinkClass}>
-              <span className="text-[17px] text-ink">Waves &amp; pick lists</span>
-              <ChevronRight className="h-5 w-5 text-ink-3" />
-            </Link>
-            <Link href="/imports" className={rowLinkClass}>
-              <span className="text-[17px] text-ink">Upload a file</span>
-              <ChevronRight className="h-5 w-5 text-ink-3" />
-            </Link>
-          </Group>
-        </section>
-
-        <PrinterSettings />
-
-        <form onSubmit={saveGeneral} className="space-y-8">
-          <section>
-            <GroupLabel>Costs</GroupLabel>
-            <Group className="divide-y divide-hairline">
-              <NumberRow label="Item cost" prefix="₱" value={unitCost} onChange={setUnitCost} />
-              <NumberRow label="Selling price" prefix="₱" value={sellingPrice} onChange={setSellingPrice} />
-              <NumberRow label="Shipping back" prefix="₱" value={returnShipping} onChange={setReturnShipping} />
-              <NumberRow label="Overdue after" suffix="days" value={overdueDays} onChange={setOverdueDays} />
-              <NumberRow label="Keep back from shops" suffix="pcs" value={stockBuffer} onChange={setStockBuffer} />
+              {[shopee, tiktok]
+                .filter((s): s is ShopRow => Boolean(s?.connected))
+                .map((s) => {
+                  const label = s.platform === "SHOPEE" ? "Shopee" : "TikTok";
+                  return (
+                    <div key={s.id} className={rowClass}>
+                      <span className="flex flex-col">
+                        <span className="text-[17px] text-ink">Update {label} from Kyna Ops</span>
+                        <span className="text-[13px] text-ink-3">{s.writesEnabled ? "On: stock is sent to the shop" : "Off: nothing is changed on the shop"}</span>
+                      </span>
+                      <Switch
+                        checked={s.writesEnabled}
+                        onChange={(next) => setShopWrites(s.id, label, next)}
+                        label={`Update ${label} from Kyna Ops`}
+                      />
+                    </div>
+                  );
+                })}
+            </Group>
+            <Group className="mt-4 divide-y divide-hairline lg:hidden">
+              <Link href="/items" className={rowLinkClass}>
+                <span className="text-[17px] text-ink">Items &amp; stock</span>
+                <ChevronRight className="h-5 w-5 text-ink-3" />
+              </Link>
+              <Link href="/waves" className={rowLinkClass}>
+                <span className="text-[17px] text-ink">Waves &amp; pick lists</span>
+                <ChevronRight className="h-5 w-5 text-ink-3" />
+              </Link>
+              <Link href="/imports" className={rowLinkClass}>
+                <span className="text-[17px] text-ink">Upload a file</span>
+                <ChevronRight className="h-5 w-5 text-ink-3" />
+              </Link>
             </Group>
           </section>
 
-          <section>
-            <GroupLabel>Telegram summary at 8 PM</GroupLabel>
-            <Group className="divide-y divide-hairline">
-              <label className={rowClass}>
-                <span className="shrink-0 text-[17px] text-ink">Chat ID</span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={telegramChatId}
-                  onChange={(e) => setTelegramChatId(e.target.value)}
-                  placeholder="Send /start to the bot"
-                  className="tabular-nums min-w-0 flex-1 bg-transparent text-right text-[17px] text-ink focus:outline-none"
-                />
-              </label>
-              <button type="button" onClick={handleSendTestTelegram} className={`${rowLinkClass} w-full text-left`}>
-                <span className="text-[17px] text-brand">Send a test</span>
-              </button>
-              {data?.telegramPreview && (
+          <PrinterSettings />
+        </div>
+
+        <div className="space-y-8">
+          <form onSubmit={saveGeneral} className="space-y-8">
+            <section>
+              <GroupLabel>Costs</GroupLabel>
+              <Group className="divide-y divide-hairline">
+                <NumberRow label="Item cost" prefix="₱" value={unitCost} onChange={setUnitCost} />
+                <NumberRow label="Selling price" prefix="₱" value={sellingPrice} onChange={setSellingPrice} />
+                <NumberRow label="Shipping back" prefix="₱" value={returnShipping} onChange={setReturnShipping} />
+                <NumberRow label="Overdue after" suffix="days" value={overdueDays} onChange={setOverdueDays} />
+                <NumberRow label="Keep back from shops" suffix="pcs" value={stockBuffer} onChange={setStockBuffer} />
+              </Group>
+            </section>
+
+            <section>
+              <GroupLabel>Telegram summary at 8 PM</GroupLabel>
+              <Group className="divide-y divide-hairline">
+                <label className={rowClass}>
+                  <span className="shrink-0 text-[17px] text-ink">Chat ID</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={telegramChatId}
+                    onChange={(e) => setTelegramChatId(e.target.value)}
+                    placeholder="Send /start to the bot"
+                    className="tabular-nums min-w-0 flex-1 bg-transparent text-right text-[17px] text-ink focus:outline-none"
+                  />
+                </label>
+                <button type="button" onClick={handleSendTestTelegram} className={`${rowLinkClass} w-full text-left`}>
+                  <span className="text-[17px] text-brand">Send a test</span>
+                </button>
                 <Disclosure
                   summaryClassName={rowLinkClass}
                   label={<span className="text-[17px] text-ink">Tonight&apos;s message</span>}
+                  onOpenChange={(open) => {
+                    if (open) void loadTelegramPreview();
+                  }}
                 >
                   <pre className="max-h-72 overflow-auto whitespace-pre-wrap px-4 pb-4 font-sans text-[15px] leading-relaxed text-ink-2">
-                    {data.telegramPreview}
+                    {loadingPreview
+                      ? "Loading preview…"
+                      : telegramPreview || "No preview available."}
                   </pre>
                 </Disclosure>
-              )}
+              </Group>
+            </section>
+
+            {dirty && (
+              <Button type="submit" full disabled={saving} className="anim-rise-in">
+                {saving ? "Saving…" : "Save changes"}
+              </Button>
+            )}
+          </form>
+
+          <section>
+            <GroupLabel>Warehouse staff</GroupLabel>
+            <Group className="divide-y divide-hairline">
+              {(data?.staff ?? []).map((s) => (
+                <div key={s.id} className={rowClass}>
+                  <span className={`text-[17px] ${s.active ? "text-ink" : "text-ink-3"}`}>{s.name}</span>
+                  <Switch
+                    checked={s.active}
+                    onChange={(next) => handleToggleStaff(s.id, next)}
+                    label={`${s.name} can use the scanner`}
+                  />
+                </div>
+              ))}
+              <form onSubmit={handleAddStaff} className="flex items-center gap-2 px-4 py-2">
+                <input
+                  type="text"
+                  value={newStaffName}
+                  onChange={(e) => setNewStaffName(e.target.value)}
+                  placeholder="New staff name"
+                  aria-label="New staff name"
+                  className="h-11 min-w-0 flex-1 bg-transparent text-[17px] text-ink focus:outline-none"
+                />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={newStaffPin}
+                  onChange={(e) => setNewStaffPin(e.target.value.replace(/\D/g, ""))}
+                  placeholder="PIN"
+                  aria-label="4-digit PIN"
+                  className="tabular-nums h-11 w-16 rounded-[10px] bg-slate-100 text-center text-[17px] font-semibold tracking-widest text-ink focus:outline-none focus:ring-2 focus:ring-brand"
+                />
+                <Button type="submit" variant="plain" disabled={addingStaff} className="h-11 px-3">
+                  Add
+                </Button>
+              </form>
             </Group>
           </section>
 
-          {dirty && (
-            <Button type="submit" full disabled={saving} className="anim-rise-in">
-              {saving ? "Saving…" : "Save changes"}
-            </Button>
-          )}
-        </form>
-
-        <section>
-          <GroupLabel>Warehouse staff</GroupLabel>
-          <Group className="divide-y divide-hairline">
-            {(data?.staff ?? []).map((s) => (
-              <div key={s.id} className={rowClass}>
-                <span className={`text-[17px] ${s.active ? "text-ink" : "text-ink-3"}`}>{s.name}</span>
-                <Switch
-                  checked={s.active}
-                  onChange={(next) => handleToggleStaff(s.id, next)}
-                  label={`${s.name} can use the scanner`}
-                />
-              </div>
-            ))}
-            <form onSubmit={handleAddStaff} className="flex items-center gap-2 px-4 py-2">
-              <input
-                type="text"
-                value={newStaffName}
-                onChange={(e) => setNewStaffName(e.target.value)}
-                placeholder="New staff name"
-                aria-label="New staff name"
-                className="h-11 min-w-0 flex-1 bg-transparent text-[17px] text-ink focus:outline-none"
-              />
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={4}
-                value={newStaffPin}
-                onChange={(e) => setNewStaffPin(e.target.value.replace(/\D/g, ""))}
-                placeholder="PIN"
-                aria-label="4-digit PIN"
-                className="tabular-nums h-11 w-16 rounded-[10px] bg-slate-100 text-center text-[17px] font-semibold tracking-widest text-ink focus:outline-none focus:ring-2 focus:ring-brand"
-              />
-              <Button type="submit" variant="plain" disabled={addingStaff} className="h-11 px-3">
-                Add
-              </Button>
-            </form>
+          <Group>
+            <button type="button" onClick={handleLogout} className={`${rowLinkClass} w-full`}>
+              <span className="text-[17px] text-missing">Sign out</span>
+            </button>
           </Group>
-        </section>
-
-        <Group>
-          <button type="button" onClick={handleLogout} className={`${rowLinkClass} w-full`}>
-            <span className="text-[17px] text-missing">Sign out</span>
-          </button>
-        </Group>
+        </div>
       </div>
     </AppShell>
   );

@@ -147,6 +147,30 @@ describe("failed deliveries from the order ledger", () => {
     expect(p.digitalStatus).toBe(DigitalStatus.COURIER_RETURNED);
   });
 
+  it("never sets taggedAt after courierReturnedToSellerAt when failed-delivery event is missing", () => {
+    const returnedAtMs = new Date("2026-11-19T11:58:00Z").getTime();
+    const events = tiktokTrackingEvents({
+      tracking: [
+        { description: "In transit", update_time_millis: new Date("2026-11-17T08:00:00Z").getTime() },
+        { description: "Parcel returned to seller", update_time_millis: returnedAtMs },
+      ],
+    });
+    const p = mapFailedDelivery(Platform.TIKTOK, "shop1", {
+      orderSn: "577086512123700001",
+      status: "CANCELLED",
+      totalPhp: 199,
+      platformCreatedAt: new Date("2026-11-14T00:00:00Z"),
+      platformUpdatedAt: new Date("2026-11-21T06:44:00Z"),
+      cancelReason: "Package delivery failed",
+      lines: [
+        { name: "Skort", variationName: "Maroon, L", imageUrl: null, quantity: 1, listingId: "a", variationId: "1" },
+      ],
+      packages: [{ trackingNumber: "JT0099999999", carrier: "J&T Express" }],
+    }, events);
+    expect(p.courierReturnedToSellerAt?.getTime()).toBe(returnedAtMs);
+    expect(p.digitalReturnTaggedAt?.getTime()).toBe(returnedAtMs);
+  });
+
   it("Return on the Spot and the cancelled order merge into one parcel", () => {
     const ros = mapShopeeReturn(shopeeReturnOnTheSpot, ctx);
     expect(returnDedupeKey(ros.category, ros.returnSn, ros.orderSn)).toBe(

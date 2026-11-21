@@ -71,9 +71,11 @@ async function syncTikTokStatements(conn: ShopConnection, token: string, deadlin
       accessToken: token,
       shopCipher: conn.shopCipher,
       query: {
+        // Omit statement_time_lt: TikTok truncates it to UTC midnight (exclusive),
+        // which drops the entire current UTC day's settled statement (all day + 12am–8am PHT).
         statement_time_ge: String(sec(new Date(now.getTime() - TIKTOK_STATEMENT_LOOKBACK_MS))),
-        statement_time_lt: String(sec(now)),
         sort_field: "statement_time",
+        sort_order: "DESC",
         page_size: "100",
         ...(pageToken ? { page_token: pageToken } : {}),
       },

@@ -1,8 +1,14 @@
+import { PrintJobKind, PrintJobStatus, WaveItemStatus, WaveStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getDailyTruthReport } from "@/lib/analytics/daily-returns";
+import { getCatalog } from "@/lib/catalog/garments";
+import { getShopeeBumpStatus } from "@/lib/catalog/shopee-bump";
+import { getMoneySummary } from "@/lib/money/summary";
+import { isOnline } from "@/lib/print/device";
 import { formatTelegramDailyBrief } from "@/lib/reports/brief";
-import { formatManilaDateTime } from "@/lib/time";
+import { formatManilaDateTime, getManilaRangeBounds } from "@/lib/time";
 import { missingWhere, overdueWhere } from "@/lib/returns/rules";
+import { getReadyCounts } from "@/lib/waves/build";
 
 export async function sendTelegramMessage(chatId: string, text: string): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
@@ -112,6 +118,102 @@ export async function buildTelegramReply(rawInput: string): Promise<string> {
       `• Actually Arrived Today: ${rr.physicallyArrivedCount}`,
       `• Shopee: ${rr.shopeeTaggedCount} | TikTok: ${rr.tiktokTaggedCount}`,
       `• Dispute Deadlines < 24h: ${report.combined.urgentDeadlineCount}`,
+    ].join("\n");
+  }
+
+  if (text.startsWith("/ship") || text.startsWith("/waves") || text.includes("ready to ship")) {
+    const now = new Date();
+    const { start, end } = getManilaRangeBounds("today");
+    const [ready, printedTodayCount, printDevice, printerQueuedCount, waveNeedAttentionCount] =
+      await Promise.all([
+        getReadyCounts(now),
+        prisma.printJob.count({
+          where: {
+            kind: PrintJobKind.LABEL,
+            status: PrintJobStatus.PRINTED,
+            printedAt: { gte: start, lt: end },
+          },
+        }),
+        prisma.printDevice.findFirst({ orderBy: { createdAt: "desc" } }),
+        prisma.printJob.count({
+          where: { status: { in: [PrintJobStatus.QUEUED, PrintJobStatus.PRINTING] } },
+        }),
+        prisma.waveItem.count({
+          where: {
+            status: WaveItemStatus.FAILED,
+            wave: {
+              OR: [
+                { status: WaveStatus.RUNNING },
+                { status: WaveStatus.DONE, createdAt: { gte: start, lt: end } },
+              ],
+            },
+          },
+        }),
+      ]);
+    const printerOnline = printDevice ? isOnline(printDevice.lastSeenAt, now) : false;
+    const lines = [
+      `SHIPPING STATUS`,
+      `• Ready to ship: ${ready.totalReady} (Shopee ${ready.byPlatform.SHOPEE} | TikTok ${ready.byPlatform.TIKTOK})`,
+      ...(ready.coolingOff ? [`• Waiting 1h buyer cancel window: ${ready.coolingOff}`] : []),
+      `• Printed today: ${printedTodayCount}`,
+      `• Printer PC: ${printerOnline ? "Online" : "Offline"}${printerQueuedCount ? ` (${printerQueuedCount} in queue)` : ""}`,
+      ...(waveNeedAttentionCount ? [`• NEED ATTENTION: ${waveNeedAttentionCount} parcel(s) failed — open Waves`] : []),
+    ];
+    if (ready.byCourier.length) {
+      lines.push(``);
+      for (const c of ready.byCourier) lines.push(`• ${c.courier}: ${c.count}`);
+    }
+    return lines.join("\n");
+  }
+
+  if (text.startsWith("/stock") || text.includes("low stock") || text.includes("out of stock")) {
+    const catalog = await getCatalog();
+    const low = catalog
+      .flatMap((g) =>
+        g.variants
+          .filter((v) => v.available !== null && v.available <= 5)
+          .map((v) => ({ name: g.name, label: v.label, available: v.available! }))
+      )
+      .sort((a, b) => a.available - b.available);
+    if (!low.length) {
+      return `ALL STOCKED — No items at 5 pieces or below right now.`;
+    }
+    const lines = [`LOW / OUT OF STOCK (${low.length} variants)`, ``];
+    for (const item of low.slice(0, 15)) {
+      lines.push(`• ${item.available === 0 ? "OUT" : `${item.available} left`} — ${item.name} (${item.label})`);
+    }
+    if (low.length > 15) lines.push(`…and ${low.length - 15} more in Items & stock.`);
+    return lines.join("\n");
+  }
+
+  if (text.startsWith("/bump") || text.includes("boost")) {
+    const bump = await getShopeeBumpStatus();
+    if (!bump.connected) return "Shopee is not connected yet.";
+    const lines = [
+      `SHOPEE AUTO-BUMP: ${bump.enabled ? "ON" : "OFF"} (${bump.boosted.length}/${bump.slotsTotal} active)`,
+      ``,
+    ];
+    if (bump.boosted.length) {
+      for (const b of bump.boosted) {
+        const h = Math.floor(b.cooldownSecond / 3600);
+        const m = Math.floor((b.cooldownSecond % 3600) / 60);
+        lines.push(`• ${b.name} (${h > 0 ? `${h}h ${m}m` : `${m}m`} left)`);
+      }
+    } else {
+      lines.push(`No items boosted right now. Turn on Auto-Bump in Items & stock.`);
+    }
+    return lines.join("\n");
+  }
+
+  if (text.startsWith("/money") || text.includes("credited") || text.includes("sales")) {
+    const { label, start, end } = getManilaRangeBounds("today");
+    const m = await getMoneySummary(start, end);
+    const peso = (n: number) => `PHP ${Math.round(n).toLocaleString("en-PH")}`;
+    return [
+      `MONEY CREDITED TODAY (${label})`,
+      `• Total credited: ${peso(m.creditedPhp)}`,
+      `• Shopee: ${peso(m.creditedShopeePhp)} | TikTok: ${peso(m.creditedTikTokPhp)}`,
+      `• Orders placed (not yet credited): ${m.ordersPlacedCount} — ${peso(m.ordersPlacedPhp)}`,
     ].join("\n");
   }
 

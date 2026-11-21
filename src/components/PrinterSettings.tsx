@@ -44,8 +44,18 @@ export function PrinterSettings() {
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 10_000);
-    return () => clearInterval(t);
+    const tick = () => {
+      if (!document.hidden) void load();
+    };
+    const onVisibility = () => {
+      if (!document.hidden) void load();
+    };
+    const t = setInterval(tick, 10_000);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [load]);
 
   async function run(action: string, done: string) {

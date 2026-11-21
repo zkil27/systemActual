@@ -4,7 +4,7 @@ import { shopeeGet } from "@/lib/connectors/shopee";
 import { tiktokRequest } from "@/lib/connectors/tiktok";
 import { ensureFreshToken } from "@/lib/connectors/tokens";
 import { mapShopeeOrder, mapTikTokOrder } from "@/lib/ledger/normalize";
-import { saveOrder } from "@/lib/ledger/store";
+import { loadExistingOrders, saveOrder } from "@/lib/ledger/store";
 import { SHOPEE_DETAIL_FIELDS } from "@/lib/ledger/sync";
 
 const BATCH = 50;
@@ -33,6 +33,7 @@ export async function recheckOrders(
       continue;
     }
     const idBySn = new Map(list.map((o) => [o.orderSn, o.id]));
+    const seenListings = new Set<string>();
 
     for (let i = 0; i < list.length; i += BATCH) {
       if (Date.now() >= deadline) return done;
@@ -55,9 +56,19 @@ export async function recheckOrders(
                   query: { ids: sns.join(",") },
                 })
               )?.orders ?? [];
-        for (const r of raw) {
-          const n = shop.platform === Platform.SHOPEE ? mapShopeeOrder(r) : mapTikTokOrder(r);
-          await saveOrder(shop.id, shop.platform, n);
+        const normalized = raw.map((r) =>
+          shop.platform === Platform.SHOPEE ? mapShopeeOrder(r) : mapTikTokOrder(r)
+        );
+        const existingBySn = await loadExistingOrders(
+          shop.platform,
+          normalized.map((n) => n.orderSn)
+        );
+        const now = new Date();
+        for (const n of normalized) {
+          await saveOrder(shop.id, shop.platform, n, now, {
+            existing: existingBySn.get(n.orderSn) ?? null,
+            seenListings,
+          });
           const id = idBySn.get(n.orderSn);
           if (id) done.add(id);
         }

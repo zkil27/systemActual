@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { runTick } from "@/lib/worker/tick";
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 /** The owner's "Sync now" button. Runs the same tick as the PC agent and webhooks. */
 export async function POST() {

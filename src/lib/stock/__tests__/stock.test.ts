@@ -1,5 +1,5 @@
-import { Platform } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { Platform, Prisma } from "@prisma/client";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   availableToSell,
   hasLeftWarehouse,
@@ -8,6 +8,24 @@ import {
   shipMovements,
   type PushCandidate,
 } from "@/lib/stock/rules";
+
+const { mockPrisma } = vi.hoisted(() => ({
+  mockPrisma: {
+    garmentVariant: {
+      findUniqueOrThrow: vi.fn(),
+    },
+    stockMovement: {
+      groupBy: vi.fn(),
+      create: vi.fn(),
+    },
+  },
+}));
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: mockPrisma,
+}));
+
+import { recordStaffStockReport } from "@/lib/stock/ledger";
 
 describe("availableToSell", () => {
   it("is on shelf minus unshipped orders minus the safety buffer", () => {
@@ -78,5 +96,102 @@ describe("planPushes", () => {
   it("only sends listings whose number changed, lowest stock first", () => {
     const plan = planPushes([row("a", 10, 10), row("b", 5, 6), row("c", 0, 2), row("d", 7, null)]);
     expect(plan.map((p) => p.listingVariantId)).toEqual(["c", "b", "d"]);
+  });
+});
+
+describe("recordStaffStockReport", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockPrisma.garmentVariant.findUniqueOrThrow.mockResolvedValue({
+      id: "gv-1",
+      label: "Black, M",
+      startingStockSetAt: new Date("2026-11-20T00:00:00Z"),
+      garment: { name: "Ribbed Crop Top" },
+      listings: [],
+    });
+    mockPrisma.stockMovement.groupBy.mockResolvedValue([
+      { garmentVariantId: "gv-1", _sum: { delta: 7 } },
+    ]);
+    mockPrisma.stockMovement.create.mockResolvedValue({ id: "sm-1" });
+  });
+
+  it("zeros out shelf count for EMPTY_SHELF and records staff audit note", async () => {
+    const res = await recordStaffStockReport({
+      variantId: "gv-1",
+      mode: "EMPTY_SHELF",
+      staffMemberId: "staff-1",
+      staffName: "Ana",
+      clientKey: "key-empty-1",
+    });
+
+    expect(res).toEqual({
+      duplicate: false,
+      garmentName: "Ribbed Crop Top",
+      variantLabel: "Black, M",
+      previousOnShelf: 7,
+      newOnShelf: 0,
+      delta: -7,
+    });
+    expect(mockPrisma.stockMovement.create).toHaveBeenCalledWith({
+      data: {
+        garmentVariantId: "gv-1",
+        delta: -7,
+        reason: "ADJUSTMENT",
+        sourceKey: "empty:key-empty-1",
+        staffMemberId: "staff-1",
+        note: "Shelf empty (0 left) reported by Ana",
+      },
+    });
+  });
+
+  it("deducts DEFECTIVE quantity capped at current shelf count", async () => {
+    const res = await recordStaffStockReport({
+      variantId: "gv-1",
+      mode: "DEFECTIVE",
+      quantity: 12,
+      note: "Oil stain",
+      staffMemberId: "staff-1",
+      staffName: "Joy",
+      clientKey: "key-defect-1",
+    });
+
+    expect(res).toEqual({
+      duplicate: false,
+      garmentName: "Ribbed Crop Top",
+      variantLabel: "Black, M",
+      previousOnShelf: 7,
+      newOnShelf: 0,
+      delta: -7,
+    });
+    expect(mockPrisma.stockMovement.create).toHaveBeenCalledWith({
+      data: {
+        garmentVariantId: "gv-1",
+        delta: -7,
+        reason: "ADJUSTMENT",
+        sourceKey: "defect:key-defect-1",
+        staffMemberId: "staff-1",
+        note: "Damaged on shelf (-7): Oil stain",
+      },
+    });
+  });
+
+  it("is idempotent on duplicate clientKey (P2002)", async () => {
+    const p2002 = new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002",
+      clientVersion: "6.16.0",
+    });
+    mockPrisma.stockMovement.create.mockRejectedValueOnce(p2002);
+
+    const res = await recordStaffStockReport({
+      variantId: "gv-1",
+      mode: "EMPTY_SHELF",
+      staffMemberId: "staff-1",
+      staffName: "Ana",
+      clientKey: "dup-key-1",
+    });
+
+    expect(res.duplicate).toBe(true);
+    expect(res.delta).toBe(0);
+    expect(res.newOnShelf).toBe(7);
   });
 });

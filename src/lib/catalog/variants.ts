@@ -1,17 +1,122 @@
 import { Platform } from "@prisma/client";
 
+const VARIATION_SYNONYMS: Record<string, string[]> = {
+  freesize: ["free", "size"],
+  fs: ["free", "size"],
+  small: ["s"],
+  medium: ["m"],
+  large: ["l"],
+  xlarge: ["xl"],
+  extralarge: ["xl"],
+  xxlarge: ["2xl"],
+  xxl: ["2xl"],
+  blk: ["black"],
+  wht: ["white"],
+  brn: ["brown"],
+  gry: ["grey"],
+  gray: ["grey"],
+  nvy: ["navy"],
+  pnk: ["pink"],
+};
+
 /**
- * "Black,M", "Black, M" and "M / Black" are the same variation. Lowercase,
- * split on anything that isn't a letter or digit, sort the words.
- * Exact equality after this, no fuzzy guessing: the owner still confirms links.
+ * "Black,M", "Black, M", "Black / Medium", and "M / Black" are the same variation.
+ * Lowercase, split on anything that isn't a letter or digit, map PH fashion
+ * aliases (e.g. FS/Freesize, Medium/M, BLK/Black), and sort the words.
  */
 export function normalizeVariationLabel(label: string | null | undefined): string {
-  return (label ?? "")
+  const tokens = (label ?? "")
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter(Boolean)
-    .sort()
-    .join(" ");
+    .flatMap((tok) => VARIATION_SYNONYMS[tok] ?? [tok]);
+  return tokens.sort().join(" ");
+}
+
+const TITLE_FILLER = new Set([
+  "cod",
+  "ready",
+  "stock",
+  "readystock",
+  "kyna",
+  "kynaph",
+  "ph",
+  "new",
+  "arrival",
+  "arrivals",
+  "sale",
+  "promo",
+  "bestseller",
+  "trending",
+  "viral",
+  "ootd",
+  "korean",
+  "style",
+  "women",
+  "womens",
+  "ladies",
+  "fashion",
+  "quality",
+  "hq",
+  "freeshipping",
+  "original",
+]);
+
+/**
+ * Normalizes a Shopee/TikTok product title for automatic twin matching by
+ * stripping promo tags like [COD] / (Ready Stock) and filler words.
+ */
+export function normalizeGarmentTitle(name: string): string {
+  const cleaned = name
+    .toLowerCase()
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/\([^)]*\b(cod|ready\s*stock|sale|promo|new)\b[^)]*\)/gi, " ");
+  const tokens = cleaned.split(/[^a-z0-9]+/).filter(Boolean);
+  const core = tokens.filter((t) => !TITLE_FILLER.has(t));
+  return (core.length ? core : tokens).join(" ");
+}
+
+export interface CrossShopCandidate {
+  id: string;
+  name: string;
+  platforms: Platform[];
+  listingKey: { shopConnectionId: string; listingId: string } | null;
+}
+
+export interface CrossShopMatch {
+  shopee: { shopConnectionId: string; listingId: string };
+  tiktok: { shopConnectionId: string; listingId: string };
+  normalizedTitle: string;
+}
+
+/**
+ * Finds 1-to-1 Shopee ↔ TikTok listing pairs whose normalized titles match
+ * uniquely on both shops. Ambiguous titles are left for the owner.
+ */
+export function findCrossShopTitleMatches(garments: CrossShopCandidate[]): CrossShopMatch[] {
+  const shopeeByTitle = new Map<string, CrossShopCandidate[]>();
+  const tiktokByTitle = new Map<string, CrossShopCandidate[]>();
+
+  for (const g of garments) {
+    if (g.platforms.length !== 1 || !g.listingKey) continue;
+    const key = normalizeGarmentTitle(g.name);
+    if (!key) continue;
+    const map = g.platforms[0] === Platform.SHOPEE ? shopeeByTitle : tiktokByTitle;
+    map.set(key, [...(map.get(key) ?? []), g]);
+  }
+
+  const matches: CrossShopMatch[] = [];
+  for (const [title, shList] of shopeeByTitle) {
+    const ttList = tiktokByTitle.get(title);
+    if (shList.length === 1 && ttList?.length === 1) {
+      matches.push({
+        shopee: shList[0].listingKey!,
+        tiktok: ttList[0].listingKey!,
+        normalizedTitle: title,
+      });
+    }
+  }
+  return matches;
 }
 
 export interface LabeledVariant {

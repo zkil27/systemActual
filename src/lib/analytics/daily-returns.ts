@@ -1,12 +1,28 @@
-import { PhysicalCondition, Platform, ReturnCategory } from "@prisma/client";
+import {
+  PhysicalCondition,
+  Platform,
+  PrintJobKind,
+  PrintJobStatus,
+  ReturnCategory,
+  WaveItemStatus,
+  WaveStatus,
+} from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getManilaRangeBounds, isWithinBounds } from "@/lib/time";
 import { getMoneySummary, type MoneySummary } from "@/lib/money/summary";
+import { getStockOperationsSummary } from "@/lib/catalog/garments";
+import { getShopeeBumpStatus } from "@/lib/catalog/shopee-bump";
+import { isOnline } from "@/lib/print/device";
+import { getReadyCounts } from "@/lib/waves/build";
+import { isContinuousWave } from "@/lib/waves/schedule";
 import {
   costAtRiskPhp,
   isMissingDiscrepancy as isMissing,
   isOverdueRts as isOverdue,
+  missingWhere,
+  overdueWhere,
 } from "@/lib/returns/rules";
+import { withSpan } from "@/lib/otel";
 
 export interface CategoryDailyTruth {
   taggedCount: number;
@@ -82,6 +98,25 @@ export interface DailyTruthReport {
     isDemo: boolean;
     lastSyncedAt: string | null;
   }>;
+  operations: {
+    readyToShipCount: number;
+    readyShopeeCount: number;
+    readyTikTokCount: number;
+    coolingOffCount: number;
+    printedTodayCount: number;
+    runningWaveCount: number;
+    waveNeedAttentionCount: number;
+    wavesAutoEnabled: boolean;
+    continuousAutoShip: boolean;
+    printerOnline: boolean;
+    printerQueuedCount: number;
+    lowStockCount: number;
+    outOfStockCount: number;
+    unlinkedCount: number;
+    stockPushFailedCount: number;
+    shopeeBumpEnabled: boolean;
+    shopeeBoostedCount: number;
+  };
 }
 
 function emptyCategory(): CategoryDailyTruth {
@@ -110,27 +145,96 @@ export async function getDailyTruthReport(options?: {
     options?.date
   );
 
-  const [settings, shops, parcels, money] = await Promise.all([
+  const now = new Date();
+  const [settings, shops] = await Promise.all([
     prisma.appSettings.findUnique({ where: { id: "default" } }),
     prisma.shopConnection.findMany({ orderBy: { platform: "asc" } }),
-    prisma.returnParcel.findMany({
-      include: {
-        scans: {
-          orderBy: { scannedAt: "desc" },
-          take: 1,
-          include: { staffMember: { select: { name: true } } },
-        },
-      },
-      orderBy: [{ courierReturnedToSellerAt: "desc" }, { digitalReturnTaggedAt: "desc" }],
-    }),
-    getMoneySummary(start, end),
   ]);
 
   const defaultUnitCostPhp = Number(settings?.defaultUnitCostPhp ?? 82);
   const overdueRtsDays = settings?.overdueRtsDays ?? 10;
   const returnShippingEstimatePhp = Number(settings?.returnShippingEstimatePhp ?? 40);
-  const now = new Date();
+  const stockSafetyBuffer = settings?.stockSafetyBuffer ?? 0;
   const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const connectedPlatforms = new Set(
+    shops.filter((s) => !s.isDemo && s.accessToken).map((s) => s.platform)
+  ).size;
+  const liveShopee = shops.find(
+    (s) => s.platform === Platform.SHOPEE && !s.isDemo && Boolean(s.accessToken)
+  );
+
+  const [
+    parcels,
+    money,
+    readyCounts,
+    printedTodayCount,
+    runningWaveCount,
+    waveNeedAttentionCount,
+    printDevice,
+    printerQueuedCount,
+    stockOps,
+    bumpStatus,
+  ] = await Promise.all([
+    withSpan("dashboard.returnParcels", () =>
+      prisma.returnParcel.findMany({
+        where: {
+          OR: [
+            { digitalReturnTaggedAt: { gte: start, lt: end } },
+            { courierReturnedToSellerAt: { gte: start, lt: end } },
+            { physicallyReceivedAt: { gte: start, lt: end } },
+            missingWhere,
+            overdueWhere(overdueRtsDays, now),
+            { disputeDeadlineAt: { gt: new Date(now.getTime() - 2 * 3600_000), lte: in24h } },
+          ],
+        },
+        select: {
+          id: true,
+          platform: true,
+          orderSn: true,
+          forwardTrackingNumber: true,
+          rtsTrackingNumber: true,
+          courier: true,
+          category: true,
+          digitalStatus: true,
+          returnReason: true,
+          itemSummary: true,
+          variationName: true,
+          quantity: true,
+          itemImageUrl: true,
+          estimatedUnitCostPhp: true,
+          digitalReturnTaggedAt: true,
+          courierReturnedToSellerAt: true,
+          physicallyReceivedAt: true,
+          physicalCondition: true,
+          disputeDeadlineAt: true,
+          expectsPhysicalReturn: true,
+        },
+        orderBy: [{ courierReturnedToSellerAt: "desc" }, { digitalReturnTaggedAt: "desc" }],
+      })
+    ),
+    withSpan("dashboard.money", () => getMoneySummary(start, end, shops)),
+    withSpan("dashboard.readyCounts", () => getReadyCounts(now)),
+    prisma.printJob.count({
+      where: {
+        kind: PrintJobKind.LABEL,
+        status: PrintJobStatus.PRINTED,
+        printedAt: { gte: start, lt: end },
+      },
+    }),
+    prisma.wave.count({ where: { status: WaveStatus.RUNNING } }),
+    prisma.waveItem.count({
+      where: {
+        status: WaveItemStatus.FAILED,
+        wave: {
+          OR: [{ status: WaveStatus.RUNNING }, { status: WaveStatus.DONE, createdAt: { gte: start, lt: end } }],
+        },
+      },
+    }),
+    prisma.printDevice.findFirst({ orderBy: { createdAt: "desc" } }),
+    prisma.printJob.count({ where: { status: { in: [PrintJobStatus.QUEUED, PrintJobStatus.PRINTING] } } }),
+    withSpan("dashboard.catalog", () => getStockOperationsSummary(stockSafetyBuffer, connectedPlatforms)),
+    getShopeeBumpStatus(now, liveShopee ? { id: liveShopee.id, shopName: liveShopee.shopName } : null),
+  ]);
 
   const failedDelivery = emptyCategory();
   const returnRefund = emptyCategory();
@@ -275,7 +379,7 @@ export async function getDailyTruthReport(options?: {
         isOverdueRts,
         isUrgentDeadline,
         expectsPhysicalReturn: p.expectsPhysicalReturn,
-        scannedByName: p.scans[0]?.staffMember.name ?? null,
+        scannedByName: null,
       });
     }
   }
@@ -305,6 +409,26 @@ export async function getDailyTruthReport(options?: {
     return score(b) - score(a);
   });
 
+  const attentionParcels = attentionCandidates.slice(0, 12);
+  if (attentionParcels.length > 0) {
+    const scans = await prisma.physicalScan.findMany({
+      where: { parcelId: { in: attentionParcels.map((p) => p.id) } },
+      orderBy: { scannedAt: "desc" },
+      select: { parcelId: true, staffMember: { select: { name: true } } },
+    });
+    const scannerByParcel = new Map<string, string>();
+    for (const s of scans) {
+      if (!scannerByParcel.has(s.parcelId)) {
+        scannerByParcel.set(s.parcelId, s.staffMember.name);
+      }
+    }
+    for (const p of attentionParcels) {
+      p.scannedByName = scannerByParcel.get(p.id) ?? null;
+    }
+  }
+
+  const { lowStockCount, outOfStockCount, unlinkedCount, stockPushFailedCount } = stockOps;
+
   return {
     rangeLabel: label,
     dateStr,
@@ -326,7 +450,7 @@ export async function getDailyTruthReport(options?: {
       damagedOrSwappedTodayCount,
     },
     topItems,
-    attentionParcels: attentionCandidates.slice(0, 12),
+    attentionParcels,
     shops: shops.map((s) => ({
       id: s.id,
       platform: s.platform,
@@ -334,5 +458,24 @@ export async function getDailyTruthReport(options?: {
       isDemo: s.isDemo,
       lastSyncedAt: s.lastSyncedAt?.toISOString() ?? null,
     })),
+    operations: {
+      readyToShipCount: readyCounts.totalReady,
+      readyShopeeCount: readyCounts.byPlatform.SHOPEE,
+      readyTikTokCount: readyCounts.byPlatform.TIKTOK,
+      coolingOffCount: readyCounts.coolingOff,
+      printedTodayCount,
+      runningWaveCount,
+      waveNeedAttentionCount,
+      wavesAutoEnabled: Boolean(settings?.wavesAutoEnabled),
+      continuousAutoShip: isContinuousWave(settings?.waveTimes ?? ""),
+      printerOnline: printDevice ? isOnline(printDevice.lastSeenAt, now) : false,
+      printerQueuedCount,
+      lowStockCount,
+      outOfStockCount,
+      unlinkedCount,
+      stockPushFailedCount,
+      shopeeBumpEnabled: bumpStatus.enabled,
+      shopeeBoostedCount: bumpStatus.boosted.length,
+    },
   };
 }

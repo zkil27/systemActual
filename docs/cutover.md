@@ -73,14 +73,14 @@ Use Shopee's sandbox (`SHOPEE_BASE_URL=https://partner.test-stable.shopeemobile.
 
 4. Copy any useful redacted captures into the fixture tests. Don't commit anything that still contains personal data. `src/lib/__fixtures__/live/` is git-ignored for that reason.
 
-## 4. Items and starting stock (Read)
+## 4. Items, starting stock & Shopee Auto-Bump (Read)
 
 Do this at a quiet hour. Stock changes while it runs.
 
-1. **Items & stock → Get stock from shops.** It only reads, and the screen updates by itself.
-2. **Link** each Shopee listing to its TikTok twin, and pair any sizes and colours that didn't match by name.
-3. Check the flagged items (the shops disagree) by counting the shelf, then save the counts. **Use these stock numbers** saves the rest with the lower suggestion.
-4. Staff can now use **New stock** on the scanner for supplier deliveries.
+1. **Items & stock → Get stock from shops.** It runs in the background, automatically links matching Shopee & TikTok items, pairs common sizes/colours (`Black, M` / `Medium`, `FS` / `Freesize`), and initializes starting counts using the lower shop number.
+2. Check any remaining unlinked listings or flagged variants, then adjust counts if needed.
+3. Staff can immediately use **New stock** on the scanner for supplier deliveries.
+4. Optionally turn on **Shopee Auto-Bump** on **Items & stock** and star (★) your priority Shopee items.
 
 ## 5. Turn BigSeller off
 

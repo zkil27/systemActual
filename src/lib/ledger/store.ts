@@ -18,10 +18,47 @@ const existingSelect = {
   status: true,
   cancelRequested: true,
   shippedAt: true,
-  packages: { select: { packageNumber: true, status: true, trackingNumber: true } },
+  _count: { select: { lines: true } },
+  packages: {
+    select: {
+      packageNumber: true,
+      status: true,
+      trackingNumber: true,
+      carrier: true,
+      channelId: true,
+    },
+  },
 } satisfies Prisma.OrderSelect;
 
-export type ExistingOrderSnapshot = OrderComparisonSnapshot & { id: string; orderSn: string };
+export type ExistingOrderSnapshot = Omit<OrderComparisonSnapshot, "packages"> & {
+  id: string;
+  orderSn: string;
+  _count: { lines: number };
+  packages: Array<{
+    packageNumber: string;
+    status: string | null;
+    trackingNumber: string | null;
+    carrier: string | null;
+    channelId: string | null;
+  }>;
+};
+
+function arePackagesUnchanged(
+  existing: ExistingOrderSnapshot["packages"],
+  incoming: NormalizedOrder["packages"]
+): boolean {
+  if (existing.length !== incoming.length) return false;
+  const byNum = new Map(existing.map((p) => [p.packageNumber, p]));
+  for (const p of incoming) {
+    const prev = byNum.get(p.packageNumber);
+    if (!prev) return false;
+    if (prev.status !== p.status) return false;
+    if (prev.carrier !== p.carrier) return false;
+    if (prev.channelId !== p.channelId) return false;
+    if (p.trackingNumber && prev.trackingNumber !== p.trackingNumber) return false;
+  }
+  return true;
+}
 
 /** Loads existing snapshots for a page of orders in one query so overlap skips take milliseconds. */
 export async function loadExistingOrders(
@@ -34,6 +71,66 @@ export async function loadExistingOrders(
     select: existingSelect,
   });
   return new Map(rows.map((r) => [r.orderSn, r]));
+}
+
+/**
+ * Ensures every listing variation referenced by a batch of orders exists and
+ * has a GarmentVariant, preloading already-linked rows in one query so hot
+ * sync pages do zero redundant listing upserts.
+ */
+export async function ensureListingsForBatch(
+  shopConnectionId: string,
+  platform: Platform,
+  orders: NormalizedOrder[],
+  now: Date,
+  seenListings: Set<string>
+): Promise<void> {
+  const pending = new Map<string, NormalizedOrder["lines"][number]>();
+  const listingIds = new Set<string>();
+
+  for (const o of orders) {
+    for (const l of o.lines) {
+      if (!l.listingId || !l.variationId) continue;
+      const key = `${shopConnectionId}:${l.listingId}:${l.variationId}`;
+      if (seenListings.has(key) || pending.has(key)) continue;
+      pending.set(key, l);
+      listingIds.add(l.listingId);
+    }
+  }
+  if (!pending.size) return;
+
+  const existing = await prisma.listingVariant.findMany({
+    where: { shopConnectionId, listingId: { in: [...listingIds] } },
+    select: { listingId: true, variationId: true, garmentVariantId: true },
+  });
+  for (const row of existing) {
+    if (!row.garmentVariantId) continue;
+    const key = `${shopConnectionId}:${row.listingId}:${row.variationId}`;
+    seenListings.add(key);
+    pending.delete(key);
+  }
+
+  for (const [key, l] of pending) {
+    const listing = {
+      name: l.name,
+      variationName: l.variationName,
+      imageUrl: l.imageUrl,
+      lastSeenAt: now,
+    };
+    const lv = await prisma.listingVariant.upsert({
+      where: {
+        shopConnectionId_listingId_variationId: {
+          shopConnectionId,
+          listingId: l.listingId,
+          variationId: l.variationId,
+        },
+      },
+      create: { shopConnectionId, platform, listingId: l.listingId, variationId: l.variationId, ...listing },
+      update: { ...listing, imageUrl: l.imageUrl ?? undefined },
+    });
+    if (!lv.garmentVariantId) await ensureGarmentFor(lv);
+    seenListings.add(key);
+  }
 }
 
 /**
@@ -50,6 +147,8 @@ export async function saveOrder(
     existing?: ExistingOrderSnapshot | null;
     /** Listings already ensured in this sync pass (avoids redundant upserts per order). */
     seenListings?: Set<string>;
+    /** Set true when caller already ran `ensureListingsForBatch`. */
+    skipListingEnsure?: boolean;
   }
 ): Promise<"saved" | "stale" | "unchanged"> {
   const existing =
@@ -74,82 +173,149 @@ export async function saveOrder(
     cancelRequested: n.cancelRequested,
   };
 
-  await prisma.$transaction(async (tx) => {
-    const order = await tx.order.upsert({
-      where: { platform_orderSn: { platform, orderSn: n.orderSn } },
-      create: { shopConnectionId, platform, orderSn: n.orderSn, ...orderData },
-      update: orderData,
-      select: { id: true },
-    });
+  const linesAlreadySaved = Boolean(existing && existing._count.lines === n.lines.length && n.lines.length > 0);
+  const packagesUnchanged = Boolean(existing && arePackagesUnchanged(existing.packages, n.packages));
 
-    await tx.orderLine.deleteMany({ where: { orderId: order.id } });
-    if (n.lines.length) {
-      await tx.orderLine.createMany({
-        data: n.lines.map((l) => ({
-          orderId: order.id,
-          listingId: l.listingId,
-          variationId: l.variationId,
-          name: l.name,
-          variationName: l.variationName,
-          imageUrl: l.imageUrl,
-          quantity: l.quantity,
-          unitPricePhp: new Prisma.Decimal(l.unitPricePhp.toFixed(2)),
-        })),
+  if (existing && linesAlreadySaved && packagesUnchanged) {
+    // Fast path: only order-level fields changed (e.g. status transition). One DB round-trip.
+    await prisma.order.update({
+      where: { id: existing.id },
+      data: orderData,
+    });
+  } else {
+    await prisma.$transaction(async (tx) => {
+      const order = await tx.order.upsert({
+        where: { platform_orderSn: { platform, orderSn: n.orderSn } },
+        create: { shopConnectionId, platform, orderSn: n.orderSn, ...orderData },
+        update: orderData,
+        select: { id: true },
       });
-    }
 
-    // Packages keep their row (later tasks hang shipping state on them), so
-    // upsert instead of replace, and drop only packages the platform removed
-    // (split / combine).
-    const numbers = n.packages.map((p) => p.packageNumber);
-    await tx.package.deleteMany({
-      where: { orderId: order.id, ...(numbers.length ? { packageNumber: { notIn: numbers } } : {}) },
+      if (!linesAlreadySaved) {
+        await tx.orderLine.deleteMany({ where: { orderId: order.id } });
+        if (n.lines.length) {
+          await tx.orderLine.createMany({
+            data: n.lines.map((l) => ({
+              orderId: order.id,
+              listingId: l.listingId,
+              variationId: l.variationId,
+              name: l.name,
+              variationName: l.variationName,
+              imageUrl: l.imageUrl,
+              quantity: l.quantity,
+              unitPricePhp: new Prisma.Decimal(l.unitPricePhp.toFixed(2)),
+            })),
+          });
+        }
+      }
+
+      if (!packagesUnchanged) {
+        // Packages keep their row (later tasks hang shipping state on them), so
+        // upsert instead of replace, and drop only packages the platform removed
+        // (split / combine).
+        const numbers = n.packages.map((p) => p.packageNumber);
+        await tx.package.deleteMany({
+          where: { orderId: order.id, ...(numbers.length ? { packageNumber: { notIn: numbers } } : {}) },
+        });
+        for (const p of n.packages) {
+          const data = {
+            trackingNumber: p.trackingNumber,
+            carrier: p.carrier,
+            channelId: p.channelId,
+            status: p.status,
+          };
+          await tx.package.upsert({
+            where: { orderId_packageNumber: { orderId: order.id, packageNumber: p.packageNumber } },
+            create: { orderId: order.id, packageNumber: p.packageNumber, ...data },
+            update: {
+              ...data,
+              // Never erase a tracking number we already have.
+              trackingNumber: p.trackingNumber ?? undefined,
+            },
+          });
+        }
+      }
     });
-    for (const p of n.packages) {
-      const data = {
-        trackingNumber: p.trackingNumber,
-        carrier: p.carrier,
-        channelId: p.channelId,
-        status: p.status,
+  }
+
+  if (!opts?.skipListingEnsure) {
+    for (const l of n.lines) {
+      if (!l.listingId || !l.variationId) continue;
+      const listingKey = `${shopConnectionId}:${l.listingId}:${l.variationId}`;
+      if (opts?.seenListings?.has(listingKey)) continue;
+      const listing = {
+        name: l.name,
+        variationName: l.variationName,
+        imageUrl: l.imageUrl,
+        lastSeenAt: now,
       };
-      await tx.package.upsert({
-        where: { orderId_packageNumber: { orderId: order.id, packageNumber: p.packageNumber } },
-        create: { orderId: order.id, packageNumber: p.packageNumber, ...data },
-        update: {
-          ...data,
-          // Never erase a tracking number we already have.
-          trackingNumber: p.trackingNumber ?? undefined,
+      const lv = await prisma.listingVariant.upsert({
+        where: {
+          shopConnectionId_listingId_variationId: {
+            shopConnectionId,
+            listingId: l.listingId,
+            variationId: l.variationId,
+          },
         },
+        create: { shopConnectionId, platform, listingId: l.listingId, variationId: l.variationId, ...listing },
+        update: { ...listing, imageUrl: l.imageUrl ?? undefined },
       });
+      if (!lv.garmentVariantId) await ensureGarmentFor(lv);
+      opts?.seenListings?.add(listingKey);
     }
-  });
-
-  for (const l of n.lines) {
-    if (!l.listingId || !l.variationId) continue;
-    const listingKey = `${shopConnectionId}:${l.listingId}:${l.variationId}`;
-    if (opts?.seenListings?.has(listingKey)) continue;
-    const listing = {
-      name: l.name,
-      variationName: l.variationName,
-      imageUrl: l.imageUrl,
-      lastSeenAt: now,
-    };
-    const lv = await prisma.listingVariant.upsert({
-      where: {
-        shopConnectionId_listingId_variationId: {
-          shopConnectionId,
-          listingId: l.listingId,
-          variationId: l.variationId,
-        },
-      },
-      create: { shopConnectionId, platform, listingId: l.listingId, variationId: l.variationId, ...listing },
-      update: { ...listing, imageUrl: l.imageUrl ?? undefined },
-    });
-    if (!lv.garmentVariantId) await ensureGarmentFor(lv);
-    opts?.seenListings?.add(listingKey);
   }
 
   return "saved";
+}
+
+/**
+ * Saves a page of normalized orders in bounded parallel chunks after
+ * preloading existing order snapshots and listing links in two batch queries.
+ */
+export async function saveOrderBatch(
+  shopConnectionId: string,
+  platform: Platform,
+  batch: NormalizedOrder[],
+  opts?: {
+    now?: Date;
+    seenListings?: Set<string>;
+    concurrency?: number;
+    beforeChunk?: () => void;
+    onChunkDone?: (chunk: NormalizedOrder[]) => void;
+  }
+): Promise<{ saved: number }> {
+  if (!batch.length) return { saved: 0 };
+  const now = opts?.now ?? new Date();
+  const seenListings = opts?.seenListings ?? new Set<string>();
+  const concurrency = Math.max(1, opts?.concurrency ?? 6);
+
+  const [existingBySn] = await Promise.all([
+    loadExistingOrders(
+      platform,
+      batch.map((o) => o.orderSn)
+    ),
+    ensureListingsForBatch(shopConnectionId, platform, batch, now, seenListings),
+  ]);
+
+  let saved = 0;
+  for (let i = 0; i < batch.length; i += concurrency) {
+    opts?.beforeChunk?.();
+    const chunk = batch.slice(i, i + concurrency);
+    const outcomes = await Promise.all(
+      chunk.map((order) =>
+        saveOrder(shopConnectionId, platform, order, now, {
+          existing: existingBySn.get(order.orderSn) ?? null,
+          seenListings,
+          skipListingEnsure: true,
+        })
+      )
+    );
+    for (const outcome of outcomes) {
+      if (outcome === "saved") saved++;
+    }
+    opts?.onChunkDone?.(chunk);
+  }
+  return { saved };
 }
 
 /** Deletes finished orders older than the retention window. */

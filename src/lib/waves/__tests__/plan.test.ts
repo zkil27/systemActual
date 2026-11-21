@@ -1,6 +1,17 @@
 import { Platform } from "@prisma/client";
 import { describe, expect, it } from "vitest";
-import { pickListPages, planWave, shipBlocker, summarizeWave, type WaveCandidate } from "@/lib/waves/plan";
+import {
+  groupPickItems,
+  matchParcelsForVariant,
+  parsePickItemLabel,
+  pickListPages,
+  planWave,
+  shipBlocker,
+  shortenGarmentName,
+  summarizeWave,
+  type WaveCandidate,
+  type WaveParcel,
+} from "@/lib/waves/plan";
 import { mapShopeeOrder, mapTikTokOrder } from "@/lib/ledger/normalize";
 
 const now = new Date("2026-11-21T02:00:00Z");
@@ -128,5 +139,254 @@ describe("summary and pick list", () => {
     expect(pages.every((p) => p.length <= 25)).toBe(true);
     expect(pages.flat().every((l) => l.length <= 44)).toBe(true);
     expect(pages[2][0]).toBe("Page 3/3");
+  });
+
+  it("separates multiple courier/shop groups with a divider line", () => {
+    const multiGroup = planWave([
+      cand("s1", { platform: Platform.SHOPEE, carrier: "SPX Express", channelId: "spx" }),
+      cand("t1", { platform: Platform.TIKTOK, carrier: "J&T Express", channelId: "jt" }),
+    ]);
+    const pages = pickListPages(summarizeWave(multiGroup, skipped), now);
+    expect(pages[0]).toContain("--------------------------------------------");
+  });
+
+  it("shortens long SEO garment names in 4x6 pick lists so variations stay visible", () => {
+    const seoPlanned = planWave([
+      cand("s1", {
+        lines: [
+          {
+            key: "jb-emerald",
+            label:
+              "Kyna PH Jacquard Brocade Skorts for Women High Waist A-Line Mini Skirt with Elastic Waist Comfortable and Casual Summer Wear Machine Washable Basic Style Sleeveless Comfy Short Lingerie - JB Emerald, 2XL (39-42)",
+            quantity: 1,
+          },
+          {
+            key: "floral-38",
+            label:
+              "Women’s Casual Floral Skort Summer with inner short A-Line Mini Skirt Shorts - Print 38, XL (30-40)",
+            quantity: 3,
+          },
+        ],
+      }),
+    ]);
+    const pages = pickListPages(summarizeWave(seoPlanned, skipped), now);
+    expect(pages.flat().every((l) => l.length <= 44)).toBe(true);
+    expect(pages[0].some((l) => l.includes("Jacquard Brocade Skorts - JB"))).toBe(true);
+    expect(pages[0].some((l) => l.includes("3 x Casual Floral Skort - Print 38"))).toBe(true);
+  });
+});
+
+describe("pick list readability helpers", () => {
+  const SCREENSHOT_LABELS = [
+    {
+      label:
+        "Kyna Palda Short Corduroy Korean Inspired Skort for Women - Trendy and Comfortable Bottoms for Daily Wear - Blouse - Taupe, Medium 26-30",
+      qty: 1,
+    },
+    {
+      label:
+        "Kyna PH Jacquard Brocade Skorts for Women High Waist A-Line Mini Skirt with Elastic Waist Comfortable and Casual Summer Wear Machine Washable Basic Style Sleeveless Comfy Short Lingerie - JB Emerald, 2XL (39-42)",
+      qty: 1,
+    },
+    {
+      label:
+        "Kyna PH Jacquard Brocade Skorts for Women High Waist A-Line Mini Skirt with Elastic Waist Comfortable and Casual Summer Wear Machine Washable Basic Style Sleeveless Comfy Short Lingerie - JB Maroon, 2XL (39-42)",
+      qty: 1,
+    },
+    {
+      label:
+        "Kyna Top Skirt Coords - Floral Print, Short Sleeve, Round Neck, Casual Style, Perfect for Daily Wear - RB olive stripe, M (27-32)",
+      qty: 1,
+    },
+    {
+      label:
+        "Kyna Top Skirt Coords - Floral Print, Short Sleeve, Round Neck, Casual Style, Perfect for Daily Wear - RB Print 3, M (27-32)",
+      qty: 1,
+    },
+    {
+      label:
+        "Women’s Casual Floral Skort Summer with inner short A-Line Mini Skirt Shorts - Print 38, XL (30-40)",
+      qty: 3,
+    },
+    {
+      label:
+        "Women’s Casual Floral Skort Summer with inner short A-Line Mini Skirt Shorts - print 7, XL (30-40)",
+      qty: 1,
+    },
+  ];
+
+  it("strips SEO filler and brand prefixes in shortenGarmentName", () => {
+    expect(
+      shortenGarmentName(
+        "Kyna Palda Short Corduroy Korean Inspired Skort for Women - Trendy and Comfortable Bottoms for Daily Wear"
+      )
+    ).toBe("Palda Short Corduroy Skort");
+    expect(
+      shortenGarmentName(
+        "Kyna PH Jacquard Brocade Skorts for Women High Waist A-Line Mini Skirt with Elastic Waist Comfortable and Casual Summer Wear Machine Washable Basic Style Sleeveless Comfy Short Lingerie"
+      )
+    ).toBe("Jacquard Brocade Skorts");
+    expect(
+      shortenGarmentName(
+        "Kyna Top Skirt Coords - Floral Print, Short Sleeve, Round Neck, Casual Style, Perfect for Daily Wear"
+      )
+    ).toBe("Top Skirt Coords");
+    expect(
+      shortenGarmentName("Women’s Casual Floral Skort Summer with inner short A-Line Mini Skirt Shorts")
+    ).toBe("Casual Floral Skort");
+    expect(shortenGarmentName("[COD] Kyna PH - Ribbed Cotton Top (Ready Stock)")).toBe("Ribbed Cotton Top");
+    expect(shortenGarmentName("Top")).toBe("Top");
+  });
+
+  it("parses colour, size, and short qualifiers cleanly in parsePickItemLabel", () => {
+    expect(parsePickItemLabel(SCREENSHOT_LABELS[0].label)).toMatchObject({
+      shortGarmentName: "Palda Short Corduroy Skort",
+      variation: "Blouse - Taupe, Medium 26-30",
+      color: "Blouse - Taupe",
+      size: "Medium 26-30",
+    });
+    expect(parsePickItemLabel(SCREENSHOT_LABELS[1].label)).toMatchObject({
+      shortGarmentName: "Jacquard Brocade Skorts",
+      variation: "JB Emerald, 2XL (39-42)",
+      color: "JB Emerald",
+      size: "2XL (39-42)",
+    });
+    expect(parsePickItemLabel(SCREENSHOT_LABELS[3].label)).toMatchObject({
+      shortGarmentName: "Top Skirt Coords",
+      variation: "RB olive stripe, M (27-32)",
+      color: "RB olive stripe",
+      size: "M (27-32)",
+    });
+    expect(parsePickItemLabel(SCREENSHOT_LABELS[5].label)).toMatchObject({
+      shortGarmentName: "Casual Floral Skort",
+      variation: "Print 38, XL (30-40)",
+      color: "Print 38",
+      size: "XL (30-40)",
+    });
+    expect(
+      parsePickItemLabel(
+        "Kyna Top Skirt Coords - Floral Print, Short Sleeve, Round Neck, Casual Style, Perfect for Daily Wear"
+      )
+    ).toMatchObject({
+      shortGarmentName: "Top Skirt Coords",
+      variation: null,
+      color: null,
+      size: null,
+    });
+    expect(parsePickItemLabel("Ribbed Top - Free size")).toMatchObject({
+      shortGarmentName: "Ribbed Top",
+      variation: "Free size",
+      color: "Free size",
+      size: null,
+    });
+  });
+
+  it("groups repeated variations under one garment header in first-appearance order", () => {
+    const grouped = groupPickItems(SCREENSHOT_LABELS);
+    expect(grouped.map((g) => ({ shortName: g.shortName, totalQty: g.totalQty, count: g.variants.length }))).toEqual([
+      { shortName: "Palda Short Corduroy Skort", totalQty: 1, count: 1 },
+      { shortName: "Jacquard Brocade Skorts", totalQty: 2, count: 2 },
+      { shortName: "Top Skirt Coords", totalQty: 2, count: 2 },
+      { shortName: "Casual Floral Skort", totalQty: 4, count: 2 },
+    ]);
+    expect(grouped[3].variants).toEqual([
+      {
+        label: SCREENSHOT_LABELS[5].label,
+        variation: "Print 38, XL (30-40)",
+        color: "Print 38",
+        size: "XL (30-40)",
+        qty: 3,
+      },
+      {
+        label: SCREENSHOT_LABELS[6].label,
+        variation: "print 7, XL (30-40)",
+        color: "print 7",
+        size: "XL (30-40)",
+        qty: 1,
+      },
+    ]);
+  });
+
+  it("matches parcels for a pick-list variant within the same group in print order", () => {
+    const makeParcel = (
+      id: string,
+      position: number,
+      groupKey: string,
+      labels: Array<{ label: string; qty?: number }>
+    ): WaveParcel => ({
+      id,
+      packageId: `pkg-${id}`,
+      orderId: `ord-${id}`,
+      orderSn: `SN-${id}`,
+      platform: "TIKTOK",
+      shopName: "Kyna TikTok",
+      groupKey,
+      position,
+      totalInWave: 4,
+      status: "READY",
+      orderStatus: "AWAITING_SHIPMENT",
+      error: null,
+      courier: "J&T Express",
+      trackingNumber: null,
+      packageNumber: `P-${id}`,
+      isCod: true,
+      totalPhp: 299,
+      createdAt: "2026-11-21T02:00:00.000Z",
+      shippedAt: null,
+      totalPieces: labels.reduce((s, l) => s + (l.qty ?? 1), 0),
+      lines: labels.map((l, idx) => ({
+        id: `${id}-l${idx}`,
+        key: `${id}-k${idx}`,
+        label: l.label,
+        name: l.label,
+        shortName: l.label,
+        variationName: null,
+        color: null,
+        size: null,
+        imageUrl: null,
+        quantity: l.qty ?? 1,
+        unitPricePhp: 299,
+      })),
+    });
+
+    const parcels: WaveParcel[] = [
+      makeParcel("p3", 3, "TIKTOK|jt", [
+        { label: "Palda Short Corduroy Skort - Blouse - Maroon, Medium 27-31 waist", qty: 1 },
+        { label: "Jacquard Brocade Skorts - JB Black, XL (35-38)", qty: 1 },
+      ]),
+      makeParcel("p1", 1, "TIKTOK|jt", [
+        { label: "Palda Short Corduroy Skort - Blouse - Maroon, Medium 27-31 waist", qty: 1 },
+      ]),
+      makeParcel("p2", 2, "SHOPEE|spx", [
+        { label: "Palda Short Corduroy Skort - Blouse - Maroon, Medium 27-31 waist", qty: 1 },
+      ]),
+      makeParcel("p4", 4, "TIKTOK|jt", [
+        { label: "Jacquard Brocade Skorts - JB Black, XL (35-38)", qty: 2 },
+      ]),
+    ];
+
+    // Exact match within groupKey, sorted ascending by position, excluding other groups.
+    const maroonMatches = matchParcelsForVariant(
+      parcels,
+      "TIKTOK|jt",
+      "Palda Short Corduroy Skort - Blouse - Maroon, Medium 27-31 waist"
+    );
+    expect(maroonMatches.map((p) => p.id)).toEqual(["p1", "p3"]);
+
+    // Multi-item parcel p3 is matched for both of its items.
+    const jbMatches = matchParcelsForVariant(
+      parcels,
+      "TIKTOK|jt",
+      "Jacquard Brocade Skorts - JB Black, XL (35-38)"
+    );
+    expect(jbMatches.map((p) => p.id)).toEqual(["p3", "p4"]);
+
+    // Fallback normalized matching (e.g. if listing prefix changed after preview snapshot).
+    const fallbackMatches = matchParcelsForVariant(
+      parcels,
+      "TIKTOK|jt",
+      "Kyna PH Jacquard Brocade Skorts for Women High Waist - JB Black, XL (35-38)"
+    );
+    expect(fallbackMatches.map((p) => p.id)).toEqual(["p3", "p4"]);
   });
 });

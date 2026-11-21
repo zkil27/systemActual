@@ -3,7 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarCheck2, PackageSearch, ScanBarcode, Settings2, type LucideIcon } from "lucide-react";
+import {
+  CalendarCheck2,
+  FileUp,
+  PackageSearch,
+  Printer,
+  ScanBarcode,
+  Settings2,
+  Shirt,
+  type LucideIcon,
+} from "lucide-react";
 import { Toaster } from "@/components/ui/Toast";
 import { formatBadgeCount } from "@/lib/ui/format";
 
@@ -16,12 +25,13 @@ interface AppShellProps {
   headerRight?: React.ReactNode;
   /** Pass on screens that know the count; others reuse the last known value. */
   missingCount?: number;
+  /** Content max-width on desktop; "wide" opens up to max-w-6xl. */
+  width?: "default" | "wide";
 }
 
 interface Tab {
   href: string;
   label: string;
-  desktopLabel?: string;
   icon: LucideIcon;
   match: (path: string) => boolean;
   badge?: boolean;
@@ -29,23 +39,84 @@ interface Tab {
 
 const TABS: Tab[] = [
   { href: "/", label: "Today", icon: CalendarCheck2, match: (p) => p === "/" },
+  { href: "/waves", label: "Ship", icon: Printer, match: (p) => p.startsWith("/waves") },
   {
     href: "/returns?filter=missing",
-    label: "Missing",
-    desktopLabel: "Returns",
+    label: "Returns",
+    icon: PackageSearch,
+    match: (p) => p.startsWith("/returns"),
+    badge: true,
+  },
+  { href: "/items", label: "Stock", icon: Shirt, match: (p) => p.startsWith("/items") },
+  { href: "/scan", label: "Scan", icon: ScanBarcode, match: (p) => p.startsWith("/scan") },
+];
+
+const SIDEBAR_PRIMARY: Tab[] = [
+  { href: "/", label: "Today", icon: CalendarCheck2, match: (p) => p === "/" },
+  {
+    href: "/returns?filter=missing",
+    label: "Returns",
     icon: PackageSearch,
     match: (p) => p.startsWith("/returns"),
     badge: true,
   },
   { href: "/scan", label: "Scan", icon: ScanBarcode, match: (p) => p.startsWith("/scan") },
-  {
-    href: "/settings",
-    label: "More",
-    desktopLabel: "Settings",
-    icon: Settings2,
-    match: (p) => p.startsWith("/settings") || p.startsWith("/imports"),
-  },
 ];
+
+const SIDEBAR_OPS: Tab[] = [
+  { href: "/items", label: "Items & stock", icon: Shirt, match: (p) => p.startsWith("/items") },
+  { href: "/waves", label: "Waves & pick lists", icon: Printer, match: (p) => p.startsWith("/waves") },
+  { href: "/imports", label: "Upload a file", icon: FileUp, match: (p) => p.startsWith("/imports") },
+];
+
+const SIDEBAR_FOOTER: Tab[] = [
+  { href: "/settings", label: "Settings", icon: Settings2, match: (p) => p.startsWith("/settings") },
+];
+
+function SidebarList({
+  items,
+  pathname,
+  badge,
+  className = "",
+}: {
+  items: Tab[];
+  pathname: string;
+  badge: string | null;
+  className?: string;
+}) {
+  return (
+    <ul className={`space-y-1 ${className}`}>
+      {items.map((item) => {
+        const Icon = item.icon;
+        const active = item.match(pathname);
+        return (
+          <li key={item.href}>
+            <Link
+              href={item.href}
+              aria-current={active ? "page" : undefined}
+              className={`pressable flex h-11 items-center gap-3 rounded-[var(--radius-control)] px-3 text-[15px] font-semibold ${
+                active
+                  ? "bg-white text-ink shadow-[var(--shadow-card)]"
+                  : "text-ink-2 hover:bg-black/[0.04] hover:text-ink"
+              }`}
+            >
+              <Icon
+                className={`h-5 w-5 shrink-0 ${active ? "text-brand" : "text-ink-3"}`}
+                strokeWidth={active ? 2.3 : 1.9}
+              />
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              {item.badge && badge && (
+                <span className="tabular-nums rounded-full bg-missing px-1.5 py-0.5 text-[11px] font-bold leading-none text-white">
+                  {badge}
+                </span>
+              )}
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 // Every page mounts its own shell. These survive client navigation so the
 // tab indicator can slide from the old tab and the badge doesn't pop again.
@@ -58,9 +129,11 @@ export function AppShell({
   titleAccessory,
   headerRight,
   missingCount,
+  width = "default",
 }: AppShellProps) {
   const pathname = usePathname();
   const activeIndex = TABS.findIndex((t) => t.match(pathname));
+  const maxW = width === "wide" ? "max-w-6xl" : "max-w-3xl";
 
   const [indicatorIndex, setIndicatorIndex] = useState(
     lastTabIndex >= 0 ? lastTabIndex : activeIndex
@@ -92,7 +165,22 @@ export function AppShell({
   }, []);
 
   return (
-    <div className="min-h-dvh pb-[calc(max(12px,env(safe-area-inset-bottom))+100px)] md:pb-16">
+    <div className="min-h-dvh pb-[calc(max(12px,env(safe-area-inset-bottom))+100px)] lg:pb-16 lg:pl-60">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-hairline bg-ground px-3 pb-4 lg:flex">
+        <Link
+          href="/"
+          className="flex h-16 shrink-0 items-center px-3 text-[17px] font-extrabold tracking-tight text-ink"
+        >
+          Kyna Ops
+        </Link>
+        <nav aria-label="Primary" className="flex min-h-0 flex-1 flex-col">
+          <SidebarList items={SIDEBAR_PRIMARY} pathname={pathname} badge={badge} />
+          <hr className="mx-3 my-3 border-hairline" />
+          <SidebarList items={SIDEBAR_OPS} pathname={pathname} badge={badge} />
+          <SidebarList items={SIDEBAR_FOOTER} pathname={pathname} badge={badge} className="mt-auto" />
+        </nav>
+      </aside>
+
       <header
         className={`safe-top sticky top-0 z-30 transition-[background-color,border-color,backdrop-filter] duration-200 ${
           collapsed
@@ -100,51 +188,35 @@ export function AppShell({
             : "border-b border-transparent bg-ground"
         }`}
       >
-        <div className="relative mx-auto flex h-12 max-w-3xl items-center justify-between px-5 md:h-16">
-          <div className="flex items-center gap-8">
-            <Link href="/" className="hidden text-[17px] font-extrabold tracking-tight text-ink md:block">
-              Kyna Ops
-            </Link>
-            <nav aria-label="Primary" className="hidden items-center gap-1 md:flex">
-              {TABS.map((tab, i) => {
-                const active = i === activeIndex;
-                return (
-                  <Link
-                    key={tab.href}
-                    href={tab.href}
-                    aria-current={active ? "page" : undefined}
-                    className={`pressable inline-flex h-10 items-center gap-2 rounded-full px-3.5 text-sm font-semibold ${
-                      active ? "bg-white text-ink shadow-[var(--shadow-card)]" : "text-ink-2 hover:text-ink"
-                    }`}
-                  >
-                    {tab.desktopLabel ?? tab.label}
-                    {tab.badge && badge && (
-                      <span className="tabular-nums rounded-full bg-missing px-1.5 py-0.5 text-[11px] font-bold leading-none text-white">
-                        {badge}
-                      </span>
-                    )}
-                  </Link>
-                );
-              })}
-            </nav>
-          </div>
-
-          {/* Compact title (mobile), fades in when the large title is gone */}
+        <div className={`relative mx-auto flex h-12 items-center justify-between px-5 lg:h-16 lg:px-8 ${maxW}`}>
+          {/* Compact title, fades in when the large title scrolls under the bar */}
           <p
             aria-hidden={!collapsed}
-            className={`pointer-events-none absolute inset-x-20 text-center text-[17px] font-bold text-ink transition-[opacity,translate] duration-200 ease-[var(--ease-ios)] md:hidden ${
+            className={`pointer-events-none absolute left-20 right-20 text-center text-[17px] font-bold text-ink transition-[opacity,translate] duration-200 ease-[var(--ease-ios)] lg:left-8 lg:right-auto lg:text-left ${
               collapsed ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0"
             }`}
           >
             {title}
           </p>
 
-          <div className="ml-auto flex items-center gap-1">{headerRight}</div>
+          <div className="ml-auto flex items-center gap-1">
+            {headerRight}
+            {pathname !== "/settings" && (
+              <Link
+                href="/settings"
+                aria-label="Settings"
+                title="Settings"
+                className="pressable flex h-11 w-11 items-center justify-center rounded-full text-ink-2 hover:bg-black/[0.04] lg:hidden"
+              >
+                <Settings2 className="h-[22px] w-[22px]" />
+              </Link>
+            )}
+          </div>
         </div>
       </header>
 
-      <main className="anim-page-in mx-auto max-w-3xl px-5">
-        <div className="flex min-h-12 flex-wrap items-center gap-x-3 gap-y-1 pb-6 pt-1 md:pt-4">
+      <main className={`anim-page-in mx-auto px-5 lg:px-8 ${maxW}`}>
+        <div className="flex min-h-12 flex-wrap items-center gap-x-3 gap-y-1 pb-6 pt-1 lg:pt-2">
           <h1
             ref={titleRef}
             className="text-[34px] font-extrabold leading-[1.1] tracking-[-0.025em] text-ink"
@@ -159,16 +231,16 @@ export function AppShell({
       {/* Floating pill tab bar. Sits above the home indicator, not flush with the edge. */}
       <nav
         aria-label="Tabs"
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-4 pb-[max(12px,env(safe-area-inset-bottom))] md:hidden"
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-3 pb-[max(12px,env(safe-area-inset-bottom))] lg:hidden"
       >
-        <div className="pointer-events-auto relative mx-auto grid h-16 max-w-sm grid-cols-4 rounded-full bg-white/80 p-1.5 shadow-[0_10px_30px_-8px_rgb(15_23_42/0.25),0_0_0_1px_rgb(15_23_42/0.06)] backdrop-blur-xl backdrop-saturate-150">
+        <div className="pointer-events-auto relative mx-auto grid h-16 max-w-md grid-cols-5 rounded-full bg-white/80 p-1.5 shadow-[0_10px_30px_-8px_rgb(15_23_42/0.25),0_0_0_1px_rgb(15_23_42/0.06)] backdrop-blur-xl backdrop-saturate-150">
           {indicatorIndex >= 0 && (
             <span
               aria-hidden="true"
               data-motion="slide"
               className="absolute inset-y-1.5 left-1.5 rounded-full bg-brand/10 transition-transform duration-300 ease-[var(--ease-ios)]"
               style={{
-                width: "calc((100% - 12px) / 4)",
+                width: "calc((100% - 12px) / 5)",
                 transform: `translateX(${indicatorIndex * 100}%)`,
               }}
             />
@@ -205,7 +277,7 @@ export function AppShell({
         </div>
       </nav>
 
-      <Toaster />
+      <Toaster className="lg:pl-60" />
     </div>
   );
 }

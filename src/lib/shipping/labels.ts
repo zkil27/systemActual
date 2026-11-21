@@ -6,6 +6,33 @@ import { DOC_TYPE } from "./shopee-rules";
 import { tiktokLabel } from "./tiktok-rules";
 import { tiktokShippingDocument } from "./tiktok-engine";
 
+/** Fetches a single merged multi-page Shopee label PDF for a batch of packages (up to 50). */
+export async function fetchBatchLabelPdf(packageIds: string[]): Promise<Buffer> {
+  if (!packageIds.length) throw new Error("Label batch has no parcels.");
+  if (packageIds.length === 1) return fetchLabelPdf(packageIds[0]);
+
+  const pkgs = await prisma.package.findMany({
+    where: { id: { in: packageIds } },
+    include: { order: { include: { shopConnection: true } } },
+  });
+  const byId = new Map(pkgs.map((p) => [p.id, p]));
+  const ordered = packageIds.map((id) => byId.get(id)).filter((p): p is NonNullable<typeof p> => Boolean(p));
+  if (!ordered.length) throw new Error("These parcels are no longer in the system.");
+
+  const shop = ordered[0].order.shopConnection;
+  if (shop.platform !== Platform.SHOPEE) {
+    return fetchLabelPdf(ordered[0].id);
+  }
+  const token = await ensureFreshToken(shop);
+  return shopeePostFile("/api/v2/logistics/download_shipping_document", shop.shopId, token, {
+    shipping_document_type: DOC_TYPE,
+    order_list: ordered.map((pkg) => ({
+      order_sn: pkg.order.orderSn,
+      package_number: pkg.packageNumber,
+    })),
+  });
+}
+
 /** The shop's own label PDF, fetched when the PC prints it (never stored). */
 export async function fetchLabelPdf(packageId: string): Promise<Buffer> {
   const pkg = await prisma.package.findUnique({

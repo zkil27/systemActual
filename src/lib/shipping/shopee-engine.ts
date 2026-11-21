@@ -11,7 +11,7 @@ import {
   itemInclude,
   later,
   markShipRequested,
-  queueLabel,
+  queueLabelBatch,
   retry,
   wait,
   type Item,
@@ -106,7 +106,7 @@ async function shipBatch(shop: ShopConnection, token: string, deadline: number):
     const resp = await shopeePost("/api/v2/logistics/mass_ship_order", shop.shopId, token, {
       ...channel,
       package_list: shipNumbers.map((n) => ({ package_number: n })),
-      pickup: pickup.pickup,
+      ...(pickup.pickup ? { pickup: pickup.pickup } : { dropoff: pickup.dropoff }),
     });
     const res = splitPackageResults(shipNumbers, resp);
     for (const i of shippable) {
@@ -211,10 +211,14 @@ async function docResultBatch(shop: ShopConnection, token: string, waveTotals: M
     console.error("[shopee] doc result", err);
   }
   const now = new Date();
+  const readyByGroup = new Map<string, Item[]>();
   for (const i of items) {
     const st = statuses.get(i.package.packageNumber);
     if (st?.status === "READY") {
-      await queueLabel(i, WaveItemStatus.TRACKING_ASSIGNED, waveTotals, now);
+      const key = `${i.waveId}:${i.groupKey}`;
+      const list = readyByGroup.get(key) ?? [];
+      list.push(i);
+      readyByGroup.set(key, list);
     } else if (st?.status === "FAILED") {
       // Ask Shopee to make it again; give up after a few tries (still locked: it's shipped).
       const attempts = i.attempts + 1;
@@ -227,6 +231,11 @@ async function docResultBatch(shop: ShopConnection, token: string, waveTotals: M
       });
     } else {
       await wait([i], DOC_POLL_MS, "Shopee is making the label");
+    }
+  }
+  for (const group of readyByGroup.values()) {
+    for (let idx = 0; idx < group.length; idx += 50) {
+      await queueLabelBatch(group.slice(idx, idx + 50), WaveItemStatus.TRACKING_ASSIGNED, waveTotals, now);
     }
   }
   return items.length;

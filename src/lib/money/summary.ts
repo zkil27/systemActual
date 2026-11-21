@@ -42,7 +42,11 @@ export function summarizeMoney(
   };
 }
 
-export async function getMoneySummary(start: Date, end: Date): Promise<MoneySummary> {
+export async function getMoneySummary(
+  start: Date,
+  end: Date,
+  shopsOverride?: Array<{ isDemo: boolean; accessToken: string | null; walletCheckedAt: Date | null }>
+): Promise<MoneySummary> {
   const [grouped, orders, shops] = await Promise.all([
     prisma.walletTransaction.groupBy({
       by: ["platform", "kind"],
@@ -50,14 +54,20 @@ export async function getMoneySummary(start: Date, end: Date): Promise<MoneySumm
       _sum: { amountPhp: true },
     }),
     prisma.order.aggregate({
-      where: { platformCreatedAt: { gte: start, lt: end }, status: { not: "UNPAID" } },
+      where: { platformCreatedAt: { gte: start, lt: end }, status: { notIn: ["UNPAID", "CANCELLED"] } },
       _count: { _all: true },
       _sum: { totalPhp: true },
     }),
-    prisma.shopConnection.findMany({
-      where: { isDemo: false, accessToken: { not: null } },
-      select: { walletCheckedAt: true },
-    }),
+    shopsOverride !== undefined
+      ? Promise.resolve(
+          shopsOverride
+            .filter((s) => !s.isDemo && Boolean(s.accessToken))
+            .map((s) => ({ walletCheckedAt: s.walletCheckedAt }))
+        )
+      : prisma.shopConnection.findMany({
+          where: { isDemo: false, accessToken: { not: null } },
+          select: { walletCheckedAt: true },
+        }),
   ]);
 
   const checked = shops.map((s) => s.walletCheckedAt);

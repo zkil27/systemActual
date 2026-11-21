@@ -213,7 +213,9 @@ export function mapFailedDelivery(
   }));
   const pkg = order.packages.find((p) => p.trackingNumber) ?? order.packages[0];
   const returnedAt = findReturnedToSeller(events);
-  const taggedAt = findDeliveryFailed(events) ?? order.platformUpdatedAt;
+  const rawTaggedAt = findDeliveryFailed(events) ?? returnedAt ?? order.platformUpdatedAt;
+  const taggedAt =
+    returnedAt && rawTaggedAt.getTime() > returnedAt.getTime() ? returnedAt : rawTaggedAt;
   return {
     shopConnectionId,
     platform,

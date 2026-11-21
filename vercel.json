@@ -1,3 +1,11 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["sin1"],
+  "schedules": {
+    "worker-tick": {
+      "schedule": "*/15 * * * *",
+      "path": "/api/worker/tick",
+      "requestMethod": "GET"
+    }
+  }
 }

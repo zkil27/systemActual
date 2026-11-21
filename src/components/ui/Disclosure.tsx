@@ -12,11 +12,13 @@ export function Disclosure({
   children,
   className = "",
   summaryClassName = "",
+  onOpenChange,
 }: {
   label: React.ReactNode;
   children: React.ReactNode;
   className?: string;
   summaryClassName?: string;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -24,7 +26,13 @@ export function Disclosure({
       <button
         type="button"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() =>
+          setOpen((o) => {
+            const next = !o;
+            onOpenChange?.(next);
+            return next;
+          })
+        }
         className={`flex w-full items-center justify-between gap-3 text-left ${summaryClassName}`}
       >
         {label}

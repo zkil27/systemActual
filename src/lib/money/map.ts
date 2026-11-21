@@ -70,9 +70,12 @@ export function mapShopeeWalletTransaction(t: Record<string, unknown>): MoneyRow
   };
 }
 
-/** One TikTok statement, counted only once it's PAID, on its payment time. */
+const TIKTOK_CREDITED_STATUSES = new Set(["PAID", "SETTLED"]);
+
+/** One TikTok statement, counted once it's PAID or SETTLED, on its payment time. */
 export function mapTikTokStatement(s: Record<string, unknown>): MoneyRow | null {
-  if (String(s.payment_status ?? "").toUpperCase() !== "PAID") return null;
+  const status = String(s.payment_status ?? "").toUpperCase();
+  if (!TIKTOK_CREDITED_STATUSES.has(status)) return null;
   const paid = Number(s.payment_time);
   if (!s.id || !Number.isFinite(paid) || paid <= 0) return null;
   return {

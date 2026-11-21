@@ -2,6 +2,8 @@ import { Platform } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
   computeStartingStock,
+  findCrossShopTitleMatches,
+  normalizeGarmentTitle,
   normalizeVariationLabel,
   pairVariations,
   shopeeModelLabel,
@@ -12,8 +14,53 @@ describe("variation labels", () => {
   it("treats Shopee and TikTok spellings of the same size/colour as equal", () => {
     expect(normalizeVariationLabel("Black,M")).toBe(normalizeVariationLabel("Black, M"));
     expect(normalizeVariationLabel("M / Black")).toBe(normalizeVariationLabel("black m"));
+    expect(normalizeVariationLabel("BLK, Medium")).toBe(normalizeVariationLabel("Black, M"));
+    expect(normalizeVariationLabel("Freesize")).toBe(normalizeVariationLabel("FS"));
     expect(normalizeVariationLabel("Black,M")).not.toBe(normalizeVariationLabel("Black,L"));
     expect(normalizeVariationLabel(null)).toBe("");
+  });
+
+  it("normalizes titles and finds 1-to-1 Shopee ↔ TikTok twin listings", () => {
+    expect(normalizeGarmentTitle("[COD] Korean Ribbed Cotton Baby Tee (Ready Stock)")).toBe("ribbed cotton baby tee");
+    const matches = findCrossShopTitleMatches([
+      {
+        id: "g1",
+        name: "[Ready Stock] Ribbed Cotton Baby Tee",
+        platforms: [Platform.SHOPEE],
+        listingKey: { shopConnectionId: "s1", listingId: "1001" },
+      },
+      {
+        id: "g2",
+        name: "Kyna Ribbed Cotton Baby Tee COD",
+        platforms: [Platform.TIKTOK],
+        listingKey: { shopConnectionId: "s2", listingId: "2001" },
+      },
+      {
+        id: "g3",
+        name: "Duplicate Skirt",
+        platforms: [Platform.SHOPEE],
+        listingKey: { shopConnectionId: "s1", listingId: "1002" },
+      },
+      {
+        id: "g4",
+        name: "Duplicate Skirt",
+        platforms: [Platform.SHOPEE],
+        listingKey: { shopConnectionId: "s1", listingId: "1003" },
+      },
+      {
+        id: "g5",
+        name: "Duplicate Skirt",
+        platforms: [Platform.TIKTOK],
+        listingKey: { shopConnectionId: "s2", listingId: "2002" },
+      },
+    ]);
+    expect(matches).toEqual([
+      {
+        shopee: { shopConnectionId: "s1", listingId: "1001" },
+        tiktok: { shopConnectionId: "s2", listingId: "2001" },
+        normalizedTitle: "ribbed cotton baby tee",
+      },
+    ]);
   });
 
   it("builds a Shopee model name from its tier options", () => {

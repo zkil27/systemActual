@@ -7,6 +7,17 @@ const SIZES = {
   xl: "h-28 w-28 rounded-[var(--radius-card)]",
 } as const;
 
+const SHOPEE_CDN_RE = /^https?:\/\/(?:cf\.shopee\.ph|down-ph\.img\.susercontent\.com)\//i;
+
+function thumbUrl(src: string, size: keyof typeof SIZES): string {
+  if ((size !== "sm" && size !== "md") || !SHOPEE_CDN_RE.test(src)) return src;
+  const qIdx = src.indexOf("?");
+  const base = qIdx >= 0 ? src.slice(0, qIdx) : src;
+  const query = qIdx >= 0 ? src.slice(qIdx) : "";
+  if (base.endsWith("_tn")) return src;
+  return `${base}_tn${query}`;
+}
+
 /** Garment photo. Zero-SKU items are recognised by sight, so this leads every row. */
 export function ItemThumb({
   src,
@@ -31,7 +42,7 @@ export function ItemThumb({
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={src}
+      src={thumbUrl(src, size)}
       alt={alt}
       loading="lazy"
       decoding="async"

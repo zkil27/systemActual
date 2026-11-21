@@ -103,7 +103,8 @@ export async function queueLabel(
   from: WaveItemStatus,
   waveTotals: Map<string, number>,
   now: Date,
-  trackingNumber?: string
+  trackingNumber?: string,
+  doc?: { url: string; expiresAt: Date }
 ) {
   if (!waveTotals.has(item.waveId)) {
     waveTotals.set(item.waveId, await prisma.waveItem.count({ where: { waveId: item.waveId } }));
@@ -128,6 +129,67 @@ export async function queueLabel(
         packageId: item.packageId,
         waveId: item.waveId,
         position: item.position,
+        docUrl: doc?.url ?? null,
+        docExpiresAt: doc?.expiresAt ?? null,
+        createdAt: now,
+      },
+    });
+  });
+}
+
+/**
+ * Batches up to 50 ready Shopee labels of the same courier/wave into 1 merged
+ * multi-page PrintJob, cutting PDF downloads and SumatraPDF invocations up to 50x.
+ */
+export async function queueLabelBatch(
+  items: Item[],
+  from: WaveItemStatus,
+  waveTotals: Map<string, number>,
+  now: Date
+) {
+  if (!items.length) return;
+  if (items.length === 1) {
+    await queueLabel(items[0], from, waveTotals, now);
+    return;
+  }
+
+  const waveId = items[0].waveId;
+  if (!waveTotals.has(waveId)) {
+    waveTotals.set(waveId, await prisma.waveItem.count({ where: { waveId } }));
+  }
+  const total = waveTotals.get(waveId) ?? items.length;
+
+  await prisma.$transaction(async (tx) => {
+    const movedItems: Item[] = [];
+    for (const item of items) {
+      const moved = await tx.waveItem.updateMany({
+        where: { id: item.id, status: from },
+        data: {
+          status: WaveItemStatus.LABEL_READY,
+          attempts: 0,
+          error: null,
+          nextAttemptAt: null,
+        },
+      });
+      if (moved.count === 1) movedItems.push(item);
+    }
+    if (!movedItems.length) return;
+
+    const first = movedItems[0];
+    const last = movedItems[movedItems.length - 1];
+    const title =
+      movedItems.length === 1
+        ? `Label ${first.position + 1}/${total} · ${first.package.order.orderSn}`
+        : `Labels ${first.position + 1}–${last.position + 1}/${total} (${movedItems.length} parcels)`;
+
+    await tx.printJob.create({
+      data: {
+        kind: PrintJobKind.LABEL,
+        title,
+        packageId: first.packageId,
+        batchPackageIds: movedItems.map((i) => i.packageId),
+        waveId,
+        position: first.position,
         createdAt: now,
       },
     });

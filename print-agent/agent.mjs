@@ -9,13 +9,13 @@ import { mkdir, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-const VERSION = "1.0.0";
+const VERSION = "1.1.0";
 const BASE = (process.env.KYNA_URL || "").replace(/\/$/, "");
 const TOKEN = (process.env.DEVICE_TOKEN || "").trim();
 const PRINTER = (process.env.PRINTER_NAME || "").trim() || undefined;
 const PAPER = (process.env.PAPER_SIZE || "4x6").trim();
-const POLL_MS = 5_000;
-const TICK_MS = 60_000;
+const DEFAULT_POLL_MS = 30_000;
+const DEFAULT_TICK_MS = 180_000;
 
 if (!BASE.startsWith("https://") && !BASE.startsWith("http://localhost")) {
   console.error("KYNA_URL must be your https:// Kyna Ops address. Check .env");
@@ -47,14 +47,30 @@ async function api(pathname, { method = "GET", body, raw = false, timeoutMs = 60
 
 // ------------------------------------------------------------------ printing
 
-async function printOne(job) {
+async function fetchJobPdfBuffer(job) {
+  if (job.docUrl) {
+    try {
+      const direct = await fetch(job.docUrl, { signal: AbortSignal.timeout(30_000), redirect: "follow" });
+      if (direct.ok) {
+        const buf = Buffer.from(await direct.arrayBuffer());
+        if (buf.subarray(0, 4).toString("latin1") === "%PDF") return buf;
+      }
+    } catch {
+      // Fall back to Kyna Ops endpoint if direct CDN URL expired or failed.
+    }
+  }
   const res = await api(`/api/agent/jobs/${encodeURIComponent(job.id)}/pdf`, { raw: true });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Couldn't get the PDF (${res.status})`);
   }
+  return Buffer.from(await res.arrayBuffer());
+}
+
+async function printOne(job) {
+  const buf = await fetchJobPdfBuffer(job);
   const file = path.join(tmpdir(), `kyna-${job.id}.pdf`);
-  await writeFile(file, Buffer.from(await res.arrayBuffer()));
+  await writeFile(file, buf);
   try {
     await print(file, { printer: PRINTER, paperSize: PAPER, scale: "noscale", silent: true });
   } finally {
@@ -62,8 +78,9 @@ async function printOne(job) {
   }
 }
 
-async function report(job, result) {
-  const r = await api(`/api/agent/jobs/${encodeURIComponent(job.id)}/status`, { method: "POST", body: result });
+async function reportBatch(results) {
+  if (!results.length) return false;
+  const r = await api("/api/agent/jobs/status-batch", { method: "POST", body: { results } });
   return Boolean(r.data?.paused);
 }
 
@@ -76,33 +93,34 @@ async function printLoop() {
     try {
       const { ok, data } = await api("/api/agent/poll", { method: "POST", body: { version: VERSION, printer: printerName } });
       const jobs = ok && !data.paused ? data.jobs ?? [] : [];
+      const results = [];
       for (let i = 0; i < jobs.length; i++) {
         const job = jobs[i];
-        let paused = false;
         try {
           await printOne(job);
-          paused = await report(job, { status: "PRINTED" });
+          results.push({ id: job.id, status: "PRINTED" });
           log(`Printed: ${job.title}`);
         } catch (err) {
           if (err.fatal) throw err;
           log(`FAILED: ${job.title}: ${err.message}`);
-          paused = await report(job, { status: "FAILED", error: String(err.message || err) }).catch(() => false);
-        }
-        if (paused && i < jobs.length - 1) {
-          // Owner tapped Pause (e.g. changing the label roll): hand the rest back.
-          await api("/api/agent/release", { method: "POST" }).catch(() => {});
-          log("Paused from the phone.");
-          break;
+          results.push({ id: job.id, status: "FAILED", error: String(err.message || err) });
         }
       }
-      if (!jobs.length) await sleep(POLL_MS);
+      if (results.length) {
+        const paused = await reportBatch(results).catch(() => false);
+        if (paused) {
+          await api("/api/agent/release", { method: "POST" }).catch(() => {});
+          log("Paused from the phone.");
+        }
+      }
+      if (!jobs.length) await sleep(typeof data?.nextPollMs === "number" ? data.nextPollMs : DEFAULT_POLL_MS);
     } catch (err) {
       if (err.fatal) {
         log(err.message);
         await sleep(60_000);
       } else {
         log(`Can't reach Kyna Ops (${err.message}). Retrying.`);
-        await sleep(POLL_MS * 2);
+        await sleep(10_000);
       }
     }
   }
@@ -112,13 +130,15 @@ async function printLoop() {
 
 async function tickLoop() {
   for (;;) {
+    let nextMs = DEFAULT_TICK_MS;
     try {
-      const { ok, status } = await api("/api/worker/tick", { method: "POST", timeoutMs: 90_000 });
+      const { ok, status, data } = await api("/api/worker/tick", { method: "POST", timeoutMs: 90_000 });
       if (!ok) log(`Sync returned ${status}`);
+      else if (typeof data?.nextTickMs === "number") nextMs = data.nextTickMs;
     } catch (err) {
       if (!err.fatal) log(`Sync failed (${err.message})`);
     }
-    await sleep(TICK_MS);
+    await sleep(nextMs);
   }
 }
 

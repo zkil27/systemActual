@@ -3,7 +3,7 @@ import { formatManilaDateTime } from "@/lib/time";
 import { buildPdf } from "./pdf";
 import { prisma } from "@/lib/prisma";
 import { pickListPages, type WaveSummary } from "@/lib/waves/plan";
-import { fetchLabelPdf } from "@/lib/shipping/labels";
+import { fetchBatchLabelPdf, fetchLabelPdf } from "@/lib/shipping/labels";
 
 export class NotPrintableError extends Error {}
 
@@ -13,7 +13,9 @@ export class NotPrintableError extends Error {}
  * and shipping (Tasks 10–12).
  */
 export async function renderJobPdf(
-  job: Pick<PrintJob, "kind" | "title" | "createdAt" | "waveId" | "packageId">,
+  job: Pick<PrintJob, "kind" | "title" | "createdAt" | "waveId" | "packageId"> & {
+    batchPackageIds?: string[];
+  },
   printerName?: string | null
 ): Promise<Buffer> {
   switch (job.kind) {
@@ -37,6 +39,9 @@ export async function renderJobPdf(
       return buildPdf(pickListPages(wave.summaryJson as unknown as WaveSummary, wave.createdAt), { fontSize: 10 });
     }
     case PrintJobKind.LABEL:
+      if (job.batchPackageIds && job.batchPackageIds.length > 1) {
+        return fetchBatchLabelPdf(job.batchPackageIds);
+      }
       if (!job.packageId) throw new NotPrintableError("Label has no parcel.");
       return fetchLabelPdf(job.packageId);
   }

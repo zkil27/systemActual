@@ -85,11 +85,16 @@ describe("choosePickup", () => {
     });
   });
 
-  it("retries when no slot is offered yet; fails clearly for drop-off-only or no address", () => {
+  it("retries when no slot is offered yet; falls back to drop-off when supported without manual branch", () => {
     expect(
       choosePickup({ info_needed: { pickup: ["address_id", "pickup_time_id"] }, pickup: { address_list: [{ address_id: 1, time_slot_list: [] }] } })
     ).toMatchObject({ ok: false, retry: true });
     expect(choosePickup({ info_needed: { dropoff: ["branch_id"] } })).toMatchObject({ ok: false, retry: false, reason: expect.stringMatching(/drop-off/) });
+    expect(choosePickup({ info_needed: { dropoff: [] } })).toEqual({ ok: true, dropoff: {} });
+    expect(choosePickup({ info_needed: { dropoff: ["branch_id"] }, dropoff: { branch_list: [{ branch_id: 55 }] } })).toEqual({
+      ok: true,
+      dropoff: { branch_id: 55 },
+    });
     expect(choosePickup({ info_needed: { pickup: ["address_id"] }, pickup: { address_list: [] } })).toMatchObject({ ok: false, retry: false });
   });
 });

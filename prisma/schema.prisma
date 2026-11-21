@@ -46,12 +46,13 @@ model OwnerUser {
 }
 
 model StaffMember {
-  id        String         @id @default(cuid())
-  name      String         @unique
-  pinHash   String
-  active    Boolean        @default(true)
-  scans     PhysicalScan[]
-  createdAt DateTime       @default(now())
+  id             String         @id @default(cuid())
+  name           String         @unique
+  pinHash        String
+  active         Boolean        @default(true)
+  scans          PhysicalScan[]
+  packedPackages Package[]
+  createdAt      DateTime       @default(now())
 
   failedPinAttempts Int       @default(0)
   pinLockedUntil    DateTime?
@@ -271,20 +272,25 @@ model OrderLine {
 }
 
 model Package {
-  id             String     @id @default(cuid())
-  orderId        String
-  order          Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  id              String       @id @default(cuid())
+  orderId         String
+  order           Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
   /// Shopee package_number / TikTok package id
-  packageNumber  String
-  trackingNumber String?
-  carrier        String?
-  channelId      String?
+  packageNumber   String
+  trackingNumber  String?
+  carrier         String?
+  channelId       String?
   /// Raw platform package/logistics status.
-  status         String?
-  waveItems      WaveItem[]
+  status          String?
+  /// Set when warehouse staff scans/verifies the printed label at the packing table.
+  packedAt        DateTime?
+  packedByStaffId String?
+  packedByStaff   StaffMember? @relation(fields: [packedByStaffId], references: [id], onDelete: SetNull)
+  waveItems       WaveItem[]
 
   @@unique([orderId, packageNumber])
   @@index([trackingNumber])
+  @@index([packedAt])
 }
 
 /// Every listing variation seen on either shop. Filled from order lines.
@@ -438,24 +444,28 @@ model PrintDevice {
 }
 
 model PrintJob {
-  id        String         @id @default(cuid())
-  kind      PrintJobKind
-  status    PrintJobStatus @default(QUEUED)
-  title     String
+  id              String         @id @default(cuid())
+  kind            PrintJobKind
+  status          PrintJobStatus @default(QUEUED)
+  title           String
   /// Package for LABEL jobs (Tasks 11–12).
-  packageId String?
+  packageId       String?
   /// Wave this job belongs to (Tasks 10–13); position is its order within the wave.
-  waveId    String?
-  position  Int            @default(0)
-  attempts  Int            @default(0)
-  error     String?
-  deviceId  String?
-  device    PrintDevice?   @relation(fields: [deviceId], references: [id], onDelete: SetNull)
-  claimedAt DateTime?
-  printedAt DateTime?
-  createdAt DateTime       @default(now())
+  waveId          String?
+  position        Int            @default(0)
+  attempts        Int            @default(0)
+  error           String?
+  deviceId        String?
+  device          PrintDevice?   @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  claimedAt       DateTime?
+  printedAt       DateTime?
+  docUrl          String?
+  docExpiresAt    DateTime?
+  batchPackageIds String[]       @default([])
+  createdAt       DateTime       @default(now())
 
   @@index([status, createdAt])
+  @@index([status, claimedAt])
   @@index([waveId])
 }
 

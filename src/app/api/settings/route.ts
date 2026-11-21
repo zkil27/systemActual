@@ -7,10 +7,15 @@ import { isTikTokConfigured } from "@/lib/connectors/tiktok";
 import { getDailyTruthReport } from "@/lib/analytics/daily-returns";
 import { formatTelegramDailyBrief } from "@/lib/reports/brief";
 import { sendTelegramMessage } from "@/lib/telegram";
-import { parseWaveTimes } from "@/lib/waves/schedule";
+import { formatWaveScheduleSetting, isContinuousWave, parseWaveTimes } from "@/lib/waves/schedule";
 
-export async function GET() {
-  const [settings, staff, shops, report] = await Promise.all([
+export async function GET(req: NextRequest) {
+  if (req.nextUrl.searchParams.get("preview") === "1") {
+    const report = await getDailyTruthReport({ range: "today" });
+    return NextResponse.json({ telegramPreview: formatTelegramDailyBrief(report) });
+  }
+
+  const [settings, staff, shops] = await Promise.all([
     prisma.appSettings.upsert({
       where: { id: "default" },
       create: { id: "default" },
@@ -21,7 +26,6 @@ export async function GET() {
       orderBy: { name: "asc" },
     }),
     prisma.shopConnection.findMany({ orderBy: { platform: "asc" } }),
-    getDailyTruthReport({ range: "today" }),
   ]);
 
   return NextResponse.json({
@@ -52,7 +56,6 @@ export async function GET() {
       needsReconnect: Boolean(s.tokenErrorAt),
       writesEnabled: s.writesEnabled,
     })),
-    telegramPreview: formatTelegramDailyBrief(report),
   });
 }
 
@@ -67,7 +70,7 @@ const updateSettingsSchema = z.object({
   ]),
   shopConnectionId: z.string().optional(),
   stockSafetyBuffer: z.number().int().min(0).max(1000).optional(),
-  waveTimes: z.string().max(100).optional(),
+  waveTimes: z.string().max(120).optional(),
   wavesAutoEnabled: z.boolean().optional(),
   defaultUnitCostPhp: z.number().min(1).max(100000).optional(),
   defaultSellingPrice: z.number().min(1).max(100000).optional(),
@@ -115,7 +118,14 @@ export async function POST(req: NextRequest) {
             ? { returnShippingEstimatePhp: data.returnShippingEstimatePhp }
             : {}),
           ...(data.stockSafetyBuffer !== undefined ? { stockSafetyBuffer: data.stockSafetyBuffer } : {}),
-          ...(data.waveTimes !== undefined ? { waveTimes: parseWaveTimes(data.waveTimes).join(",") } : {}),
+          ...(data.waveTimes !== undefined
+            ? {
+                waveTimes: formatWaveScheduleSetting(
+                  parseWaveTimes(data.waveTimes),
+                  isContinuousWave(data.waveTimes)
+                ),
+              }
+            : {}),
           ...(data.wavesAutoEnabled !== undefined ? { wavesAutoEnabled: data.wavesAutoEnabled } : {}),
           ...(data.telegramChatId !== undefined
             ? { telegramChatId: data.telegramChatId.trim() || null }

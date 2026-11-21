@@ -1,6 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { buildTelegramReply, sendTelegramMessage } from "@/lib/telegram";
 import { prisma } from "@/lib/prisma";
+import { runTick } from "@/lib/worker/tick";
+
+const STALE_SYNC_MS = 3 * 60_000;
 
 export async function POST(req: NextRequest) {
   try {
@@ -36,14 +39,28 @@ export async function POST(req: NextRequest) {
         `Your Telegram Chat ID (${chatId}) is linked for 8:00 PM daily return summaries.`,
         ``,
         `Try these commands anytime:`,
-        `/today — Today's Failed Delivery & Buyer Return counts`,
+        `/today — Today's money, shipping, stock & returns`,
+        `/ship — Parcels ready to ship & printer status`,
+        `/stock — Low & out-of-stock items`,
+        `/bump — Shopee Auto-Bump active slots`,
+        `/money — Money credited today`,
         `/missing — Parcels driver marked returned but not scanned yet`,
-        `/failed — Failed Delivery breakdown by courier`,
-        `/returns — Buyer Return / Refund summary`,
         `/overdue — Failed Deliveries stuck > 10 days`,
       ].join("\n");
       await sendTelegramMessage(chatId, welcome);
       return NextResponse.json({ ok: true, reply: welcome });
+    }
+
+    // Free opportunistic sync if shops haven't synced recently.
+    const stale = await prisma.shopConnection.count({
+      where: {
+        isDemo: false,
+        accessToken: { not: null },
+        OR: [{ lastSyncedAt: null }, { lastSyncedAt: { lt: new Date(Date.now() - STALE_SYNC_MS) } }],
+      },
+    });
+    if (stale > 0) {
+      after(() => runTick("webhook").catch((err) => console.error("[telegram bg tick]", err)));
     }
 
     const reply = await buildTelegramReply(text);

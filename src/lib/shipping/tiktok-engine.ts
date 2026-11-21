@@ -17,7 +17,7 @@ import {
   type Item,
 } from "./items";
 import {
-  chooseTikTokPickup,
+  chooseTikTokHandover,
   LABEL_POLL_MS,
   LABEL_SIZE,
   RETRY_MS,
@@ -81,7 +81,7 @@ async function shipBatch(shop: ShopConnection, token: string, deadline: number):
     for (const i of toShip) await retry([i], RETRY_MS, (err as Error).message, { release: !i.shipRequestedAt });
     return fresh.length;
   }
-  const pickup = chooseTikTokPickup(slots, new Date());
+  const pickup = chooseTikTokHandover(slots, new Date());
   if (!pickup.ok) {
     for (const i of toShip) {
       if (pickup.retry) await retry([i], SLOT_RETRY_MS, pickup.reason, { release: !i.shipRequestedAt });
@@ -99,7 +99,7 @@ async function shipBatch(shop: ShopConnection, token: string, deadline: number):
       body: {
         packages: toShip.map((i) => ({
           id: i.package.packageNumber,
-          handover_method: "PICKUP",
+          handover_method: pickup.handoverMethod,
           ...(pickup.slot ? { pickup_slot: pickup.slot } : {}),
         })),
       },
@@ -131,24 +131,44 @@ async function shipBatch(shop: ShopConnection, token: string, deadline: number):
 
 async function labelBatch(shop: ShopConnection, token: string, waveTotals: Map<string, number>, deadline: number): Promise<number> {
   const items = await due(shop.id, WaveItemStatus.SHIPPING_ARRANGED);
+  if (!items.length) return 0;
   const now = new Date();
+  const docExpiresAt = new Date(now.getTime() + 20 * 3600_000);
+  const CONCURRENCY = 5;
   let done = 0;
-  for (const i of items) {
+
+  for (let idx = 0; idx < items.length; idx += CONCURRENCY) {
     if (Date.now() >= deadline) break;
-    done++;
-    let label = { url: null as string | null, trackingNumber: null as string | null };
-    try {
-      label = tiktokLabel(await tiktokShippingDocument(shop, token, i.package.packageNumber));
-    } catch (err) {
-      console.error("[tiktok] label", i.package.packageNumber, err);
-    }
-    if (label.url) {
-      await queueLabel(i, WaveItemStatus.SHIPPING_ARRANGED, waveTotals, now, label.trackingNumber ?? undefined);
-    } else if (Date.now() - (i.shipRequestedAt ?? i.updatedAt).getTime() > TRACKING_GIVE_UP_MS) {
-      // Shipped but no label after 2 hours. Keep the lock: it IS shipped.
-      await finish([i], WaveItemStatus.FAILED, "No label from TikTok after 2 hours. Print it from Seller Center.", false);
-    } else {
-      await wait([i], LABEL_POLL_MS, "Waiting for TikTok to make the label");
+    const chunk = items.slice(idx, idx + CONCURRENCY);
+    const fetched = await Promise.all(
+      chunk.map(async (item) => {
+        let label = { url: null as string | null, trackingNumber: null as string | null };
+        try {
+          label = tiktokLabel(await tiktokShippingDocument(shop, token, item.package.packageNumber));
+        } catch (err) {
+          console.error("[tiktok] label", item.package.packageNumber, err);
+        }
+        return { item, label };
+      })
+    );
+
+    for (const { item: i, label } of fetched) {
+      done++;
+      if (label.url) {
+        await queueLabel(
+          i,
+          WaveItemStatus.SHIPPING_ARRANGED,
+          waveTotals,
+          now,
+          label.trackingNumber ?? undefined,
+          { url: label.url, expiresAt: docExpiresAt }
+        );
+      } else if (Date.now() - (i.shipRequestedAt ?? i.updatedAt).getTime() > TRACKING_GIVE_UP_MS) {
+        // Shipped but no label after 2 hours. Keep the lock: it IS shipped.
+        await finish([i], WaveItemStatus.FAILED, "No label from TikTok after 2 hours. Print it from Seller Center.", false);
+      } else {
+        await wait([i], LABEL_POLL_MS, "Waiting for TikTok to make the label");
+      }
     }
   }
   return done;

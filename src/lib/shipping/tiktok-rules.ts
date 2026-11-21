@@ -68,6 +68,23 @@ export function chooseTikTokPickup(data: Raw | null | undefined, now: Date): Tik
   return { ok: true, slot: null };
 }
 
+export type TikTokHandoverChoice =
+  | { ok: true; handoverMethod: "PICKUP" | "DROP_OFF"; slot: { start_time: number; end_time: number } | null }
+  | { ok: false; retry: boolean; reason: string };
+
+/**
+ * Picks earliest pickup slot, or falls back to DROP_OFF when TikTok does not
+ * allow pickup for this courier channel.
+ */
+export function chooseTikTokHandover(data: Raw | null | undefined, now: Date): TikTokHandoverChoice {
+  const pickup = chooseTikTokPickup(data, now);
+  if (pickup.ok) return { ok: true, handoverMethod: "PICKUP", slot: pickup.slot };
+  if (data?.can_pickup === false && data?.can_drop_off === true) {
+    return { ok: true, handoverMethod: "DROP_OFF", slot: null };
+  }
+  return pickup;
+}
+
 const errorText = (e: Raw) => String(e.message || `TikTok error ${e.code ?? ""}`.trim());
 
 /**

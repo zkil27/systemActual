@@ -3,6 +3,7 @@ import { PrintJobStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { deviceFromAuthHeader } from "@/lib/print/device";
 import { NotPrintableError, renderJobPdf } from "@/lib/print/render";
+import { withSpan } from "@/lib/otel";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -19,7 +20,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   }
 
   try {
-    const pdf = await renderJobPdf(job, device.printerName);
+    const pdf = await withSpan("agent.pdf.fetchLabel", () => renderJobPdf(job, device.printerName));
     return new NextResponse(new Uint8Array(pdf), {
       headers: { "Content-Type": "application/pdf", "Cache-Control": "no-store" },
     });

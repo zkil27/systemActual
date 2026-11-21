@@ -1,7 +1,13 @@
 import { Platform, type ListingVariant } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { COMMITTED_ORDER_STATUSES, computeStartingStock, pairVariations, type StartingStockView } from "./variants";
-import { onShelfByVariant, resetStock, setShelfCount } from "@/lib/stock/ledger";
+import {
+  COMMITTED_ORDER_STATUSES,
+  computeStartingStock,
+  findCrossShopTitleMatches,
+  pairVariations,
+  type StartingStockView,
+} from "./variants";
+import { onShelfByVariant, setShelfCount } from "@/lib/stock/ledger";
 import { availableToSell } from "@/lib/stock/rules";
 
 type ListingRef = Pick<ListingVariant, "id" | "shopConnectionId" | "listingId" | "name" | "variationName" | "imageUrl" | "garmentVariantId">;
@@ -44,11 +50,25 @@ async function listingVariants(key: ListingKey) {
   return rows;
 }
 
+async function computeMergedShelfCount(intoId: string, fromId: string): Promise<number | null> {
+  const [variants, onShelf] = await Promise.all([
+    prisma.garmentVariant.findMany({
+      where: { id: { in: [intoId, fromId] } },
+      select: { id: true, startingStockSetAt: true },
+    }),
+    onShelfByVariant([intoId, fromId]),
+  ]);
+  const started = variants.filter((v) => v.startingStockSetAt !== null).map((v) => onShelf.get(v.id) ?? 0);
+  if (!started.length) return null;
+  // Take the safer (lower) shelf count if both shops were already tracking stock.
+  return Math.min(...started);
+}
+
 /**
  * "This Shopee listing is that TikTok listing." Variations with the same
  * colour/size are merged into one garment variant; the rest are moved under
- * the same garment for the owner to pair by hand. Merged variants need their
- * starting stock confirmed again.
+ * the same garment for the owner to pair by hand. Existing shelf counts are
+ * preserved using the safer (lower) count.
  */
 export async function linkListings(a: ListingKey, b: ListingKey) {
   if (a.shopConnectionId === b.shopConnectionId && a.listingId === b.listingId) {
@@ -72,8 +92,13 @@ export async function linkListings(a: ListingKey, b: ListingKey) {
     lb.map((l) => ({ id: l.garmentVariantId!, label: l.variationName }))
   );
 
-  // Two shops' counts of the same pieces must not be added together: start over.
-  await resetStock(pairs.filter(([into, from]) => into !== from).map(([into]) => into));
+  const mergedCounts = new Map<string, number>();
+  for (const [into, from] of pairs) {
+    if (into === from) continue;
+    const count = await computeMergedShelfCount(into, from);
+    if (count !== null) mergedCounts.set(into, count);
+  }
+
   await prisma.$transaction(async (tx) => {
     for (const [into, from] of pairs) {
       if (into === from) continue;
@@ -86,6 +111,10 @@ export async function linkListings(a: ListingKey, b: ListingKey) {
     });
   });
 
+  for (const [into, count] of mergedCounts) {
+    await setShelfCount(into, count);
+  }
+
   await deleteEmptyGarments(sourceGarments.map((g) => g.garmentId).filter((id) => id !== target.garmentId));
   return { paired: pairs.length, unpaired: leftoverB.length };
 }
@@ -94,12 +123,68 @@ export async function linkListings(a: ListingKey, b: ListingKey) {
 export async function mergeVariants(intoId: string, fromId: string) {
   if (intoId === fromId) return;
   const from = await prisma.garmentVariant.findUniqueOrThrow({ where: { id: fromId }, select: { garmentId: true } });
-  await resetStock([intoId]);
+  const count = await computeMergedShelfCount(intoId, fromId);
   await prisma.$transaction([
     prisma.listingVariant.updateMany({ where: { garmentVariantId: fromId }, data: { garmentVariantId: intoId } }),
     prisma.garmentVariant.delete({ where: { id: fromId } }),
   ]);
+  if (count !== null) {
+    await setShelfCount(intoId, count);
+  }
   await deleteEmptyGarments([from.garmentId]);
+}
+
+/** Auto-initializes starting stock using the safer (lower) shop count for every uncounted variant. */
+export async function autoConfirmStartingStock(): Promise<number> {
+  const garments = await getCatalog();
+  let confirmed = 0;
+  for (const g of garments) {
+    for (const v of g.variants) {
+      if (v.startingStock === null && v.stock.suggested !== null) {
+        await setStartingStock(v.id, v.stock.suggested);
+        confirmed++;
+      }
+    }
+  }
+  return confirmed;
+}
+
+/**
+ * Automatically links 1-to-1 Shopee ↔ TikTok twin listings by normalized title
+ * and initializes starting stock for all variants with shop stock data.
+ */
+export async function autoLinkAndInitCatalog(): Promise<{
+  linkedGarments: number;
+  pairedVariants: number;
+  confirmedStock: number;
+}> {
+  const garments = await getCatalog();
+  const matches = findCrossShopTitleMatches(
+    garments.map((g) => ({
+      id: g.id,
+      name: g.name,
+      platforms: g.platforms,
+      listingKey:
+        g.listings.length === 1
+          ? { shopConnectionId: g.listings[0].shopConnectionId, listingId: g.listings[0].listingId }
+          : null,
+    }))
+  );
+
+  let linkedGarments = 0;
+  let pairedVariants = 0;
+  for (const m of matches) {
+    try {
+      const res = await linkListings(m.shopee, m.tiktok);
+      linkedGarments++;
+      pairedVariants += res.paired;
+    } catch (err) {
+      console.error("[autoLink]", m.normalizedTitle, err);
+    }
+  }
+
+  const confirmedStock = await autoConfirmStartingStock();
+  return { linkedGarments, pairedVariants, confirmedStock };
 }
 
 /** Undo links: every listing goes back to its own garment. */
@@ -121,16 +206,92 @@ export async function setStartingStock(variantId: string, count: number) {
 
 /** Units on unshipped orders per listing variation, keyed "platform:listingId:variationId". */
 export async function committedUnitsByListing(): Promise<Map<string, number>> {
+  const platforms = [Platform.SHOPEE, Platform.TIKTOK] as const;
+  const results = await Promise.all(
+    platforms.map((platform) =>
+      prisma.orderLine.groupBy({
+        by: ["listingId", "variationId"],
+        where: { order: { platform, status: { in: COMMITTED_ORDER_STATUSES[platform] } } },
+        _sum: { quantity: true },
+      })
+    )
+  );
   const map = new Map<string, number>();
-  for (const platform of [Platform.SHOPEE, Platform.TIKTOK]) {
-    const rows = await prisma.orderLine.groupBy({
-      by: ["listingId", "variationId"],
-      where: { order: { platform, status: { in: COMMITTED_ORDER_STATUSES[platform] } } },
-      _sum: { quantity: true },
-    });
-    for (const r of rows) map.set(`${platform}:${r.listingId}:${r.variationId}`, r._sum.quantity ?? 0);
-  }
+  platforms.forEach((platform, idx) => {
+    for (const r of results[idx]) {
+      map.set(`${platform}:${r.listingId}:${r.variationId}`, r._sum.quantity ?? 0);
+    }
+  });
   return map;
+}
+
+/** Lightweight stock health counts for the dashboard, without hydrating full CatalogGarment trees. */
+export async function getStockOperationsSummary(
+  buffer: number,
+  connectedPlatforms: number
+): Promise<{
+  lowStockCount: number;
+  outOfStockCount: number;
+  unlinkedCount: number;
+  stockPushFailedCount: number;
+}> {
+  const [variants, committed, onShelf] = await Promise.all([
+    prisma.garmentVariant.findMany({
+      select: {
+        id: true,
+        garmentId: true,
+        startingStockSetAt: true,
+        listings: {
+          select: {
+            platform: true,
+            listingId: true,
+            variationId: true,
+            pushError: true,
+          },
+        },
+      },
+    }),
+    committedUnitsByListing(),
+    onShelfByVariant(),
+  ]);
+
+  let lowStockCount = 0;
+  let outOfStockCount = 0;
+  let stockPushFailedCount = 0;
+  const platformsByGarment = new Map<string, Set<Platform>>();
+
+  for (const v of variants) {
+    let garmentPlatforms = platformsByGarment.get(v.garmentId);
+    if (!garmentPlatforms) {
+      garmentPlatforms = new Set<Platform>();
+      platformsByGarment.set(v.garmentId, garmentPlatforms);
+    }
+
+    let units = 0;
+    let hasPushError = false;
+    for (const l of v.listings) {
+      garmentPlatforms.add(l.platform);
+      units += committed.get(`${l.platform}:${l.listingId}:${l.variationId}`) ?? 0;
+      if (l.pushError) hasPushError = true;
+    }
+
+    if (hasPushError) stockPushFailedCount++;
+
+    if (v.startingStockSetAt) {
+      const avail = availableToSell(onShelf.get(v.id) ?? 0, units, buffer);
+      if (avail === 0) outOfStockCount++;
+      else if (avail > 0 && avail <= 5) lowStockCount++;
+    }
+  }
+
+  let unlinkedCount = 0;
+  if (connectedPlatforms >= 2) {
+    for (const platforms of platformsByGarment.values()) {
+      if (platforms.size === 1) unlinkedCount++;
+    }
+  }
+
+  return { lowStockCount, outOfStockCount, unlinkedCount, stockPushFailedCount };
 }
 
 export interface CatalogVariant {

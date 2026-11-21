@@ -1,6 +1,29 @@
 import { Platform } from "@prisma/client";
 import { normalizeCourierName } from "@/lib/connectors/normalizer";
 import { formatManilaDateTime } from "@/lib/time";
+import {
+  groupPickItems,
+  matchParcelsForVariant,
+  parsePickItemLabel,
+  shortenGarmentName,
+  type ParsedPickItem,
+  type PickGarmentGroup,
+  type PickVariantItem,
+  type WaveParcel,
+  type WaveParcelLine,
+} from "./pick-list";
+
+export {
+  groupPickItems,
+  matchParcelsForVariant,
+  parsePickItemLabel,
+  shortenGarmentName,
+  type ParsedPickItem,
+  type PickGarmentGroup,
+  type PickVariantItem,
+  type WaveParcel,
+  type WaveParcelLine,
+};
 
 /** Shopee recommends waiting this long: buyers can cancel freely in the first hour. */
 export const MIN_ORDER_AGE_MS = 60 * 60_000;
@@ -153,11 +176,22 @@ export function pickListPages(summary: WaveSummary, createdAt: Date): string[][]
     `${summary.total} parcels: ${summary.singles} single, ${summary.multis} multi`,
     "",
   ];
-  for (const g of summary.groups) {
+  summary.groups.forEach((g, idx) => {
+    if (idx > 0) lines.push("--------------------------------------------");
     lines.push(fit(`${g.title.toUpperCase()} (${g.count} parcels)`));
-    for (const it of g.items) lines.push(fit(`${String(it.qty).padStart(3)} x ${it.label}`));
+    for (const it of g.items) {
+      const prefix = `${String(it.qty).padStart(3)} x `;
+      const rawLine = `${prefix}${it.label}`;
+      if (rawLine.length <= LINE_CHARS) {
+        lines.push(rawLine);
+      } else {
+        const parsed = parsePickItemLabel(it.label);
+        const compact = parsed.variation ? `${parsed.shortGarmentName} - ${parsed.variation}` : parsed.shortGarmentName;
+        lines.push(fit(`${prefix}${compact}`));
+      }
+    }
     lines.push("");
-  }
+  });
   const body = LINES_PER_PAGE - 1;
   const count = Math.max(1, Math.ceil(lines.length / body));
   return Array.from({ length: count }, (_, i) => [

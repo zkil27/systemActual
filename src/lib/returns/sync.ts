@@ -84,14 +84,19 @@ async function tiktokForwardEvents(conn: ShopConnection, token: string, orderSn:
 // ---------------------------------------------------------------- 1. buyer return requests (incremental)
 
 export async function syncReturnRequests(conn: ShopConnection, token: string, deadline: number) {
+  const settings = await prisma.appSettings.findUnique({
+    where: { id: "default" },
+    select: { defaultUnitCostPhp: true },
+  });
+  const defaultUnitCostPhp = Number(settings?.defaultUnitCostPhp ?? 82);
   let cursor = conn.returnsSyncedTo;
   let saved = 0;
   try {
     for (;;) {
       const w = nextSyncWindow(cursor, new Date(), RETURNS_INITIAL_LOOKBACK_MS, RETURNS_WINDOW_MS);
       saved += conn.platform === Platform.SHOPEE
-        ? await shopeeReturnsWindow(conn, token, w.from, w.to, deadline)
-        : await tiktokReturnsWindow(conn, token, w.from, w.to, deadline);
+        ? await shopeeReturnsWindow(conn, token, w.from, w.to, deadline, defaultUnitCostPhp)
+        : await tiktokReturnsWindow(conn, token, w.from, w.to, deadline, defaultUnitCostPhp);
       cursor = w.to;
       await prisma.shopConnection.update({ where: { id: conn.id }, data: { returnsSyncedTo: cursor } });
       if (w.last) return { saved, caughtUp: true };
@@ -103,7 +108,14 @@ export async function syncReturnRequests(conn: ShopConnection, token: string, de
   }
 }
 
-async function shopeeReturnsWindow(conn: ShopConnection, token: string, from: Date, to: Date, deadline: number) {
+async function shopeeReturnsWindow(
+  conn: ShopConnection,
+  token: string,
+  from: Date,
+  to: Date,
+  deadline: number,
+  defaultUnitCostPhp: number
+) {
   let saved = 0;
   for (let pageNo = 0; ; pageNo++) {
     check(deadline);
@@ -131,7 +143,8 @@ async function shopeeReturnsWindow(conn: ShopConnection, token: string, from: Da
             (order?.lines ?? []).filter((l) => l.variationName).map((l) => [l.variationId, l.variationName!])
           ),
           reverse,
-        })
+        }),
+        { defaultUnitCostPhp }
       );
       saved++;
     }
@@ -139,7 +152,14 @@ async function shopeeReturnsWindow(conn: ShopConnection, token: string, from: Da
   }
 }
 
-async function tiktokReturnsWindow(conn: ShopConnection, token: string, from: Date, to: Date, deadline: number) {
+async function tiktokReturnsWindow(
+  conn: ShopConnection,
+  token: string,
+  from: Date,
+  to: Date,
+  deadline: number,
+  defaultUnitCostPhp: number
+) {
   let saved = 0;
   let pageToken = "";
   for (;;) {
@@ -161,7 +181,8 @@ async function tiktokReturnsWindow(conn: ShopConnection, token: string, from: Da
           shopConnectionId: conn.id,
           forwardTrackingNumber: pkg?.trackingNumber ?? null,
           orderCarrier: pkg?.carrier ?? null,
-        })
+        }),
+        { defaultUnitCostPhp }
       );
       saved++;
     }
@@ -177,12 +198,16 @@ async function tiktokReturnsWindow(conn: ShopConnection, token: string, from: Da
  * once per order; an API error leaves it unchecked so the next tick retries.
  */
 export async function detectFailedDeliveries(conn: ShopConnection, token: string, deadline: number) {
-  const orders = await prisma.order.findMany({
-    where: { shopConnectionId: conn.id, status: "CANCELLED", shippedAt: { not: null }, failedDeliveryCheckedAt: null },
-    include: { lines: true, packages: true },
-    orderBy: { platformUpdatedAt: "asc" },
-    take: FAILED_DELIVERY_BATCH,
-  });
+  const [orders, settings] = await Promise.all([
+    prisma.order.findMany({
+      where: { shopConnectionId: conn.id, status: "CANCELLED", shippedAt: { not: null }, failedDeliveryCheckedAt: null },
+      include: { lines: true, packages: true },
+      orderBy: { platformUpdatedAt: "asc" },
+      take: FAILED_DELIVERY_BATCH,
+    }),
+    prisma.appSettings.findUnique({ where: { id: "default" }, select: { defaultUnitCostPhp: true } }),
+  ]);
+  const defaultUnitCostPhp = Number(settings?.defaultUnitCostPhp ?? 82);
 
   let created = 0;
   for (const order of orders) {
@@ -222,7 +247,8 @@ export async function detectFailedDeliveries(conn: ShopConnection, token: string
               totalPhp: Number(order.totalPhp),
             },
             events
-          )
+          ),
+          { defaultUnitCostPhp }
         );
         created++;
       }
@@ -286,22 +312,36 @@ export async function refreshOpenParcels(conn: ShopConnection, token: string, de
     take: RECHECK_BATCH,
   });
 
+  const CONCURRENCY = 5;
   let returned = 0;
-  for (const p of parcels) {
+  let checked = 0;
+  for (let i = 0; i < parcels.length; i += CONCURRENCY) {
     if (Date.now() >= deadline) break;
-    try {
-      const at = await courierReturnedAt(conn, token, p);
-      if (at) {
-        await markCourierReturned(p, at, conn.platform === Platform.SHOPEE ? "SHOPEE_TRACKING" : "TIKTOK_TRACKING", "Courier: delivered back to seller");
-        returned++;
-        continue;
-      }
-    } catch (err) {
-      console.error("[returns] refresh", p.orderSn, err);
-    }
-    await prisma.returnParcel.update({ where: { id: p.id }, data: { lastCheckedAt: new Date() } });
+    const chunk = parcels.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(
+      chunk.map(async (p) => {
+        try {
+          const at = await courierReturnedAt(conn, token, p);
+          if (at) {
+            await markCourierReturned(
+              p,
+              at,
+              conn.platform === Platform.SHOPEE ? "SHOPEE_TRACKING" : "TIKTOK_TRACKING",
+              "Courier: delivered back to seller"
+            );
+            return true;
+          }
+        } catch (err) {
+          console.error("[returns] refresh", p.orderSn, err);
+        }
+        await prisma.returnParcel.update({ where: { id: p.id }, data: { lastCheckedAt: new Date() } });
+        return false;
+      })
+    );
+    checked += chunk.length;
+    returned += results.filter(Boolean).length;
   }
-  return { checked: parcels.length, returned };
+  return { checked, returned };
 }
 
 async function courierReturnedAt(conn: ShopConnection, token: string, p: ReturnParcel): Promise<Date | null> {

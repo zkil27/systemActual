@@ -63,17 +63,37 @@ type Raw = Record<string, unknown>;
 const arr = (v: unknown): Raw[] => (Array.isArray(v) ? (v as Raw[]) : []);
 
 export type PickupChoice =
-  | { ok: true; pickup: { address_id: number; pickup_time_id?: string } }
+  | { ok: true; pickup: { address_id: number; pickup_time_id?: string }; dropoff?: never }
+  | { ok: true; dropoff: Record<string, unknown>; pickup?: never }
   | { ok: false; retry: boolean; reason: string };
 
-/** Pickup address and the earliest pickup slot from get_mass_shipping_parameter. */
+/**
+ * Pickup address and earliest slot from get_mass_shipping_parameter, with
+ * automatic fallback to drop-off when the courier channel requires drop-off
+ * and needs no manual branch picker.
+ */
 export function choosePickup(resp: Raw | null | undefined): PickupChoice {
   const needed = (resp?.info_needed ?? {}) as Raw;
   if (!("pickup" in needed)) {
+    if ("dropoff" in needed) {
+      const dropoffNeeds = (Array.isArray(needed.dropoff) ? needed.dropoff : []).map(String);
+      const branches = arr((resp?.dropoff as Raw | undefined)?.branch_list);
+      if (dropoffNeeds.includes("branch_id") && !branches.length) {
+        return {
+          ok: false,
+          retry: false,
+          reason: "This courier needs drop-off, not pickup. Arrange it in Seller Center.",
+        };
+      }
+      return {
+        ok: true,
+        dropoff: branches.length ? { branch_id: Number(branches[0].branch_id) } : {},
+      };
+    }
     return {
       ok: false,
       retry: false,
-      reason: "dropoff" in needed ? "This courier needs drop-off, not pickup. Arrange it in Seller Center." : "Shopee didn't offer pickup for this courier.",
+      reason: "Shopee didn't offer pickup for this courier.",
     };
   }
   const needs = (Array.isArray(needed.pickup) ? needed.pickup : []).map(String);

@@ -149,24 +149,25 @@ export function mergeDigitalStatus(existing: DigitalStatus | undefined, incoming
  * Idempotently upserts a return parcel and appends an audit event. Keyed by
  * returnDedupeKey(): one row per buyer return, one per failed-delivery order.
  */
-export async function upsertNormalizedReturn(input: NormalizedReturnInput) {
-  const settings = await prisma.appSettings.findUnique({ where: { id: "default" } });
-  const defaultUnitCost = Number(settings?.defaultUnitCostPhp ?? 82);
+export async function upsertNormalizedReturn(
+  input: NormalizedReturnInput,
+  opts?: { defaultUnitCostPhp?: number }
+) {
+  let defaultUnitCost = opts?.defaultUnitCostPhp;
+  if (defaultUnitCost === undefined && input.estimatedUnitCostPhp === undefined) {
+    const settings = await prisma.appSettings.findUnique({ where: { id: "default" } });
+    defaultUnitCost = Number(settings?.defaultUnitCostPhp ?? 82);
+  }
   const items = input.items?.length ? input.items : null;
   const qty = Math.max(1, items ? items.reduce((n, i) => n + i.quantity, 0) : input.quantity ?? 1);
   const unitCostTotal =
     input.estimatedUnitCostPhp !== undefined
       ? input.estimatedUnitCostPhp
-      : defaultUnitCost * qty;
+      : (defaultUnitCost ?? 82) * qty;
 
   const dedupeKey = returnDedupeKey(input.category, input.returnSn, input.orderSn);
   const where = { platform_dedupeKey: { platform: input.platform, dedupeKey } };
   const existing = await prisma.returnParcel.findUnique({ where });
-
-  const digitalReturnTaggedAt = pickEarliestTimestamp(
-    existing?.digitalReturnTaggedAt,
-    input.digitalReturnTaggedAt ?? input.eventTimestamp
-  );
 
   const courierReturnedToSellerAt = pickEarliestTimestamp(
     existing?.courierReturnedToSellerAt,
@@ -175,6 +176,18 @@ export async function upsertNormalizedReturn(input: NormalizedReturnInput) {
         ? input.eventTimestamp
         : null)
   );
+
+  const rawTaggedAt = pickEarliestTimestamp(
+    existing?.digitalReturnTaggedAt,
+    input.digitalReturnTaggedAt ?? input.eventTimestamp
+  );
+
+  const digitalReturnTaggedAt =
+    rawTaggedAt &&
+    courierReturnedToSellerAt &&
+    rawTaggedAt.getTime() > courierReturnedToSellerAt.getTime()
+      ? courierReturnedToSellerAt
+      : rawTaggedAt;
 
   const digitalStatus = mergeDigitalStatus(
     existing?.digitalStatus,
@@ -257,9 +270,8 @@ export async function upsertNormalizedReturn(input: NormalizedReturnInput) {
       rawStatus: input.rawStatus,
       description: input.eventDescription ?? null,
       eventTimestamp: input.eventTimestamp,
-      rawPayloadJson: input.rawPayloadJson
-        ? (input.rawPayloadJson as Prisma.InputJsonValue)
-        : Prisma.JsonNull,
+      // Omit rawPayloadJson to keep Supabase Free (<500 MB) lean.
+      rawPayloadJson: Prisma.JsonNull,
     },
     update: {},
   });

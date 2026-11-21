@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { CalendarDays, Check, CheckCircle2, ChevronRight, RefreshCw } from "lucide-react";
 import { AppShell, BarButton } from "@/components/AppShell";
@@ -17,6 +17,7 @@ import type { CategoryDailyTruth, DailyTruthReport } from "@/lib/analytics/daily
 import { formatPeso, formatSignedPeso, manilaDayLabel, manilaTime } from "@/lib/ui/format";
 import type { MoneySummary } from "@/lib/money/summary";
 import { haptic } from "@/lib/ui/motion";
+import { useLiveRefresh } from "@/lib/ui/use-live-refresh";
 
 type Range = "today" | "yesterday" | "7days";
 
@@ -89,7 +90,7 @@ function MoneyCard({ money }: { money: MoneySummary }) {
   return (
     <section
       aria-label={`Money credited ${formatPeso(money.creditedPhp)}`}
-      className="rounded-[var(--radius-card)] bg-white p-5 shadow-[var(--shadow-card)]"
+      className="rounded-[var(--radius-card)] bg-white p-5 shadow-[var(--shadow-card)] lg:h-full"
     >
       <span className="flex items-baseline justify-between gap-3">
         <span className="text-[17px] font-bold text-ink">Money credited</span>
@@ -118,14 +119,17 @@ function MissingStatus({ report }: { report: DailyTruthReport }) {
   const { overdueRtsCount, urgentDeadlineCount } = report.combined;
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3 lg:h-full">
       {missing > 0 ? (
         <Link
           key="missing"
           href="/returns?filter=missing"
-          className="anim-fade-in pressable flex items-center gap-4 rounded-[var(--radius-card)] bg-missing px-5 py-4 text-white shadow-[0_8px_24px_-10px_rgb(220_38_38/0.6)]"
+          className="anim-fade-in pressable flex items-center gap-4 rounded-[var(--radius-card)] bg-missing px-5 py-4 text-white shadow-[0_8px_24px_-10px_rgb(220_38_38/0.6)] lg:flex-1 lg:px-6"
         >
-          <AnimatedNumber value={missing} className="text-[44px] font-extrabold leading-none tracking-[-0.03em]" />
+          <AnimatedNumber
+            value={missing}
+            className="text-[44px] font-extrabold leading-none tracking-[-0.03em] lg:text-[56px]"
+          />
           <span className="min-w-0 flex-1">
             <span className="block text-[18px] font-bold leading-tight">Missing</span>
             <span className="block text-[15px] font-medium text-white">Sent back, not scanned</span>
@@ -133,7 +137,10 @@ function MissingStatus({ report }: { report: DailyTruthReport }) {
           <ChevronRight className="h-6 w-6 text-white/80" />
         </Link>
       ) : (
-        <div key="clear" className="anim-fade-in flex items-center gap-2.5 px-1 py-1">
+        <div
+          key="clear"
+          className="anim-fade-in flex items-center gap-2.5 px-1 py-1 lg:flex-1 lg:rounded-[var(--radius-card)] lg:bg-white lg:px-6 lg:py-5 lg:shadow-[var(--shadow-card)]"
+        >
           <CheckCircle2 className="h-6 w-6 text-arrived" />
           <span className="text-[17px] font-bold text-ink">All clear</span>
           <span className="text-[16px] text-ink-3">Nothing missing</span>
@@ -167,12 +174,138 @@ function MissingStatus({ report }: { report: DailyTruthReport }) {
   );
 }
 
+function OperationsStrip({ ops }: { ops: DailyTruthReport["operations"] }) {
+  const stockHeadline =
+    ops.outOfStockCount > 0
+      ? `${ops.outOfStockCount} out`
+      : ops.lowStockCount > 0
+        ? `${ops.lowStockCount} low`
+        : "All stocked";
+
+  const stockSub = [
+    ops.outOfStockCount > 0 && ops.lowStockCount > 0 ? `${ops.lowStockCount} low` : null,
+    ops.unlinkedCount > 0 ? `${ops.unlinkedCount} unlinked` : null,
+    ops.stockPushFailedCount > 0 ? `${ops.stockPushFailedCount} not updated` : null,
+    ops.shopeeBumpEnabled ? `Auto-bump ${ops.shopeeBoostedCount}/5` : "Auto-bump off",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const shipSub = [
+    `Shopee ${ops.readyShopeeCount} · TikTok ${ops.readyTikTokCount}`,
+    ops.coolingOffCount > 0 ? `${ops.coolingOffCount} <1h` : null,
+    `${ops.printedTodayCount} printed`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:col-span-12 lg:gap-6">
+      <Link
+        href="/waves"
+        className="pressable block rounded-[var(--radius-card)] bg-white p-5 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-float)]"
+      >
+        <span className="flex items-center justify-between gap-3">
+          <span className="text-[17px] font-bold text-ink">Ship orders</span>
+          <span className="flex items-center gap-2">
+            <span
+              className={`rounded-full px-2.5 py-0.5 text-[12px] font-bold ${
+                ops.printerOnline ? "bg-arrived-soft text-arrived" : "bg-slate-100 text-ink-3"
+              }`}
+            >
+              {ops.printerOnline ? "Printer on" : "Printer off"}
+            </span>
+            <ChevronRight className="h-5 w-5 text-ink-3" />
+          </span>
+        </span>
+        <span className="mt-3 flex items-baseline gap-2.5">
+          <AnimatedNumber
+            value={ops.readyToShipCount}
+            className="text-[34px] font-extrabold leading-none tracking-[-0.02em] text-ink"
+          />
+          <span className="text-[15px] font-medium text-ink-3">ready to ship</span>
+        </span>
+        <span className="mt-2 block text-[14px] text-ink-3 tabular-nums">{shipSub}</span>
+        {(ops.waveNeedAttentionCount > 0 || ops.runningWaveCount > 0 || ops.wavesAutoEnabled) && (
+          <span className="mt-2.5 flex flex-wrap gap-2 text-[13px] font-semibold">
+            {ops.runningWaveCount > 0 && <span className="text-brand">Shipping wave now</span>}
+            {ops.waveNeedAttentionCount > 0 && (
+              <span className="text-missing-ink">{ops.waveNeedAttentionCount} need attention</span>
+            )}
+            {ops.wavesAutoEnabled && (
+              <span className="text-arrived">
+                {ops.continuousAutoShip ? "Auto-ship every 15m" : "Auto wave times on"}
+              </span>
+            )}
+          </span>
+        )}
+      </Link>
+
+      <Link
+        href="/items"
+        className="pressable block rounded-[var(--radius-card)] bg-white p-5 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-float)]"
+      >
+        <span className="flex items-center justify-between gap-3">
+          <span className="text-[17px] font-bold text-ink">Stock &amp; Shopee bump</span>
+          <ChevronRight className="h-5 w-5 text-ink-3" />
+        </span>
+        <span className="mt-3 flex items-baseline justify-between gap-3">
+          <span
+            className={`text-[28px] font-extrabold leading-none tracking-[-0.02em] tabular-nums ${
+              ops.outOfStockCount > 0 ? "text-missing-ink" : ops.lowStockCount > 0 ? "text-amber-800" : "text-arrived"
+            }`}
+          >
+            {stockHeadline}
+          </span>
+          <span
+            className={`rounded-full px-2.5 py-1 text-[13px] font-bold tabular-nums ${
+              ops.shopeeBumpEnabled ? "bg-brand-soft text-brand" : "bg-slate-100 text-ink-3"
+            }`}
+          >
+            Bump {ops.shopeeBoostedCount}/5
+          </span>
+        </span>
+        <span className="mt-2.5 block text-[14px] text-ink-3 tabular-nums">{stockSub}</span>
+      </Link>
+    </div>
+  );
+}
+
+function TopItemRow({
+  item,
+  compact = false,
+}: {
+  item: DailyTruthReport["topItems"][number];
+  compact?: boolean;
+}) {
+  const detail = [item.variationName, `${item.failedCount} failed · ${item.returnCount} returned`]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <li className={`flex items-center gap-3.5 ${compact ? "px-4 py-3" : "py-3"}`}>
+      <ItemThumb src={item.itemImageUrl} alt={item.itemSummary} />
+      <span className="min-w-0 flex-1">
+        <span className={`block truncate font-semibold text-ink ${compact ? "text-[15px]" : "text-[16px]"}`}>
+          {item.itemSummary}
+        </span>
+        <span className={`block truncate text-ink-3 ${compact ? "text-[14px]" : "text-[15px]"}`}>
+          {detail}
+        </span>
+      </span>
+      <span className={`tabular-nums font-extrabold text-ink ${compact ? "text-[20px]" : "text-[22px]"}`}>
+        {item.totalCount}
+      </span>
+    </li>
+  );
+}
+
 function HomeSkeleton() {
   return (
-    <div className="space-y-4" aria-busy="true" aria-label="Loading">
-      <div className="h-[76px] animate-pulse rounded-[var(--radius-card)] bg-slate-200/60" />
-      <div className="h-[148px] animate-pulse rounded-[var(--radius-card)] bg-slate-200/60" />
-      <div className="h-[148px] animate-pulse rounded-[var(--radius-card)] bg-slate-200/60" />
+    <div className="space-y-4 lg:grid lg:grid-cols-12 lg:gap-6 lg:space-y-0" aria-busy="true" aria-label="Loading">
+      <div className="h-[76px] animate-pulse rounded-[var(--radius-card)] bg-slate-200/60 lg:col-span-5 lg:h-[148px]" />
+      <div className="h-[148px] animate-pulse rounded-[var(--radius-card)] bg-slate-200/60 lg:col-span-7" />
+      <div className="h-[148px] animate-pulse rounded-[var(--radius-card)] bg-slate-200/60 lg:col-span-6" />
+      <div className="hidden h-[148px] animate-pulse rounded-[var(--radius-card)] bg-slate-200/60 lg:col-span-6 lg:block" />
     </div>
   );
 }
@@ -183,26 +316,51 @@ export default function DashboardPage() {
   const [report, setReport] = useState<DailyTruthReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncState, setSyncState] = useState<"idle" | "syncing" | "done">("idle");
+  const [bgSyncHint, setBgSyncHint] = useState(false);
   const [selectedParcelId, setSelectedParcelId] = useState<string | null>(null);
   const [openCategory, setOpenCategory] = useState<CategoryKey | null>(null);
   const [topOpen, setTopOpen] = useState(false);
+  const cacheRef = useRef<Map<string, { report: DailyTruthReport; fetchedAt: number }>>(new Map());
 
-  const loadReport = useCallback(async () => {
-    try {
-      const params = new URLSearchParams({ range });
-      if (customDate) params.set("date", customDate);
-      const res = await fetch(`/api/dashboard?${params.toString()}`);
-      if (res.ok) setReport(await res.json());
-    } catch {
-      toast("No connection", "error");
-    } finally {
-      setLoading(false);
-    }
-  }, [range, customDate]);
+  const loadReport = useCallback(
+    async (opts?: { force?: boolean; silent?: boolean }) => {
+      const cacheKey = `${range}:${customDate}`;
+      const cached = cacheRef.current.get(cacheKey);
+      if (!opts?.force && cached) {
+        setReport(cached.report);
+        setLoading(false);
+        if (Date.now() - cached.fetchedAt < 15_000) return;
+      }
+      try {
+        const params = new URLSearchParams({ range });
+        if (customDate) params.set("date", customDate);
+        const res = await fetch(`/api/dashboard?${params.toString()}`, { cache: "no-store" });
+        if (res.ok) {
+          const data: DailyTruthReport & { syncing?: boolean } = await res.json();
+          cacheRef.current.set(cacheKey, { report: data, fetchedAt: Date.now() });
+          setReport(data);
+          setBgSyncHint(Boolean(data.syncing));
+        }
+      } catch {
+        if (!opts?.silent) toast("No connection", "error");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [range, customDate]
+  );
 
   useEffect(() => {
     loadReport();
   }, [loadReport]);
+
+  const { isSyncing: liveSyncing } = useLiveRefresh({
+    activeHint: bgSyncHint,
+    onRefresh: async () => {
+      cacheRef.current.clear();
+      await loadReport({ force: true, silent: true });
+    },
+  });
 
   async function handleSync() {
     if (syncState === "syncing") return;
@@ -215,7 +373,8 @@ export default function DashboardPage() {
         toast("Couldn't reach your stores", "error");
         return;
       }
-      await loadReport();
+      cacheRef.current.clear();
+      await loadReport({ force: true });
       haptic(8);
       setSyncState("done");
       toast(data.totalSynced > 0 ? `${data.totalSynced} updates` : "Up to date");
@@ -228,11 +387,12 @@ export default function DashboardPage() {
 
   const title = customDate ? manilaDayLabel(customDate) : RANGE_TITLES[range];
   const isDemoOnly = Boolean(report && report.shops.length > 0 && report.shops.every((s) => s.isDemo));
-  const toCheck = report?.attentionParcels.slice(0, 3) ?? [];
+  const toCheck = report?.attentionParcels.slice(0, 8) ?? [];
 
   return (
     <AppShell
       title={title}
+      width="wide"
       missingCount={report?.combined.missingNowCount}
       titleAccessory={
         isDemoOnly ? (
@@ -265,7 +425,7 @@ export default function DashboardPage() {
             ) : (
               <RefreshCw
                 key="sync"
-                className={`h-[22px] w-[22px] ${syncState === "syncing" ? "anim-spin" : ""}`}
+                className={`h-[22px] w-[22px] ${syncState === "syncing" || liveSyncing ? "anim-spin" : ""}`}
               />
             )}
           </BarButton>
@@ -281,22 +441,29 @@ export default function DashboardPage() {
             setCustomDate("");
             setRange(id);
           }}
+          className="lg:max-w-md"
         />
 
         {loading || !report ? (
           <HomeSkeleton />
         ) : (
-          <div className="anim-fade-in space-y-8">
-            <MoneyCard money={report.money} />
+          <div className="anim-fade-in grid grid-cols-1 gap-8 lg:grid-cols-12 lg:gap-6">
+            <div className="lg:col-span-5">
+              <MoneyCard money={report.money} />
+            </div>
 
-            <MissingStatus report={report} />
+            <div className="lg:col-span-7">
+              <MissingStatus report={report} />
+            </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {report.operations && <OperationsStrip ops={report.operations} />}
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:col-span-12 lg:gap-6">
               <CategoryCard kind="failed" stats={report.failedDelivery} onOpen={() => setOpenCategory("failed")} />
               <CategoryCard kind="refund" stats={report.returnRefund} onOpen={() => setOpenCategory("refund")} />
             </div>
 
-            <section>
+            <section className={report.topItems.length > 0 ? "lg:col-span-7" : "lg:col-span-12"}>
               <SectionHeader
                 title="To check"
                 action={
@@ -313,7 +480,7 @@ export default function DashboardPage() {
                 ) : (
                   <ul>
                     {toCheck.map((p, i) => (
-                      <li key={p.id}>
+                      <li key={p.id} className={i >= 3 ? "hidden lg:block" : undefined}>
                         <ParcelRow parcel={p} first={i === 0} onOpen={setSelectedParcelId} />
                       </li>
                     ))}
@@ -323,21 +490,51 @@ export default function DashboardPage() {
             </section>
 
             {report.topItems.length > 0 && (
-              <Group>
-                <button
-                  type="button"
-                  onClick={() => setTopOpen(true)}
-                  className="flex min-h-14 w-full items-center justify-between gap-3 px-5 py-3 text-left transition-colors duration-150 hover:bg-slate-50 active:bg-slate-100"
-                >
-                  <span className="shrink-0 whitespace-nowrap text-[17px] font-semibold text-ink">
-                    Most returned
-                  </span>
-                  <span className="flex min-w-0 items-center gap-1 text-[16px] text-ink-3">
-                    <span className="truncate">{report.topItems[0].itemSummary}</span>
-                    <ChevronRight className="h-5 w-5 shrink-0" />
-                  </span>
-                </button>
-              </Group>
+              <div className="lg:col-span-5">
+                <Group className="lg:hidden">
+                  <button
+                    type="button"
+                    onClick={() => setTopOpen(true)}
+                    className="flex min-h-14 w-full items-center justify-between gap-3 px-5 py-3 text-left transition-colors duration-150 hover:bg-slate-50 active:bg-slate-100"
+                  >
+                    <span className="shrink-0 whitespace-nowrap text-[17px] font-semibold text-ink">
+                      Most returned
+                    </span>
+                    <span className="flex min-w-0 items-center gap-1 text-[16px] text-ink-3">
+                      <span className="truncate">{report.topItems[0].itemSummary}</span>
+                      <ChevronRight className="h-5 w-5 shrink-0" />
+                    </span>
+                  </button>
+                </Group>
+
+                <section className="hidden lg:block">
+                  <SectionHeader
+                    title="Most returned"
+                    action={
+                      report.topItems.length > 5 ? (
+                        <button
+                          type="button"
+                          onClick={() => setTopOpen(true)}
+                          className="text-[16px] font-semibold text-brand hover:underline"
+                        >
+                          See all
+                        </button>
+                      ) : undefined
+                    }
+                  />
+                  <Group>
+                    <ul className="divide-y divide-hairline">
+                      {report.topItems.slice(0, 5).map((item) => (
+                        <TopItemRow
+                          key={`${item.itemSummary}-${item.variationName}`}
+                          item={item}
+                          compact
+                        />
+                      ))}
+                    </ul>
+                  </Group>
+                </section>
+              </div>
             )}
           </div>
         )}
@@ -358,18 +555,7 @@ export default function DashboardPage() {
       <Sheet open={topOpen} onClose={() => setTopOpen(false)} title="Most returned">
         <ul className="divide-y divide-hairline pt-1">
           {report?.topItems.map((item) => (
-            <li key={`${item.itemSummary}-${item.variationName}`} className="flex items-center gap-3.5 py-3">
-              <ItemThumb src={item.itemImageUrl} alt={item.itemSummary} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[16px] font-semibold text-ink">{item.itemSummary}</span>
-                <span className="block truncate text-[15px] text-ink-3">
-                  {[item.variationName, `${item.failedCount} failed · ${item.returnCount} returned`]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </span>
-              </span>
-              <span className="tabular-nums text-[22px] font-extrabold text-ink">{item.totalCount}</span>
-            </li>
+            <TopItemRow key={`${item.itemSummary}-${item.variationName}`} item={item} />
           ))}
         </ul>
       </Sheet>

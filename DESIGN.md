@@ -165,7 +165,7 @@ Fixed pixel scale, modelled on iOS text styles:
 | :--- | :--- | :--- |
 | Large title | 34 / 800 | One per screen |
 | Stat | 34 / 800 | The 3 stage numbers on each category card |
-| Status number | 44 / 800 | The Missing count |
+| Status number | 44 / 800 (56 on desktop) | The Missing count |
 | Title | 20 / 800 | Section and sheet headings |
 | Body | 17 / 400 | Settings rows, Most returned row |
 | Row title | 16 / 600 | Parcel rows |
@@ -175,13 +175,19 @@ Inputs are 16px or larger, which stops iOS from zooming in on focus.
 
 ## Layout
 
-- **Phone (`< 768px`):**
+- **Phone & tablet (`< 1024px`):**
   - 20px side margins and 32px between sections.
   - A 48px top bar holds icon actions. It's transparent at rest, and turns white at 80% with blur and a hairline once the large title scrolls under it.
   - A 60px translucent tab bar holds Today, Missing, Scan and More, with safe-area padding.
-- **Desktop (`>= 768px`):**
-  - The tab bar hides and the top bar shows the wordmark and inline navigation.
-  - Content is centred at `max-w-3xl`. Home's two category cards sit side by side.
+- **Desktop (`>= 1024px`):**
+  - A fixed 240px left sidebar replaces the bottom tab bar, grouped into Today, Returns (with the Missing badge) and Scan; Items & stock, Waves & pick lists and Upload a file; and Settings pinned at the bottom.
+  - A 64px sticky top bar holds page actions and the compact title once the large title scrolls under it.
+  - Content sits at `max-w-3xl` by default (Items, Upload) or `max-w-6xl` (`width="wide"`):
+    - **Today:** 12-column grid — Money credited (5) next to Missing (7); Failed delivery and Buyer return side by side (6 / 6); To check up to 8 rows (7) next to an inline top-5 Most returned list (5).
+    - **Returns:** Two-pane master–detail — filter bar and parcel list on the left alongside a sticky 420px (`xl`: 460px) parcel panel on the right, with `/`, `↑`, `↓` and `Esc` keyboard shortcuts.
+    - **Settings:** Two equal columns — Stores and Printer on the left; Costs, Telegram, Warehouse staff and Sign out on the right.
+    - **Waves:** 400px controls column on the left and the latest wave and pick groups on the right.
+  - Scan, Stock-in and Login stay phone-width.
 - **Home-screen app:**
   - `display: standalone` manifest with 192, 512 and maskable icons, generated in code.
   - Both `mobile-web-app-capable` and `apple-mobile-web-app-capable` tags, plus `viewport-fit=cover`.
@@ -225,7 +231,7 @@ Composite components:
 
 - **ParcelRow:** photo, name, then one line with status · category · size/colour, and a chevron.
 - **CategorySheet:** couriers, the Shopee/TikTok split, item cost at stake, and "See parcels".
-- **ParcelDetailSheet:**
+- **ParcelDetailSheet / ParcelDetailPanel:** share `ParcelDetailBody` (bottom sheet on phones and Home; sticky right-hand panel on desktop Returns):
   - photo and size pill, then status
   - a 3-stage timeline
   - one dispute action: copy, with the message itself folded

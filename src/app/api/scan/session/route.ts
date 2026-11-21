@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getScannerSession } from "@/lib/auth";
+import { getPackerStats } from "@/lib/shipping/outbound";
 import { getManilaDayBounds, getManilaTodayStr } from "@/lib/time";
 import { missingWhere } from "@/lib/returns/rules";
 
@@ -16,7 +17,7 @@ export async function GET() {
       ? { staffMemberId: session.staffId, scannedAt: { gte: start, lt: end } }
       : { scannedAt: { gte: start, lt: end } };
 
-  const [todayCount, recentScans, pendingMissingCount] = await Promise.all([
+  const [todayCount, recentScans, pendingMissingCount, packStats] = await Promise.all([
     prisma.physicalScan.count({ where: whereClause }),
     prisma.physicalScan.findMany({
       where: whereClause,
@@ -37,12 +38,15 @@ export async function GET() {
       },
     }),
     prisma.returnParcel.count({ where: missingWhere }),
+    getPackerStats(session),
   ]);
 
   return NextResponse.json({
     unlocked: true,
     actor: session,
     todayCount,
+    todayPackedCount: packStats.todayPackedCount,
+    unpackedWaveCount: packStats.unpackedWaveCount,
     pendingMissingCount,
     recentScans: recentScans.map((s) => ({
       id: s.id,

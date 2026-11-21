@@ -25,18 +25,24 @@ export interface ParcelRowData {
 export function ParcelRow({
   parcel,
   first,
+  selected = false,
   onOpen,
 }: {
   parcel: ParcelRowData;
   first: boolean;
+  selected?: boolean;
   onOpen: (id: string) => void;
 }) {
   const status = getParcelStatus(parcel);
   return (
     <button
       type="button"
+      data-parcel-id={parcel.id}
+      aria-current={selected ? "true" : undefined}
       onClick={() => onOpen(parcel.id)}
-      className="flex w-full items-center gap-3.5 pl-4 text-left transition-colors duration-150 hover:bg-slate-50 active:bg-slate-100"
+      className={`flex w-full items-center gap-3.5 pl-4 text-left transition-colors duration-150 active:bg-slate-100 lg:scroll-mt-60 lg:scroll-mb-6 ${
+        selected ? "bg-brand-soft" : "hover:bg-slate-50"
+      }`}
     >
       <ItemThumb src={parcel.itemImageUrl} alt={parcel.itemSummary} />
       <span

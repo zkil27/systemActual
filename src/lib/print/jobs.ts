@@ -29,12 +29,21 @@ export function applyReport(
     : { ok: true, data: { status: PrintJobStatus.FAILED, error: report.error.slice(0, 500) } };
 }
 
-/** Oldest queued jobs first, in wave order, claimed atomically for this PC. */
-export async function claimJobs(deviceId: string, now: Date = new Date()) {
-  await prisma.printJob.updateMany({
+/** Requeues jobs a PC claimed but never reported (crash, power cut). Run from worker tick, not idle polls. */
+export async function requeueStalePrintJobs(now: Date = new Date()): Promise<number> {
+  const res = await prisma.printJob.updateMany({
     where: { status: PrintJobStatus.PRINTING, claimedAt: { lt: new Date(now.getTime() - STALE_CLAIM_MS) } },
     data: { status: PrintJobStatus.QUEUED, deviceId: null, claimedAt: null },
   });
+  return res.count;
+}
+
+export function computeNextPollMs(jobCount: number, runningWaveCount: number): number {
+  return jobCount > 0 || runningWaveCount > 0 ? 3_000 : 30_000;
+}
+
+/** Oldest queued jobs first, in wave order, claimed atomically for this PC. */
+export async function claimJobs(deviceId: string, now: Date = new Date()) {
   const order = [{ createdAt: "asc" as const }, { position: "asc" as const }];
   const queued = await prisma.printJob.findMany({
     where: { status: PrintJobStatus.QUEUED },
@@ -48,26 +57,53 @@ export async function claimJobs(deviceId: string, now: Date = new Date()) {
     where: { id: { in: ids }, status: PrintJobStatus.QUEUED },
     data: { status: PrintJobStatus.PRINTING, deviceId, claimedAt: now, attempts: { increment: 1 } },
   });
-  return prisma.printJob.findMany({
+  const claimed = await prisma.printJob.findMany({
     where: { id: { in: ids }, status: PrintJobStatus.PRINTING, deviceId },
     orderBy: order,
-    select: { id: true, kind: true, title: true },
+    select: { id: true, kind: true, title: true, docUrl: true, docExpiresAt: true },
   });
+  return claimed.map((j) => ({
+    id: j.id,
+    kind: j.kind,
+    title: j.title,
+    docUrl: j.docUrl && j.docExpiresAt && j.docExpiresAt.getTime() > now.getTime() ? j.docUrl : null,
+  }));
 }
 
 export async function reportJob(deviceId: string, jobId: string, report: JobReport, now: Date = new Date()) {
   const job = await prisma.printJob.findUnique({
     where: { id: jobId },
-    select: { status: true, deviceId: true, kind: true, waveId: true, packageId: true },
+    select: { status: true, deviceId: true, kind: true, waveId: true, packageId: true, batchPackageIds: true },
   });
   if (!job) return { ok: false as const, reason: "job not found" };
   const result = applyReport(job, deviceId, report, now);
   if (!result.ok) return result;
   await prisma.printJob.update({ where: { id: jobId }, data: result.data });
-  if (report.status === "PRINTED" && job.kind === PrintJobKind.LABEL && job.waveId && job.packageId) {
-    await markLabelPrinted(job.waveId, job.packageId);
+  if (report.status === "PRINTED" && job.kind === PrintJobKind.LABEL && job.waveId) {
+    const pkgIds = job.batchPackageIds.length > 0 ? job.batchPackageIds : job.packageId ? [job.packageId] : [];
+    if (pkgIds.length > 0) {
+      await markLabelPrinted(job.waveId, pkgIds);
+    }
   }
   return { ok: true as const };
+}
+
+export async function reportJobsBatch(
+  deviceId: string,
+  items: Array<{ id: string } & JobReport>,
+  now: Date = new Date()
+) {
+  const outcomes: Array<{ id: string; ok: boolean; reason?: string }> = [];
+  for (const item of items) {
+    const res = await reportJob(
+      deviceId,
+      item.id,
+      item.status === "PRINTED" ? { status: "PRINTED" } : { status: "FAILED", error: item.error },
+      now
+    );
+    outcomes.push(res.ok ? { id: item.id, ok: true } : { id: item.id, ok: false, reason: res.reason });
+  }
+  return outcomes;
 }
 
 /** Pause: put this PC's unprinted claimed jobs back, so nothing is lost. */

@@ -6,8 +6,8 @@ import { prisma } from "@/lib/prisma";
  * SHA-256 is stored, so a database leak doesn't give out a working token.
  */
 export const DEVICE_TOKEN_PREFIX = "kpd_";
-/** The agent polls every few seconds; quiet for 2 minutes means the PC is off or offline. */
-export const ONLINE_WINDOW_MS = 2 * 60_000;
+/** The agent polls adaptively (up to every 30s when idle); quiet for 3 minutes means the PC is off or offline. */
+export const ONLINE_WINDOW_MS = 3 * 60_000;
 
 export function newDeviceToken(): { token: string; hash: string } {
   const token = DEVICE_TOKEN_PREFIX + crypto.randomBytes(24).toString("base64url");

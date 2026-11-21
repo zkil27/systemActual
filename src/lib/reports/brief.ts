@@ -9,6 +9,8 @@ export function formatTelegramDailyBrief(report: DailyTruthReport): string {
   const peso = (n: number) => `PHP ${Math.round(n).toLocaleString("en-PH")}`;
   const signed = (n: number) => (Math.round(n) < 0 ? `-${peso(-n)}` : peso(n));
 
+  const ops = report.operations;
+
   const lines: string[] = [
     `KYNA OPS — DAILY SUMMARY`,
     `${report.rangeLabel} (Manila Time)`,
@@ -19,6 +21,11 @@ export function formatTelegramDailyBrief(report: DailyTruthReport): string {
       ? [`• Ads: ${signed(m.adsPhp)} | Adjustments: ${signed(m.adjustmentsPhp)}`]
       : []),
     `• Orders placed (not yet money): ${m.ordersPlacedCount} — ${peso(m.ordersPlacedPhp)}`,
+    ``,
+    `SHIPPING & STOCK`,
+    `• Ready to ship: ${ops.readyToShipCount} (Shopee ${ops.readyShopeeCount} | TikTok ${ops.readyTikTokCount})`,
+    `• Printed today: ${ops.printedTodayCount}${ops.waveNeedAttentionCount ? ` | Need attention: ${ops.waveNeedAttentionCount}` : ""}`,
+    `• Stock: ${ops.outOfStockCount} out, ${ops.lowStockCount} low${ops.shopeeBumpEnabled ? ` | Auto-bump: ${ops.shopeeBoostedCount}/5` : ""}`,
     ``,
     `FAILED DELIVERY (Undelivered / COD)`,
     `• Driver Tagged Today: ${fd.taggedCount} (${fd.taggedPieces} pcs)`,
@@ -49,6 +56,6 @@ export function formatTelegramDailyBrief(report: DailyTruthReport): string {
   }
 
   lines.push(``);
-  lines.push(`Commands: /today  /failed  /returns  /missing  /overdue`);
+  lines.push(`Commands: /today  /ship  /stock  /money  /bump  /missing`);
   return lines.join("\n");
 }

@@ -41,9 +41,11 @@ describe("Shopee wallet transactions", () => {
 });
 
 describe("TikTok statements", () => {
-  it("counts a statement only once PAID, on its payment time", () => {
+  it("counts a statement once PAID or SETTLED, on its payment time", () => {
     const paid = mapTikTokStatement({ id: "7238804564097517339", payment_status: "PAID", settlement_amount: "1250.75", payment_time: 1795050000 });
     expect(paid).toMatchObject({ kind: MoneyKind.CREDIT, amountPhp: 1250.75, occurredAt: new Date(1795050000 * 1000) });
+    const settled = mapTikTokStatement({ id: "7709669377083311878", payment_status: "SETTLED", settlement_amount: "76553.94", payment_time: 1795136407 });
+    expect(settled).toMatchObject({ kind: MoneyKind.CREDIT, amountPhp: 76553.94, occurredAt: new Date(1795136407 * 1000) });
     expect(mapTikTokStatement({ id: "x", payment_status: "PROCESSING", settlement_amount: "10", payment_time: 0 })).toBeNull();
   });
 });

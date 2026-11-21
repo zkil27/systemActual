@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chooseTikTokPickup, tiktokLabel, tiktokShipDecision, tiktokShipErrors } from "@/lib/shipping/tiktok-rules";
+import { chooseTikTokHandover, chooseTikTokPickup, tiktokLabel, tiktokShipDecision, tiktokShipErrors } from "@/lib/shipping/tiktok-rules";
 
 const now = new Date("2026-11-21T02:00:00Z");
 const nowSec = Math.floor(now.getTime() / 1000);
@@ -75,6 +75,19 @@ describe("chooseTikTokPickup", () => {
       retry: true,
     });
     expect(chooseTikTokPickup({ can_pickup: false, can_drop_off: true }, now)).toMatchObject({ ok: false, retry: false });
+  });
+
+  it("chooseTikTokHandover falls back to DROP_OFF when pickup is unavailable", () => {
+    expect(chooseTikTokHandover({ can_pickup: false, can_drop_off: true }, now)).toEqual({
+      ok: true,
+      handoverMethod: "DROP_OFF",
+      slot: null,
+    });
+    expect(chooseTikTokHandover({ can_pickup: true, pickup_slots: [] }, now)).toEqual({
+      ok: true,
+      handoverMethod: "PICKUP",
+      slot: null,
+    });
   });
 });
 

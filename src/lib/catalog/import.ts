@@ -2,7 +2,7 @@ import { Platform, type ShopConnection } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { shopeeGet } from "@/lib/connectors/shopee";
 import { tiktokRequest } from "@/lib/connectors/tiktok";
-import { ensureGarmentFor } from "./garments";
+import { autoLinkAndInitCatalog, ensureGarmentFor } from "./garments";
 import { mapShopeeItem, mapTikTokProduct, type ImportedListing } from "./import-map";
 
 /**
@@ -13,6 +13,7 @@ import { mapShopeeItem, mapTikTokProduct, type ImportedListing } from "./import-
  */
 export const IMPORT_RUNNING = "RUNNING";
 export const IMPORT_DONE = "DONE";
+export const CATALOG_REFRESH_MS = 6 * 3600_000;
 
 async function saveImported(conn: ShopConnection, rows: ImportedListing[]) {
   const now = new Date();
@@ -70,21 +71,62 @@ async function tiktokPage(conn: ShopConnection, token: string, pageToken: string
     path: "/product/202502/products/search",
     accessToken: token,
     shopCipher: conn.shopCipher,
-    query: { page_size: "20", ...(pageToken ? { page_token: pageToken } : {}) },
+    query: { page_size: "10", ...(pageToken ? { page_token: pageToken } : {}) },
     body: { status: "ACTIVATE" },
   });
-  for (const p of (data?.products ?? []) as Array<{ id: string }>) {
+  const products = (data?.products ?? []) as Array<{ id: string }>;
+  const CHUNK = 5;
+  for (let i = 0; i < products.length; i += CHUNK) {
     if (Date.now() >= deadline) return { next: pageToken, done: false };
-    const product = await tiktokRequest({
-      method: "GET",
-      path: `/product/202309/products/${encodeURIComponent(p.id)}`,
-      accessToken: token,
-      shopCipher: conn.shopCipher,
-    });
-    await saveImported(conn, mapTikTokProduct(product));
+    const chunk = products.slice(i, i + CHUNK);
+    const details = await Promise.all(
+      chunk.map((p) =>
+        tiktokRequest({
+          method: "GET",
+          path: `/product/202309/products/${encodeURIComponent(p.id)}`,
+          accessToken: token,
+          shopCipher: conn.shopCipher,
+        })
+      )
+    );
+    for (const product of details) {
+      await saveImported(conn, mapTikTokProduct(product));
+    }
   }
   const next = data?.next_page_token ? String(data.next_page_token) : null;
   return { next, done: !next };
+}
+
+/**
+ * Automatically schedules a catalog/stock discovery import when a shop has
+ * never been imported or has new listings discovered from orders without shop
+ * stock or TikTok warehouse IDs.
+ */
+export async function maybeQueueCatalogDiscovery(conn: ShopConnection, now: Date = new Date()): Promise<boolean> {
+  if (conn.isDemo || !conn.accessToken || conn.stockImportStatus === IMPORT_RUNNING) return false;
+  if (conn.platform === Platform.TIKTOK && !conn.shopCipher) return false;
+
+  const stale = !conn.stockImportedAt || now.getTime() - conn.stockImportedAt.getTime() >= CATALOG_REFRESH_MS;
+  if (!stale) return false;
+
+  const needsDiscovery =
+    !conn.stockImportedAt ||
+    (await prisma.listingVariant.count({
+      where: {
+        shopConnectionId: conn.id,
+        OR: [
+          { availableStock: null },
+          ...(conn.platform === Platform.TIKTOK ? [{ warehouseId: null }] : []),
+        ],
+      },
+    })) > 0;
+
+  if (!needsDiscovery) return false;
+  await prisma.shopConnection.update({
+    where: { id: conn.id },
+    data: { stockImportStatus: IMPORT_RUNNING, stockImportCursor: null },
+  });
+  return true;
 }
 
 /**
@@ -105,6 +147,11 @@ export async function runStockImport(conn: ShopConnection, token: string, deadli
         where: { id: conn.id },
         data: { stockImportStatus: IMPORT_DONE, stockImportCursor: null, stockImportedAt: new Date() },
       });
+      try {
+        await autoLinkAndInitCatalog();
+      } catch (err) {
+        console.error("[stock import auto-link]", err);
+      }
       return { pages: pages + 1, done: true };
     }
     if (page.next === cursor && Date.now() >= deadline) break; // interrupted mid-page

@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse, after } from "next/server";
+import { Platform } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
 import { shopeeWebhookUrl, verifyShopeeWebhookSignature } from "@/lib/connectors/shopee";
+import { syncSingleOrder } from "@/lib/ledger/sync";
 import { runTick } from "@/lib/worker/tick";
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
@@ -18,17 +21,38 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid Shopee signature" }, { status: 401 });
   }
 
+  let payload: Record<string, unknown>;
   try {
-    JSON.parse(rawBody);
+    payload = JSON.parse(rawBody) as Record<string, unknown>;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  // Reply now; the push is only a wake-up. The tick pulls whatever changed
-  // since the shop's cursor, so duplicate or out-of-order pushes are harmless.
+  // Fast-track urgent cancellations before any in-flight wave ships the order.
+  const data = (payload?.data ?? {}) as Record<string, unknown>;
+  const orderSn = typeof data.ordersn === "string" ? data.ordersn : typeof data.order_sn === "string" ? data.order_sn : "";
+  const status = typeof data.status === "string" ? data.status.toUpperCase() : "";
+  if (orderSn && (status === "IN_CANCEL" || status === "CANCELLED")) {
+    await prisma.order
+      .updateMany({
+        where: { platform: Platform.SHOPEE, orderSn },
+        data: { cancelRequested: true, status },
+      })
+      .catch((err) => console.error("[Shopee fast-cancel]", err));
+  }
+
+  const shopExternalId =
+    payload?.shop_id !== undefined && payload?.shop_id !== null ? String(payload.shop_id) : undefined;
+
+  // Reply now; fast-sync the changed order first (<1s), then run the full tick.
   after(async () => {
     try {
-      await runTick("webhook");
+      if (orderSn) {
+        await syncSingleOrder(Platform.SHOPEE, orderSn, shopExternalId).catch((err) =>
+          console.error("[Shopee single-order sync error]", orderSn, err)
+        );
+      }
+      await runTick("webhook", { platform: Platform.SHOPEE });
     } catch (err) {
       console.error("[Shopee webhook tick error]", err);
     }

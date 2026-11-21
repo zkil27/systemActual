@@ -69,60 +69,59 @@ export async function GET(req: NextRequest) {
     }
 
     const where: Prisma.ReturnParcelWhereInput = conditions.length ? { AND: conditions } : {};
+    const limitRaw = Number(sp.get("limit"));
+    const offsetRaw = Number(sp.get("offset"));
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(100, Math.floor(limitRaw)) : 50;
+    const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? Math.floor(offsetRaw) : 0;
 
     const [totalCount, parcels] = await Promise.all([
       prisma.returnParcel.count({ where }),
       prisma.returnParcel.findMany({
         where,
-        include: {
-          scans: {
-            orderBy: { scannedAt: "desc" },
-            take: 1,
-            include: { staffMember: { select: { name: true } } },
-          },
+        select: {
+          id: true,
+          courier: true,
+          category: true,
+          itemSummary: true,
+          variationName: true,
+          quantity: true,
+          itemImageUrl: true,
+          physicallyReceivedAt: true,
+          physicalCondition: true,
+          expectsPhysicalReturn: true,
+          digitalStatus: true,
+          courierReturnedToSellerAt: true,
+          digitalReturnTaggedAt: true,
         },
         orderBy: [{ courierReturnedToSellerAt: "desc" }, { digitalReturnTaggedAt: "desc" }],
-        take: 300,
+        take: limit,
+        skip: offset,
       }),
     ]);
 
     const now = new Date();
-    const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
     return NextResponse.json({
       totalCount,
+      limit,
+      offset,
+      hasMore: offset + parcels.length < totalCount,
       parcels: parcels.map((p) => ({
         id: p.id,
-        platform: p.platform,
-        orderSn: p.orderSn,
-        returnSn: p.returnSn,
-        forwardTrackingNumber: p.forwardTrackingNumber,
-        rtsTrackingNumber: p.rtsTrackingNumber,
         courier: p.courier,
         category: p.category,
         digitalStatus: p.digitalStatus,
-        returnReason: p.returnReason,
         itemSummary: p.itemSummary,
         variationName: p.variationName,
         quantity: p.quantity,
         itemImageUrl: p.itemImageUrl,
-        orderTotalPhp: Number(p.orderTotalPhp),
-        estimatedUnitCostPhp: Number(p.estimatedUnitCostPhp),
         digitalReturnTaggedAt: p.digitalReturnTaggedAt?.toISOString() ?? null,
         courierReturnedToSellerAt: p.courierReturnedToSellerAt?.toISOString() ?? null,
         physicallyReceivedAt: p.physicallyReceivedAt?.toISOString() ?? null,
         physicalCondition: p.physicalCondition,
-        disputeDeadlineAt: p.disputeDeadlineAt?.toISOString() ?? null,
         isMissingDiscrepancy: isMissingDiscrepancy(p),
         isOverdueRts: isOverdueRts(p, overdueDays, now),
         expectsPhysicalReturn: p.expectsPhysicalReturn,
-        isUrgentDeadline: Boolean(
-          p.disputeDeadlineAt &&
-            p.disputeDeadlineAt.getTime() > now.getTime() - 2 * 60 * 60 * 1000 &&
-            p.disputeDeadlineAt.getTime() <= in24h.getTime()
-        ),
-        scannedByName: p.scans[0]?.staffMember.name ?? null,
-        photoCount: p.scans[0]?.photoUrls.length ?? 0,
       })),
     });
   } catch (err) {

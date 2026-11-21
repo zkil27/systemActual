@@ -58,7 +58,7 @@ export default function ImportsPage() {
         setError(data.error || "This file couldn't be read.");
         return;
       }
-      toast(`${data.imported} parcels added`);
+      toast(`${data.imported} ${data.kind === "orders" ? "orders" : data.kind === "stock" ? "items" : "parcels"} added`);
       setFile(null);
       await loadJobs();
     } catch {
@@ -97,6 +97,7 @@ export default function ImportsPage() {
             <span className="max-w-full truncate text-[17px] font-semibold text-ink">
               {file ? file.name : "Choose a CSV or Excel file"}
             </span>
+            <span className="text-[13px] text-ink-3">Supports Returns, Orders, or Product Stock exports</span>
             <input
               type="file"
               accept=".csv,.xlsx,.xls"
@@ -115,7 +116,7 @@ export default function ImportsPage() {
           )}
 
           <Button type="submit" size="lg" full disabled={!file || uploading}>
-            {uploading ? "Adding…" : "Add returns"}
+            {uploading ? "Importing…" : "Import file"}
           </Button>
         </form>
 

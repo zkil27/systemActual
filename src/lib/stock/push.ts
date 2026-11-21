@@ -67,16 +67,13 @@ async function pushTikTokProduct(shopCipher: string, token: string, rows: PushCa
 }
 
 /** Stock target per listing variation of one shop (only variants with a starting count). */
-async function candidatesFor(shopConnectionId: string): Promise<PushCandidate[]> {
-  const [listings, onShelf, committed, settings] = await Promise.all([
-    prisma.listingVariant.findMany({
-      where: { shopConnectionId, garmentVariant: { startingStockSetAt: { not: null } } },
-    }),
-    onShelfByVariant(),
-    committedByVariant(),
-    prisma.appSettings.findUnique({ where: { id: "default" }, select: { stockSafetyBuffer: true } }),
-  ]);
-  const buffer = settings?.stockSafetyBuffer ?? 0;
+async function candidatesFor(
+  shopConnectionId: string,
+  shared: { onShelf: Map<string, number>; committed: Map<string, number>; buffer: number }
+): Promise<PushCandidate[]> {
+  const listings = await prisma.listingVariant.findMany({
+    where: { shopConnectionId, garmentVariant: { startingStockSetAt: { not: null } } },
+  });
   return listings.map((l) => ({
     listingVariantId: l.id,
     platform: l.platform,
@@ -84,7 +81,11 @@ async function candidatesFor(shopConnectionId: string): Promise<PushCandidate[]>
     listingId: l.listingId,
     variationId: l.variationId,
     warehouseId: l.warehouseId,
-    target: availableToSell(onShelf.get(l.garmentVariantId!) ?? 0, committed.get(l.garmentVariantId!) ?? 0, buffer),
+    target: availableToSell(
+      shared.onShelf.get(l.garmentVariantId!) ?? 0,
+      shared.committed.get(l.garmentVariantId!) ?? 0,
+      shared.buffer
+    ),
     pushedStock: l.pushedStock,
   }));
 }
@@ -98,13 +99,22 @@ export async function pushStock(deadline: number) {
   const shops = await prisma.shopConnection.findMany({
     where: { isDemo: false, writesEnabled: true, accessToken: { not: null } },
   });
+  if (!shops.length) return { pushed: 0, failed: 0 };
+
+  const [onShelf, committed, settings] = await Promise.all([
+    onShelfByVariant(),
+    committedByVariant(),
+    prisma.appSettings.findUnique({ where: { id: "default" }, select: { stockSafetyBuffer: true } }),
+  ]);
+  const shared = { onShelf, committed, buffer: settings?.stockSafetyBuffer ?? 0 };
+
   let pushed = 0;
   let failed = 0;
   for (const shop of shops) {
     if (Date.now() >= deadline) break;
     if (shop.platform === Platform.TIKTOK && !shop.shopCipher) continue;
     const token = await ensureFreshToken(shop);
-    const plan = planPushes(await candidatesFor(shop.id));
+    const plan = planPushes(await candidatesFor(shop.id, shared));
 
     const byListing = new Map<string, PushCandidate[]>();
     for (const c of plan) byListing.set(c.listingId, [...(byListing.get(c.listingId) ?? []), c]);

@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { Prisma, StockReason } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { committedUnitsByListing } from "@/lib/catalog/garments";
-import { COMMITTED_ORDER_STATUSES } from "@/lib/catalog/variants";
+import { COMMITTED_ORDER_STATUSES, computeStartingStock } from "@/lib/catalog/variants";
 import { hasLeftWarehouse, RESTOCK_CONDITIONS, shipMovements } from "./rules";
 
 /** Pieces on the shelf per garment variant (only variants with a starting count). */
@@ -76,6 +76,48 @@ export async function resetStock(variantIds: string[]) {
 
 export class StockNotStartedError extends Error {}
 
+async function ensureVariantStartingStock(variant: {
+  id: string;
+  startingStockSetAt: Date | null;
+  listings: Array<{
+    platform: import("@prisma/client").Platform;
+    listingId: string;
+    variationId: string;
+    availableStock: number | null;
+  }>;
+}) {
+  if (variant.startingStockSetAt) return;
+  let units = 0;
+  if (variant.listings.length > 0) {
+    const listingIds = [...new Set(variant.listings.map((l) => l.listingId))];
+    const platforms = [...new Set(variant.listings.map((l) => l.platform))];
+    const groups = await Promise.all(
+      platforms.map((platform) =>
+        prisma.orderLine.groupBy({
+          by: ["listingId", "variationId"],
+          where: {
+            listingId: { in: listingIds },
+            order: { platform, status: { in: COMMITTED_ORDER_STATUSES[platform] } },
+          },
+          _sum: { quantity: true },
+        })
+      )
+    );
+    const committed = new Map<string, number>();
+    platforms.forEach((platform, idx) => {
+      for (const r of groups[idx]) {
+        committed.set(`${platform}:${r.listingId}:${r.variationId}`, r._sum.quantity ?? 0);
+      }
+    });
+    units = variant.listings.reduce(
+      (n, l) => n + (committed.get(`${l.platform}:${l.listingId}:${l.variationId}`) ?? 0),
+      0
+    );
+  }
+  const suggested = computeStartingStock(variant.listings, units).suggested ?? 0;
+  await setShelfCount(variant.id, suggested);
+}
+
 /**
  * Staff recorded a supplier delivery. `clientKey` comes from the phone, so a
  * double tap or a retry on a bad connection is only counted once.
@@ -86,9 +128,11 @@ export async function recordSupplierDelivery(opts: {
   staffMemberId: string;
   clientKey: string;
 }) {
-  const variant = await prisma.garmentVariant.findUniqueOrThrow({ where: { id: opts.variantId } });
-  // Before the owner's first count, a delivery would be counted twice (once here, once in her count).
-  if (!variant.startingStockSetAt) throw new StockNotStartedError("Ask the owner to set the starting count first.");
+  const variant = await prisma.garmentVariant.findUniqueOrThrow({
+    where: { id: opts.variantId },
+    include: { listings: { select: { platform: true, listingId: true, variationId: true, availableStock: true } } },
+  });
+  await ensureVariantStartingStock(variant);
   try {
     await prisma.stockMovement.create({
       data: {
@@ -102,6 +146,96 @@ export async function recordSupplierDelivery(opts: {
     return { duplicate: false };
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") return { duplicate: true };
+    throw err;
+  }
+}
+
+export type StaffStockReportMode = "EMPTY_SHELF" | "DEFECTIVE";
+
+/**
+ * Staff reported an empty shelf (0 left) or damaged/stained pieces found on the rack.
+ * Deducts shelf stock immediately so shops stop overselling; idempotent on `clientKey`.
+ */
+export async function recordStaffStockReport(opts: {
+  variantId: string;
+  mode: StaffStockReportMode;
+  quantity?: number;
+  note?: string;
+  staffMemberId: string;
+  staffName: string;
+  clientKey: string;
+}): Promise<{
+  duplicate: boolean;
+  garmentName: string;
+  variantLabel: string;
+  previousOnShelf: number;
+  newOnShelf: number;
+  delta: number;
+}> {
+  const variant = await prisma.garmentVariant.findUniqueOrThrow({
+    where: { id: opts.variantId },
+    include: {
+      garment: { select: { name: true } },
+      listings: { select: { platform: true, listingId: true, variationId: true, availableStock: true } },
+    },
+  });
+  await ensureVariantStartingStock(variant);
+  const previousOnShelf = (await onShelfByVariant([opts.variantId])).get(opts.variantId) ?? 0;
+
+  const cleanNote = opts.note?.trim() || "";
+  let delta: number;
+  let sourceKey: string;
+  let note: string;
+
+  if (opts.mode === "EMPTY_SHELF") {
+    delta = -Math.max(0, previousOnShelf);
+    sourceKey = `empty:${opts.clientKey}`;
+    note = cleanNote
+      ? `Shelf empty (0): ${cleanNote}`
+      : `Shelf empty (0 left) reported by ${opts.staffName}`;
+  } else {
+    const deduct = Math.min(
+      Math.max(0, previousOnShelf),
+      Math.max(1, Math.floor(opts.quantity ?? 1))
+    );
+    delta = -deduct;
+    sourceKey = `defect:${opts.clientKey}`;
+    note = cleanNote
+      ? `Damaged on shelf (-${deduct}): ${cleanNote}`
+      : `Damaged on shelf (-${deduct}) reported by ${opts.staffName}`;
+  }
+
+  const newOnShelf = Math.max(0, previousOnShelf + delta);
+  try {
+    await prisma.stockMovement.create({
+      data: {
+        garmentVariantId: opts.variantId,
+        delta,
+        reason: StockReason.ADJUSTMENT,
+        sourceKey,
+        staffMemberId: opts.staffMemberId,
+        note,
+      },
+    });
+    return {
+      duplicate: false,
+      garmentName: variant.garment.name,
+      variantLabel: variant.label,
+      previousOnShelf,
+      newOnShelf,
+      delta,
+    };
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return {
+        duplicate: true,
+        garmentName: variant.garment.name,
+        variantLabel: variant.label,
+        previousOnShelf,
+        newOnShelf: previousOnShelf,
+        delta: 0,
+      };
+    }
     throw err;
   }
 }
@@ -155,32 +289,66 @@ export async function recordShipments(deadline: number, batch = 200) {
     orderBy: { platformUpdatedAt: "asc" },
     take: batch,
   });
+  if (!orders.length) return { orders: 0, movements: 0 };
+
+  const shippedOrders = orders.filter((o) => hasLeftWarehouse(o.platform, o.status, o.shippedAt));
+  const byKey = new Map<string, { id: string; startingStockSetAt: Date | null } | null>();
+  if (shippedOrders.length > 0) {
+    const shopIds = [...new Set(shippedOrders.map((o) => o.shopConnectionId))];
+    const listingIds = [...new Set(shippedOrders.flatMap((o) => o.lines.map((l) => l.listingId)))];
+    if (listingIds.length > 0) {
+      const listings = await prisma.listingVariant.findMany({
+        where: {
+          shopConnectionId: { in: shopIds },
+          listingId: { in: listingIds },
+        },
+        select: {
+          shopConnectionId: true,
+          listingId: true,
+          variationId: true,
+          garmentVariant: { select: { id: true, startingStockSetAt: true } },
+        },
+      });
+      for (const l of listings) {
+        byKey.set(`${l.shopConnectionId}:${l.listingId}:${l.variationId}`, l.garmentVariant);
+      }
+    }
+  }
+
   let movements = 0;
+  const processedIds: string[] = [];
+  const allMovements: Array<{
+    garmentVariantId: string;
+    delta: number;
+    sourceKey: string;
+    reason: StockReason;
+  }> = [];
+
   for (const order of orders) {
     if (Date.now() >= deadline) break;
     if (hasLeftWarehouse(order.platform, order.status, order.shippedAt)) {
-      const listings = await prisma.listingVariant.findMany({
-        where: {
-          shopConnectionId: order.shopConnectionId,
-          OR: order.lines.map((l) => ({ listingId: l.listingId, variationId: l.variationId })),
-        },
-        include: { garmentVariant: { select: { id: true, startingStockSetAt: true } } },
-      });
-      const byKey = new Map(listings.map((l) => [`${l.listingId}:${l.variationId}`, l.garmentVariant]));
       const data = shipMovements(
         order,
         order.lines.map((l) => ({
           listingId: l.listingId,
           variationId: l.variationId,
           quantity: l.quantity,
-          variant: byKey.get(`${l.listingId}:${l.variationId}`) ?? null,
+          variant: byKey.get(`${order.shopConnectionId}:${l.listingId}:${l.variationId}`) ?? null,
         }))
       ).map((m) => ({ ...m, reason: StockReason.SHIPPED }));
-      if (data.length) {
-        movements += (await prisma.stockMovement.createMany({ data, skipDuplicates: true })).count;
-      }
+      allMovements.push(...data);
     }
-    await prisma.order.update({ where: { id: order.id }, data: { stockRecordedAt: new Date() } });
+    processedIds.push(order.id);
+  }
+
+  if (allMovements.length > 0) {
+    movements = (await prisma.stockMovement.createMany({ data: allMovements, skipDuplicates: true })).count;
+  }
+  if (processedIds.length > 0) {
+    await prisma.order.updateMany({
+      where: { id: { in: processedIds } },
+      data: { stockRecordedAt: new Date() },
+    });
   }
   return { orders: orders.length, movements };
 }

@@ -1,5 +1,6 @@
 import { Platform, Prisma, WaveStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { normalizeCourierName } from "@/lib/connectors/normalizer";
 import { syncReadyOrders } from "@/lib/ledger/sync";
 import { recheckOrders } from "./recheck";
 import {
@@ -15,11 +16,85 @@ import {
 
 const PREVIEW_KEEP_MS = 24 * 3600_000;
 
-const readyWhere = (): Prisma.OrderWhereInput => ({
+const readyWhere = (platform?: Platform): Prisma.OrderWhereInput => ({
   cancelRequested: false,
   shopConnection: { isDemo: false, accessToken: { not: null } },
-  OR: (Object.keys(READY_ORDER_STATUSES) as Platform[]).map((p) => ({ platform: p, status: { in: READY_ORDER_STATUSES[p] } })),
+  OR: (platform ? [platform] : (Object.keys(READY_ORDER_STATUSES) as Platform[])).map((p) => ({
+    platform: p,
+    status: { in: READY_ORDER_STATUSES[p] },
+  })),
 });
+
+export interface ReadyBreakdown {
+  totalReady: number;
+  coolingOff: number;
+  byPlatform: { SHOPEE: number; TIKTOK: number };
+  byCourier: Array<{ courier: string; count: number }>;
+}
+
+/** Fast ledger count of ready parcels by shop and courier (no external API calls). */
+export async function getReadyCounts(now: Date = new Date()): Promise<ReadyBreakdown> {
+  const orders = await prisma.order.findMany({
+    where: readyWhere(),
+    select: {
+      platform: true,
+      status: true,
+      cancelRequested: true,
+      platformCreatedAt: true,
+      packages: {
+        select: {
+          carrier: true,
+          status: true,
+          trackingNumber: true,
+          waveItems: { where: { activePackageId: { not: null } }, select: { id: true } },
+        },
+      },
+    },
+    take: MAX_WAVE_SIZE,
+  });
+
+  let totalReady = 0;
+  let coolingOff = 0;
+  const byPlatform = { SHOPEE: 0, TIKTOK: 0 };
+  const courierMap = new Map<string, number>();
+
+  for (const o of orders) {
+    for (const pkg of o.packages) {
+      const blocker = shipBlocker(
+        {
+          platform: o.platform,
+          status: o.status,
+          cancelRequested: o.cancelRequested,
+          platformCreatedAt: o.platformCreatedAt,
+          packageCount: o.packages.length,
+        },
+        { status: pkg.status, trackingNumber: pkg.trackingNumber, inActiveWave: pkg.waveItems.length > 0 },
+        now
+      );
+      if (blocker === "tooNew") {
+        coolingOff++;
+        continue;
+      }
+      if (blocker) {
+        if (blocker === "split") break;
+        continue;
+      }
+      totalReady++;
+      byPlatform[o.platform]++;
+      const courier = normalizeCourierName(pkg.carrier);
+      courierMap.set(courier, (courierMap.get(courier) ?? 0) + 1);
+    }
+  }
+
+  return {
+    totalReady,
+    coolingOff,
+    byPlatform,
+    byCourier: [...courierMap.entries()]
+      .map(([courier, count]) => ({ courier, count }))
+      .sort((a, b) => b.count - a.count || a.courier.localeCompare(b.courier)),
+  };
+}
 
 /**
  * Plans a wave without touching the shops: picks every package ready to ship,
@@ -37,24 +112,39 @@ export async function buildWavePreview(opts: {
   recheck?: boolean;
   /** Test waves: keep only the first N packages in label order (e.g. 5 for the first live wave). */
   limit?: number;
+  /** Optional filter to ship a single shop (Shopee or TikTok). */
+  platform?: Platform;
+  /** Optional filter to ship a single courier (e.g. "J&T Express"). */
+  courier?: string;
 }) {
   const now = opts.now ?? new Date();
   const cutoff = new Date(now.getTime() - MIN_ORDER_AGE_MS);
+  const targetCourier = opts.courier ? normalizeCourierName(opts.courier) : null;
 
   // Pull live ready-to-ship orders from the shops first so the wave stays
   // accurate even if the incremental ledger sync is still catching up.
   const liveSyncDeadline = Date.now() + Math.max(0, opts.deadline - Date.now()) * 0.5;
-  const freshLiveKeys = await syncReadyOrders(liveSyncDeadline);
+  const freshLiveKeys = await syncReadyOrders(liveSyncDeadline, opts.platform);
 
-  const [tooNew, candidates] = await Promise.all([
-    prisma.order.count({ where: { ...readyWhere(), platformCreatedAt: { gt: cutoff } } }),
+  const [tooNew, rawCandidates] = await Promise.all([
+    prisma.order.count({ where: { ...readyWhere(opts.platform), platformCreatedAt: { gt: cutoff } } }),
     prisma.order.findMany({
-      where: { ...readyWhere(), platformCreatedAt: { lte: cutoff } },
-      select: { id: true, orderSn: true, platform: true, shopConnectionId: true },
+      where: { ...readyWhere(opts.platform), platformCreatedAt: { lte: cutoff } },
+      select: {
+        id: true,
+        orderSn: true,
+        platform: true,
+        shopConnectionId: true,
+        packages: { select: { carrier: true } },
+      },
       orderBy: { platformCreatedAt: "asc" },
       take: MAX_WAVE_SIZE,
     }),
   ]);
+
+  const candidates = targetCourier
+    ? rawCandidates.filter((c) => c.packages.some((p) => normalizeCourierName(p.carrier) === targetCourier))
+    : rawCandidates;
 
   let rechecked: Set<string>;
   if (opts.recheck === false) {
@@ -101,6 +191,7 @@ export async function buildWavePreview(opts: {
 
   for (const o of orders) {
     for (const pkg of o.packages) {
+      if (targetCourier && normalizeCourierName(pkg.carrier) !== targetCourier) continue;
       const blocker = shipBlocker(
         { platform: o.platform, status: o.status, cancelRequested: o.cancelRequested, platformCreatedAt: o.platformCreatedAt, packageCount: o.packages.length },
         { status: pkg.status, trackingNumber: pkg.trackingNumber, inActiveWave: pkg.waveItems.length > 0 },

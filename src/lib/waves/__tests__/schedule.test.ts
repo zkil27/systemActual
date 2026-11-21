@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { dueWaveSlot, nextWaveAt, parseWaveTimes, retryUpdate } from "@/lib/waves/schedule";
+import {
+  dueWaveSlot,
+  formatWaveScheduleSetting,
+  isContinuousWave,
+  nextWaveAt,
+  parseWaveTimes,
+  retryUpdate,
+} from "@/lib/waves/schedule";
 import { waveDoneMessage } from "@/lib/waves/run";
 
 // Manila = UTC+8. 08:30 Manila on Nov 21 = 00:30Z.
@@ -31,6 +38,15 @@ describe("dueWaveSlot", () => {
 
   it("yesterday's slot doesn't block today's", () => {
     expect(dueWaveSlot(manila("08:30"), times, "2026-11-20 08:30")).toBe("2026-11-21 08:30");
+  });
+
+  it("supports continuous 15-minute buckets without duplicating within the same bucket", () => {
+    expect(isContinuousWave("CONTINUOUS,08:30,12:30")).toBe(true);
+    expect(formatWaveScheduleSetting(["12:30", "08:30"], true)).toBe("CONTINUOUS,08:30,12:30");
+    expect(dueWaveSlot(manila("09:07"), [], null, true)).toBe("2026-11-21 C:09:00");
+    expect(dueWaveSlot(manila("09:14"), [], "2026-11-21 C:09:00", true)).toBeNull();
+    expect(dueWaveSlot(manila("09:15"), [], "2026-11-21 C:09:00", true)).toBe("2026-11-21 C:09:15");
+    expect(nextWaveAt(manila("09:07"), [], true)?.toISOString()).toBe(manila("09:15").toISOString());
   });
 });
 
