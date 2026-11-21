@@ -3,6 +3,7 @@ import { Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { verifyTikTokWebhookSignature } from "@/lib/connectors/tiktok";
 import { syncSingleOrder } from "@/lib/ledger/sync";
+import { notifyCancelledPrintedOrder } from "@/lib/shipping/outbound";
 import { runTick } from "@/lib/worker/tick";
 
 export const maxDuration = 120;
@@ -32,7 +33,8 @@ export async function POST(req: NextRequest) {
   const orderSn = typeof data.order_id === "string" ? data.order_id : "";
   const status = String(data.order_status ?? "").toUpperCase();
   const cancelStatus = String(data.cancel_status ?? "").toUpperCase();
-  if (orderSn && (status === "CANCELLED" || cancelStatus.includes("CANCEL"))) {
+  const isCancelEvent = Boolean(orderSn && (status === "CANCELLED" || cancelStatus.includes("CANCEL")));
+  if (isCancelEvent) {
     await prisma.order
       .updateMany({
         where: { platform: Platform.TIKTOK, orderSn },
@@ -50,6 +52,11 @@ export async function POST(req: NextRequest) {
   // first (<1s) so dashboards reflect it immediately, then run the full tick.
   after(async () => {
     try {
+      if (isCancelEvent) {
+        await notifyCancelledPrintedOrder(Platform.TIKTOK, orderSn).catch((err) =>
+          console.error("[TikTok cancel-pull alert]", orderSn, err)
+        );
+      }
       if (orderSn) {
         await syncSingleOrder(Platform.TIKTOK, orderSn, shopExternalId).catch((err) =>
           console.error("[TikTok single-order sync error]", orderSn, err)

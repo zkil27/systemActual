@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { WaveStatus } from "@prisma/client";
+import { WaveItemStatus, WaveStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getScannerSession, redactOutboundPackageForStaff } from "@/lib/auth";
 import {
+  cancelledToPullWhere,
   enrichPackageLineImages,
   OUTBOUND_PACKAGE_INCLUDE,
-  unpackedWaveItemWhere,
+  unpickedPrintedWhere,
 } from "@/lib/shipping/outbound";
-import { getManilaDayBounds, getManilaTodayStr } from "@/lib/time";
 import { groupPickItems, parsePickItemLabel, type WaveSummary } from "@/lib/waves/plan";
 
 export interface StaffPickVariant {
@@ -43,66 +43,66 @@ export async function GET() {
     );
   }
 
-  const { start, end } = getManilaDayBounds(getManilaTodayStr());
-
-  const [latestWave, unpackedItems] = await Promise.all([
+  const now = new Date();
+  const [latestWave, cancelledItems, unpickedItems] = await Promise.all([
     prisma.wave.findFirst({
       where: { status: { in: [WaveStatus.RUNNING, WaveStatus.DONE, WaveStatus.PREVIEW] } },
       orderBy: { createdAt: "desc" },
     }),
     prisma.waveItem.findMany({
-      where: unpackedWaveItemWhere(start, end),
-      include: {
-        package: { include: OUTBOUND_PACKAGE_INCLUDE },
-      },
+      where: cancelledToPullWhere(now),
+      include: { package: { include: OUTBOUND_PACKAGE_INCLUDE } },
+      orderBy: { updatedAt: "desc" },
+      take: 50,
+    }),
+    prisma.waveItem.findMany({
+      where: unpickedPrintedWhere(now),
+      include: { package: { include: OUTBOUND_PACKAGE_INCLUDE } },
       orderBy: [{ wave: { createdAt: "asc" } }, { position: "asc" }],
-      take: 250,
+      take: 150,
     }),
   ]);
 
-  const enrichedUnpackedPkgs = await enrichPackageLineImages(
-    unpackedItems.map((u) => u.package)
-  );
-  const unpackedParcels = enrichedUnpackedPkgs.map(redactOutboundPackageForStaff);
+  const [enrichedCancelled, enrichedUnpicked] = await Promise.all([
+    enrichPackageLineImages(cancelledItems.map((c) => c.package)),
+    enrichPackageLineImages(unpickedItems.map((u) => u.package)),
+  ]);
+
+  const cancelledToPull = enrichedCancelled.map(redactOutboundPackageForStaff);
+  const unpickedParcels = enrichedUnpicked.map(redactOutboundPackageForStaff);
 
   if (!latestWave) {
     return NextResponse.json({
       wave: null,
-      unpackedParcels,
+      cancelledToPull,
+      unpickedParcels,
     });
   }
 
   const summary = latestWave.summaryJson as unknown as WaveSummary;
 
-  // Build photo + GarmentVariant lookup from the wave's order lines so pick cards
-  // show garment photos and can deep-link to "Shelf empty?" for that exact item.
-  const waveLines = await prisma.waveItem.findMany({
-    where: { waveId: latestWave.id },
-    select: {
-      package: {
-        select: {
-          order: {
-            select: {
-              shopConnectionId: true,
-              lines: {
-                select: {
-                  listingId: true,
-                  variationId: true,
-                  name: true,
-                  variationName: true,
-                  imageUrl: true,
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  });
+  const [waveItems, statusCounts] = await Promise.all([
+    prisma.waveItem.findMany({
+      where: { waveId: latestWave.id },
+      include: { package: { include: OUTBOUND_PACKAGE_INCLUDE } },
+      orderBy: { position: "asc" },
+    }),
+    prisma.waveItem.groupBy({
+      by: ["status"],
+      where: { waveId: latestWave.id },
+      _count: { _all: true },
+    }),
+  ]);
 
-  const shopIds = [...new Set(waveLines.map((w) => w.package.order.shopConnectionId))];
+  const printedCount =
+    statusCounts.find((c) => c.status === WaveItemStatus.PRINTED)?._count._all ?? 0;
+  const cancelledInWaveCount =
+    statusCounts.find((c) => c.status === WaveItemStatus.SKIPPED_CANCELLED)?._count._all ?? 0;
+  const notPrintedCount = Math.max(0, latestWave.parcelCount - printedCount - cancelledInWaveCount);
+
+  const shopIds = [...new Set(waveItems.map((w) => w.package.order.shopConnectionId))];
   const listingIds = [
-    ...new Set(waveLines.flatMap((w) => w.package.order.lines.map((l) => l.listingId))),
+    ...new Set(waveItems.flatMap((w) => w.package.order.lines.map((l) => l.listingId))),
   ];
   const listings =
     shopIds.length > 0 && listingIds.length > 0
@@ -134,7 +134,7 @@ export async function GET() {
   >();
   const imageByShortName = new Map<string, string>();
 
-  for (const w of waveLines) {
+  for (const w of waveItems) {
     const shopId = w.package.order.shopConnectionId;
     for (const l of w.package.order.lines) {
       const lv = listingByKey.get(`${shopId}:${l.listingId}:${l.variationId}`);
@@ -192,16 +192,31 @@ export async function GET() {
     };
   });
 
+  // Optional visual checklist ONLY for 2+ piece orders (where packing errors happen most).
+  const multiWavePkgs = waveItems
+    .filter((w) => {
+      const pieces = w.package.order.lines.reduce((sum, l) => sum + l.quantity, 0);
+      return pieces > 1 || w.package.order.lines.length > 1;
+    })
+    .map((w) => w.package);
+  const enrichedMulti = await enrichPackageLineImages(multiWavePkgs);
+  const multiParcels = enrichedMulti.map(redactOutboundPackageForStaff);
+
   return NextResponse.json({
     wave: {
       id: latestWave.id,
       status: latestWave.status,
       createdAt: latestWave.createdAt.toISOString(),
       parcelCount: latestWave.parcelCount,
+      printedCount,
+      notPrintedCount,
       singles: summary.singles ?? 0,
       multis: summary.multis ?? 0,
+      courierTotals: (summary.groups ?? []).map((g) => ({ title: g.title, count: g.count })),
       groups,
+      multiParcels,
     },
-    unpackedParcels,
+    cancelledToPull,
+    unpickedParcels,
   });
 }

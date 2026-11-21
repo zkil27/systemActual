@@ -38,13 +38,21 @@ export function Sheet({
       restoreFocus.current = document.activeElement as HTMLElement | null;
       setMounted(true);
       setDrag(0);
-      const id = requestAnimationFrame(() => requestAnimationFrame(() => setShown(true)));
-      return () => cancelAnimationFrame(id);
+      return;
     }
     setShown(false);
     const t = setTimeout(() => setMounted(false), EXIT_MS);
     return () => clearTimeout(t);
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !mounted) return;
+    let id = 0;
+    id = requestAnimationFrame(() => {
+      id = requestAnimationFrame(() => setShown(true));
+    });
+    return () => cancelAnimationFrame(id);
+  }, [open, mounted]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -146,7 +154,7 @@ export function Sheet({
               }`
         } ${
           shown
-            ? "opacity-100"
+            ? "translate-y-0 opacity-100"
             : "translate-y-full motion-reduce:opacity-0 md:translate-y-6 md:opacity-0"
         }`}
         style={shown && drag !== 0 ? { transform: `translateY(${drag}px)` } : undefined}

@@ -1,5 +1,54 @@
+import { Platform } from "@prisma/client";
 import { describe, expect, it } from "vitest";
-import { evaluateOutboundScan, isOrderCancelledForPacking } from "@/lib/shipping/outbound";
+import {
+  evaluateOutboundScan,
+  isAwaitingRiderPickup,
+  isOrderCancelledForPacking,
+  lastTrackingDigits,
+} from "@/lib/shipping/outbound";
+
+describe("isAwaitingRiderPickup", () => {
+  it("uses shippedAt === null for Shopee PROCESSED orders", () => {
+    expect(
+      isAwaitingRiderPickup({ platform: Platform.SHOPEE, status: "PROCESSED", shippedAt: null })
+    ).toBe(true);
+    expect(
+      isAwaitingRiderPickup({
+        platform: Platform.SHOPEE,
+        status: "PROCESSED",
+        shippedAt: new Date("2026-11-22T02:00:00Z"),
+      })
+    ).toBe(false);
+    expect(
+      isAwaitingRiderPickup({ platform: Platform.SHOPEE, status: "SHIPPED", shippedAt: null })
+    ).toBe(false);
+  });
+
+  it("uses AWAITING_COLLECTION status for TikTok even when shippedAt (rts_time) is set", () => {
+    expect(
+      isAwaitingRiderPickup({
+        platform: Platform.TIKTOK,
+        status: "AWAITING_COLLECTION",
+        shippedAt: new Date("2026-11-22T02:00:00Z"),
+      })
+    ).toBe(true);
+    expect(
+      isAwaitingRiderPickup({
+        platform: Platform.TIKTOK,
+        status: "IN_TRANSIT",
+        shippedAt: new Date("2026-11-22T02:00:00Z"),
+      })
+    ).toBe(false);
+  });
+});
+
+describe("lastTrackingDigits", () => {
+  it("extracts last 6 uppercase characters with orderSn fallback", () => {
+    expect(lastTrackingDigits("spxph0123456789", "261122ORD1")).toBe("456789");
+    expect(lastTrackingDigits(null, "261122abc999")).toBe("ABC999");
+    expect(lastTrackingDigits("1234", "ORD1")).toBe("1234");
+  });
+});
 
 describe("isOrderCancelledForPacking", () => {
   it("flags cancelRequested, CANCELLED, and IN_CANCEL orders", () => {

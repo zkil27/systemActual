@@ -47,6 +47,8 @@ export async function GET() {
     todayCount,
     todayPackedCount: packStats.todayPackedCount,
     unpackedWaveCount: packStats.unpackedWaveCount,
+    cancelledToPullCount: packStats.cancelledToPullCount,
+    unpickedOverdueCount: packStats.unpickedOverdueCount,
     pendingMissingCount,
     recentScans: recentScans.map((s) => ({
       id: s.id,

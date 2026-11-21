@@ -3,6 +3,7 @@ import { Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { shopeeWebhookUrl, verifyShopeeWebhookSignature } from "@/lib/connectors/shopee";
 import { syncSingleOrder } from "@/lib/ledger/sync";
+import { notifyCancelledPrintedOrder } from "@/lib/shipping/outbound";
 import { runTick } from "@/lib/worker/tick";
 
 export const maxDuration = 120;
@@ -32,7 +33,8 @@ export async function POST(req: NextRequest) {
   const data = (payload?.data ?? {}) as Record<string, unknown>;
   const orderSn = typeof data.ordersn === "string" ? data.ordersn : typeof data.order_sn === "string" ? data.order_sn : "";
   const status = typeof data.status === "string" ? data.status.toUpperCase() : "";
-  if (orderSn && (status === "IN_CANCEL" || status === "CANCELLED")) {
+  const isCancelEvent = Boolean(orderSn && (status === "IN_CANCEL" || status === "CANCELLED"));
+  if (isCancelEvent) {
     await prisma.order
       .updateMany({
         where: { platform: Platform.SHOPEE, orderSn },
@@ -47,6 +49,11 @@ export async function POST(req: NextRequest) {
   // Reply now; fast-sync the changed order first (<1s), then run the full tick.
   after(async () => {
     try {
+      if (isCancelEvent) {
+        await notifyCancelledPrintedOrder(Platform.SHOPEE, orderSn).catch((err) =>
+          console.error("[Shopee cancel-pull alert]", orderSn, err)
+        );
+      }
       if (orderSn) {
         await syncSingleOrder(Platform.SHOPEE, orderSn, shopExternalId).catch((err) =>
           console.error("[Shopee single-order sync error]", orderSn, err)

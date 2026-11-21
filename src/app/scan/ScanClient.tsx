@@ -5,31 +5,30 @@ import Link from "next/link";
 import {
   AlertTriangle,
   Camera,
-  Check,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
   Delete,
   Lock,
   OctagonAlert,
-  PackageCheck,
-  PackagePlus,
   Printer,
-  RefreshCw,
   ScanBarcode,
-  ShieldAlert,
+  Search,
   X,
 } from "lucide-react";
-import { Button } from "@/components/ui/Button";
+import { Button, Group } from "@/components/ui/Button";
 import { ItemThumb } from "@/components/ui/ItemThumb";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { Sheet } from "@/components/ui/Sheet";
+import { Toaster, toast } from "@/components/ui/Toast";
 import type { StaffSafeOutboundPackage, StaffSafeParcel } from "@/lib/auth";
-import type { OutboundScanEvaluation } from "@/lib/shipping/outbound";
 import { CONDITIONS, DEFAULT_CONDITION, findCondition, type ConditionTone } from "@/lib/ui/conditions";
 import { compressImageFile } from "@/lib/ui/compress-image";
-import { manilaDateTime, manilaTime, shortCourier } from "@/lib/ui/format";
+import { shortCourier } from "@/lib/ui/format";
 import { haptic } from "@/lib/ui/motion";
 import { categoryLabel } from "@/lib/ui/parcel-status";
 import { PIN_LENGTH, applyPinKey, keyFromKeyboard } from "@/lib/ui/pin";
-import type { StaffPickGroup } from "@/app/api/scan/wave/route";
+import { PickListSection, type StaffWaveData } from "./PickListSection";
 
 export interface StaffOption {
   id: string;
@@ -58,43 +57,25 @@ export interface ScanInitialState {
   actorName: string;
   isOwnerActor: boolean;
   todayCount: number;
-  todayPackedCount: number;
-  unpackedWaveCount: number;
+  cancelledToPullCount: number;
+  unpickedOverdueCount: number;
   pendingMissing: number;
   recentScans: RecentScanItem[];
   staffList: StaffOption[];
 }
 
-interface StaffWaveData {
-  id: string;
-  status: string;
-  createdAt: string;
-  parcelCount: number;
-  singles: number;
-  multis: number;
-  groups: StaffPickGroup[];
-}
-
-type PackerTab = "pack" | "pick" | "returns";
+type PackerTab = "pick" | "returns";
 
 const PACKER_TABS: readonly { id: PackerTab; label: string }[] = [
-  { id: "pack", label: "Pack" },
   { id: "pick", label: "Pick list" },
   { id: "returns", label: "Returns" },
 ];
 
-const COURIER_LOCKS = [
-  { id: "ALL", label: "All couriers" },
-  { id: "J&T Express", label: "J&T" },
-  { id: "SPX Express", label: "SPX" },
-  { id: "Flash Express", label: "Flash" },
-] as const;
-
-const TONE_SELECTED: Record<ConditionTone, string> = {
-  good: "bg-arrived-soft shadow-[inset_0_0_0_2px_var(--color-arrived)]",
-  neutral: "bg-slate-100 shadow-[inset_0_0_0_2px_var(--color-ink-2)]",
-  warn: "bg-failed-soft shadow-[inset_0_0_0_2px_#d97706]",
-  bad: "bg-missing-soft shadow-[inset_0_0_0_2px_var(--color-missing)]",
+const TONE_SELECTED_ROW: Record<ConditionTone, string> = {
+  good: "bg-arrived-soft/75",
+  neutral: "bg-slate-100/90",
+  warn: "bg-failed-soft/75",
+  bad: "bg-missing-soft/80",
 };
 
 const TONE_DOT: Record<ConditionTone, string> = {
@@ -129,33 +110,29 @@ function getAudioContext(): AudioContext | null {
   return sharedAudioCtx;
 }
 
-function playBeep(kind: "ok" | "warn" | "error" | "multi") {
+function playBeep(kind: "ok" | "warn" | "error") {
   try {
     const ctx = getAudioContext();
     if (!ctx) return;
     if (ctx.state === "suspended") {
       void ctx.resume();
     }
-    const beep = (freq: number, delay: number, duration: number) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.frequency.value = freq;
-      gain.gain.value = 0.09;
-      const startAt = ctx.currentTime + delay;
-      osc.start(startAt);
-      osc.stop(startAt + duration);
-    };
-    if (kind === "multi") {
-      beep(740, 0, 0.09);
-      beep(988, 0.11, 0.14);
-      return;
-    }
-    beep(kind === "ok" ? 880 : kind === "warn" ? 520 : 260, 0, kind === "ok" ? 0.12 : 0.28);
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = kind === "ok" ? 880 : kind === "warn" ? 520 : 280;
+    gain.gain.value = 0.08;
+    osc.start();
+    osc.stop(ctx.currentTime + (kind === "ok" ? 0.12 : 0.24));
   } catch {
     // Ignore audio errors on restricted browsers
   }
+}
+
+function last6(trackingNumber: string | null, orderSn: string): string {
+  const raw = (trackingNumber?.trim() || orderSn.trim()).toUpperCase();
+  return raw.length > 6 ? raw.slice(-6) : raw;
 }
 
 function CheckDraw() {
@@ -182,14 +159,14 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
   const [actorName, setActorName] = useState(initial.actorName);
   const [isOwnerActor, setIsOwnerActor] = useState(initial.isOwnerActor);
   const [todayCount, setTodayCount] = useState(initial.todayCount);
-  const [todayPackedCount, setTodayPackedCount] = useState(initial.todayPackedCount);
-  const [unpackedWaveCount, setUnpackedWaveCount] = useState(initial.unpackedWaveCount);
+  const [cancelledToPullCount, setCancelledToPullCount] = useState(initial.cancelledToPullCount);
+  const [unpickedOverdueCount, setUnpickedOverdueCount] = useState(initial.unpickedOverdueCount);
   const [pendingMissing, setPendingMissing] = useState(initial.pendingMissing);
   const [recentScans, setRecentScans] = useState<RecentScanItem[]>(initial.recentScans);
   const [recentOpen, setRecentOpen] = useState(false);
 
-  const [tab, setTab] = useState<PackerTab>("pack");
-  const [courierLock, setCourierLock] = useState<string>("ALL");
+  const [tab, setTab] = useState<PackerTab>("returns");
+  const [scrolled, setScrolled] = useState(false);
 
   const [staffList, setStaffList] = useState<StaffOption[]>(initial.staffList);
   const [selectedStaffId, setSelectedStaffId] = useState(initial.staffList[0]?.id ?? "");
@@ -198,7 +175,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
   const [wrongCount, setWrongCount] = useState(0);
   const [unlocking, setUnlocking] = useState(false);
 
-  // Shared camera + barcode input state
+  // Returns scanner state
   const [cameraOpen, setCameraOpen] = useState(false);
   const [nativeCamera, setNativeCamera] = useState(false);
   const [cameraError, setCameraError] = useState("");
@@ -206,27 +183,6 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
   const [lookingUp, setLookingUp] = useState(false);
   const [lookupError, setLookupError] = useState("");
   const [lastScannedCode, setLastScannedCode] = useState("");
-
-  // Outbound Pack mode state
-  const [outboundResult, setOutboundResult] = useState<{
-    pkg: StaffSafeOutboundPackage;
-    evaluation: OutboundScanEvaluation;
-    autoPacked: boolean;
-  } | null>(null);
-  const [outboundChoices, setOutboundChoices] = useState<StaffSafeOutboundPackage[]>([]);
-  const [packingConfirm, setPackingConfirm] = useState(false);
-  const [reprintingSn, setReprintingSn] = useState<string | null>(null);
-  const [packNotice, setPackNotice] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
-
-  // Wave Pick list & Unpacked leftovers state
-  const [waveData, setWaveData] = useState<StaffWaveData | null>(null);
-  const [unpackedParcels, setUnpackedParcels] = useState<StaffSafeOutboundPackage[]>([]);
-  const [waveLoading, setWaveLoading] = useState(false);
-  const [waveError, setWaveError] = useState("");
-  const [leftoversOpen, setLeftoversOpen] = useState(false);
-  const [checkedPickKeys, setCheckedPickKeys] = useState<Record<string, boolean>>({});
-
-  // Inbound Returns mode state
   const [matchedParcel, setMatchedParcel] = useState<StaffSafeParcel | null>(null);
   const [choices, setChoices] = useState<StaffSafeParcel[]>([]);
   const [selectedCondition, setSelectedCondition] = useState<string>(DEFAULT_CONDITION);
@@ -235,22 +191,31 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
   const [savingScan, setSavingScan] = useState(false);
   const [saved, setSaved] = useState<{ id: number; text: string; restocked: boolean } | null>(null);
 
+  // Wave Pick list & zero-friction alert sheets
+  const [waveData, setWaveData] = useState<StaffWaveData | null>(null);
+  const [cancelledToPull, setCancelledToPull] = useState<StaffSafeOutboundPackage[]>([]);
+  const [unpickedParcels, setUnpickedParcels] = useState<StaffSafeOutboundPackage[]>([]);
+  const [waveLoading, setWaveLoading] = useState(false);
+  const [waveError, setWaveError] = useState("");
+  const [checkedPickKeys, setCheckedPickKeys] = useState<Record<string, boolean>>({});
+  const [pullSheetOpen, setPullSheetOpen] = useState(false);
+  const [unpickedSheetOpen, setUnpickedSheetOpen] = useState(false);
+  const [pullingId, setPullingId] = useState<string | null>(null);
+  const [reprintingSn, setReprintingSn] = useState<string | null>(null);
+
+  // Optional Check / Reprint sheet (for torn/jammed labels or tricky multi-item lookup)
+  const [checkSheetOpen, setCheckSheetOpen] = useState(false);
+  const [checkQuery, setCheckQuery] = useState("");
+  const [checkSearching, setCheckSearching] = useState(false);
+  const [checkError, setCheckError] = useState("");
+  const [checkResults, setCheckResults] = useState<StaffSafeOutboundPackage[]>([]);
+
   const scannerRef = useRef<{ stop: () => Promise<void>; clear: () => void } | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const detectBusyRef = useRef(false);
   const lookupInFlightRef = useRef(false);
-  const tabRef = useRef<PackerTab>(tab);
-  const courierLockRef = useRef<string>(courierLock);
-
-  useEffect(() => {
-    tabRef.current = tab;
-  }, [tab]);
-
-  useEffect(() => {
-    courierLockRef.current = courierLock;
-  }, [courierLock]);
 
   const loadSession = useCallback(async () => {
     const res = await fetch("/api/scan/session");
@@ -260,8 +225,8 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
       setActorName(data.actor?.name || "Staff");
       setIsOwnerActor(data.actor?.actorType === "owner");
       setTodayCount(data.todayCount ?? 0);
-      setTodayPackedCount(data.todayPackedCount ?? 0);
-      setUnpackedWaveCount(data.unpackedWaveCount ?? 0);
+      setCancelledToPullCount(data.cancelledToPullCount ?? 0);
+      setUnpickedOverdueCount(data.unpickedOverdueCount ?? 0);
       setPendingMissing(data.pendingMissingCount ?? 0);
       setRecentScans(data.recentScans ?? []);
     } else {
@@ -285,9 +250,12 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
         return;
       }
       setWaveData(data.wave ?? null);
-      const nextUnpacked: StaffSafeOutboundPackage[] = data.unpackedParcels ?? [];
-      setUnpackedParcels(nextUnpacked);
-      setUnpackedWaveCount(nextUnpacked.length);
+      const nextCancelled: StaffSafeOutboundPackage[] = data.cancelledToPull ?? [];
+      const nextUnpicked: StaffSafeOutboundPackage[] = data.unpickedParcels ?? [];
+      setCancelledToPull(nextCancelled);
+      setUnpickedParcels(nextUnpicked);
+      setCancelledToPullCount(nextCancelled.length);
+      setUnpickedOverdueCount(nextUnpicked.length);
       if (data.wave?.id && typeof window !== "undefined") {
         try {
           const raw = window.localStorage.getItem(`kyna_pick_checked_${data.wave.id}`);
@@ -304,12 +272,11 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
   }, []);
 
   useEffect(() => {
-    if (unlocked && (tab === "pick" || leftoversOpen)) {
+    if (unlocked && (tab === "pick" || pullSheetOpen || unpickedSheetOpen)) {
       void loadWave();
     }
-  }, [unlocked, tab, leftoversOpen, loadWave]);
+  }, [unlocked, tab, pullSheetOpen, unpickedSheetOpen, loadWave]);
 
-  // The success card leaves by itself; the scanner is usable the whole time.
   useEffect(() => {
     if (!saved) return;
     const t = setTimeout(() => setSaved(null), 3200);
@@ -317,10 +284,12 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
   }, [saved]);
 
   useEffect(() => {
-    if (!packNotice) return;
-    const t = setTimeout(() => setPackNotice(null), 3000);
-    return () => clearTimeout(t);
-  }, [packNotice]);
+    if (!unlocked) return;
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [unlocked]);
 
   const stopCamera = useCallback(async () => {
     if (detectTimerRef.current) {
@@ -366,41 +335,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
     haptic(12);
   }, []);
 
-  const applyOutboundLookup = useCallback(
-    (
-      pkg: StaffSafeOutboundPackage,
-      evaluation: OutboundScanEvaluation,
-      autoPacked: boolean,
-      stats?: { todayPackedCount?: number; unpackedWaveCount?: number }
-    ) => {
-      setOutboundChoices([]);
-      setOutboundResult({ pkg, evaluation, autoPacked });
-      setManualCode("");
-      if (typeof stats?.todayPackedCount === "number") {
-        setTodayPackedCount(stats.todayPackedCount);
-      }
-      if (typeof stats?.unpackedWaveCount === "number") {
-        setUnpackedWaveCount(stats.unpackedWaveCount);
-      }
-
-      if (evaluation.status === "BLOCKED_CANCELLED" || evaluation.status === "BLOCKED_WRONG_COURIER") {
-        playBeep("error");
-        haptic([80, 60, 80]);
-      } else if (evaluation.status === "NEEDS_MULTI_CONFIRM") {
-        playBeep("multi");
-        haptic([20, 40, 20]);
-      } else if (evaluation.status === "ALREADY_PACKED") {
-        playBeep("warn");
-        haptic(16);
-      } else {
-        playBeep("ok");
-        haptic(12);
-      }
-    },
-    []
-  );
-
-  const lookupBarcode = useCallback(
+  const lookupReturnBarcode = useCallback(
     async (rawCode: string) => {
       const code = rawCode.trim();
       if (!code || lookupInFlightRef.current) return;
@@ -409,51 +344,20 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
       setLookingUp(true);
       try {
         await stopCamera();
-        const activeTab = tabRef.current;
-        const mode = activeTab === "returns" ? "return" : "outbound";
-        const params = new URLSearchParams({
-          code,
-          mode,
-          ...(mode === "outbound"
-            ? { courierLock: courierLockRef.current, autoPack: "1" }
-            : {}),
-        });
-        const res = await fetch(`/api/scan/lookup?${params.toString()}`);
+        const res = await fetch(
+          `/api/scan/lookup?mode=return&code=${encodeURIComponent(code)}`
+        );
         const data = await res.json();
         setChoices([]);
-        setOutboundChoices([]);
-
         if (!res.ok || !data.found) {
           playBeep("error");
           haptic([30, 40, 30]);
-          if (mode === "outbound") {
-            setOutboundResult(null);
-          } else {
-            setMatchedParcel(null);
-          }
-          setLookupError(data.error || `No parcel found for ${code}. Try the last 6 digits.`);
+          setMatchedParcel(null);
+          setLookupError(data.error || `No return found for ${code}. Try the last 6 digits.`);
           return;
         }
-
         setLastScannedCode(code);
-
-        if (data.kind === "outbound") {
-          if (Array.isArray(data.outboundMatches)) {
-            setOutboundResult(null);
-            setOutboundChoices(data.outboundMatches);
-            playBeep("warn");
-            haptic(12);
-            return;
-          }
-          applyOutboundLookup(data.outbound, data.evaluation, Boolean(data.autoPacked), {
-            todayPackedCount: data.todayPackedCount,
-            unpackedWaveCount: data.unpackedWaveCount,
-          });
-          return;
-        }
-
         if (Array.isArray(data.matches)) {
-          // Several parcels share this code: staff pick the one in their hand.
           setMatchedParcel(null);
           setChoices(data.matches);
           playBeep("warn");
@@ -468,7 +372,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
         setLookingUp(false);
       }
     },
-    [stopCamera, openParcel, applyOutboundLookup]
+    [stopCamera, openParcel]
   );
 
   async function startCamera() {
@@ -476,7 +380,6 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
     setLookupError("");
     setMatchedParcel(null);
     setChoices([]);
-    setOutboundChoices([]);
 
     const hasNativeDetector = typeof window !== "undefined" && "BarcodeDetector" in window;
     setNativeCamera(hasNativeDetector);
@@ -515,7 +418,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
               const barcodes = await detector.detect(el);
               const raw = barcodes.find((b) => b.rawValue)?.rawValue;
               if (raw) {
-                void lookupBarcode(raw);
+                void lookupReturnBarcode(raw);
               }
             } catch {
               // Ignore transient frame decode errors
@@ -542,7 +445,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
           { facingMode: "environment" },
           { fps: 10, qrbox: { width: 260, height: 140 } },
           (decodedText) => {
-            void lookupBarcode(decodedText);
+            void lookupReturnBarcode(decodedText);
           },
           () => {}
         );
@@ -596,7 +499,6 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
     [pin, unlocking, handlePinSubmit]
   );
 
-  // Keyboard digits work on the shared warehouse PC too.
   useEffect(() => {
     if (unlocked) return;
     const onKey = (e: KeyboardEvent) => {
@@ -607,41 +509,32 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [unlocked, pressKey]);
 
-  async function handleConfirmOutboundPack(pkg: StaffSafeOutboundPackage, ignoreLock = false) {
-    setPackingConfirm(true);
-    setLookupError("");
+  async function handleMarkCancelledPulled(pkg: StaffSafeOutboundPackage) {
+    setPullingId(pkg.packageId);
     try {
       const res = await fetch("/api/scan/pack", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "confirm_pack",
-          packageId: pkg.packageId,
-          courierLock: ignoreLock ? "ALL" : courierLock,
-        }),
+        body: JSON.stringify({ action: "mark_cancelled_pulled", packageId: pkg.packageId }),
       });
       const data = await res.json();
       if (!res.ok) {
-        playBeep("error");
-        setLookupError(data.error || "Couldn't mark packed.");
+        toast(data.error || "Couldn't mark pulled.", "error");
         return;
       }
       playBeep("ok");
-      haptic(16);
-      const updated = data.outbound as StaffSafeOutboundPackage;
-      setOutboundResult({
-        pkg: updated,
-        evaluation: { status: "AUTO_PACK_OK", courierMismatch: false, expectedCourier: null },
-        autoPacked: true,
-      });
-      if (typeof data.todayPackedCount === "number") setTodayPackedCount(data.todayPackedCount);
-      if (typeof data.unpackedWaveCount === "number") setUnpackedWaveCount(data.unpackedWaveCount);
-      setUnpackedParcels((prev) => prev.filter((p) => p.packageId !== pkg.packageId));
-      setPackNotice({ text: `Packed ${updated.orderSn}`, tone: "ok" });
+      haptic(14);
+      setCancelledToPull((prev) => prev.filter((p) => p.packageId !== pkg.packageId));
+      if (typeof data.cancelledToPullCount === "number") {
+        setCancelledToPullCount(data.cancelledToPullCount);
+      } else {
+        setCancelledToPullCount((n) => Math.max(0, n - 1));
+      }
+      toast(`Pulled cancelled parcel ···${last6(pkg.trackingNumber, pkg.orderSn)}`);
     } catch {
-      setLookupError("No connection. Try again.");
+      toast("No connection. Try again.", "error");
     } finally {
-      setPackingConfirm(false);
+      setPullingId(null);
     }
   }
 
@@ -655,15 +548,43 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
       });
       const data = await res.json();
       if (!res.ok) {
-        setPackNotice({ text: data.error || "Couldn't queue reprint.", tone: "error" });
+        toast(data.error || "Couldn't queue reprint.", "error");
         return;
       }
       haptic(12);
-      setPackNotice({ text: `Sent ${data.orderSn} to printer`, tone: "ok" });
+      toast(`Sent ${data.orderSn} to printer`);
     } catch {
-      setPackNotice({ text: "No connection. Try again.", tone: "error" });
+      toast("No connection. Try again.", "error");
     } finally {
       setReprintingSn(null);
+    }
+  }
+
+  async function handleCheckSearch(e: React.FormEvent) {
+    e.preventDefault();
+    const q = checkQuery.trim();
+    if (q.length < 3) return;
+    setCheckSearching(true);
+    setCheckError("");
+    setCheckResults([]);
+    try {
+      const res = await fetch(
+        `/api/scan/lookup?mode=outbound&autoPack=0&code=${encodeURIComponent(q)}`
+      );
+      const data = await res.json();
+      if (!res.ok || !data.found) {
+        setCheckError(data.error || `No parcel found for "${q}".`);
+        return;
+      }
+      if (Array.isArray(data.outboundMatches)) {
+        setCheckResults(data.outboundMatches);
+      } else if (data.outbound) {
+        setCheckResults([data.outbound]);
+      }
+    } catch {
+      setCheckError("No connection. Try again.");
+    } finally {
+      setCheckSearching(false);
     }
   }
 
@@ -734,7 +655,6 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
     await fetch("/api/auth/logout", { method: "POST" });
     setUnlocked(false);
     setMatchedParcel(null);
-    setOutboundResult(null);
     setSaved(null);
     await loadSession();
   }
@@ -747,8 +667,6 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
     setManualCode("");
     setMatchedParcel(null);
     setChoices([]);
-    setOutboundResult(null);
-    setOutboundChoices([]);
   }
 
   // ── Locked: name, then PIN ────────────────────────────────────────
@@ -860,49 +778,69 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
     );
   }
 
-  // ── Unlocked: Packer Station (Pack / Pick list / Returns) ─────────
+  // ── Unlocked: Calm Apple-HIG Packer Station (Pick list & Returns) ──
   const condition = findCondition(selectedCondition);
   const needsPhotoMissing = Boolean(condition?.needsPhoto && photos.length === 0);
-  const showScannerBox =
-    tab === "returns"
-      ? !matchedParcel
-      : tab === "pack" && outboundResult?.evaluation.status !== "NEEDS_MULTI_CONFIRM";
+
+  function openCheckSheet() {
+    setCheckQuery("");
+    setCheckError("");
+    setCheckResults([]);
+    setCheckSheetOpen(true);
+  }
 
   return (
-    <div className="min-h-dvh bg-ground pb-12">
-      <header className="safe-top sticky top-0 z-30 border-b border-hairline bg-white/95">
-        <div className="mx-auto flex h-14 max-w-md items-center justify-between gap-2 px-4">
-          <button
-            type="button"
-            onClick={() => setRecentOpen(true)}
-            className="pressable -ml-1.5 flex min-w-0 flex-col items-start rounded-[10px] px-2 py-1 text-left hover:bg-black/[0.03]"
+    <div className="min-h-dvh bg-ground pb-14">
+      <header
+        className={`safe-top sticky top-0 z-30 transition-[background-color,border-color,backdrop-filter] duration-200 ${
+          scrolled
+            ? "border-b border-hairline bg-white/80 backdrop-blur-xl backdrop-saturate-150"
+            : "border-b border-transparent bg-ground"
+        }`}
+      >
+        <div className="relative mx-auto flex h-12 max-w-md items-center justify-between gap-2 px-5">
+          {isOwnerActor ? (
+            <Link
+              href="/"
+              className="pressable -ml-2 flex h-11 items-center gap-0.5 whitespace-nowrap rounded-full px-2 text-[16px] font-semibold text-brand hover:bg-black/[0.04]"
+            >
+              <ChevronLeft className="h-5 w-5 shrink-0" strokeWidth={2.4} />
+              <span>Dashboard</span>
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setRecentOpen(true)}
+              className="pressable -ml-2 flex h-11 min-w-0 items-center rounded-full px-2 text-left text-[16px] font-bold text-ink hover:bg-black/[0.04]"
+            >
+              <span className="truncate">{actorName}</span>
+            </button>
+          )}
+
+          <p
+            aria-hidden={!scrolled}
+            className={`pointer-events-none absolute left-28 right-28 truncate text-center text-[16px] font-bold text-ink transition-[opacity,translate] duration-200 ease-[var(--ease-ios)] ${
+              scrolled ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0"
+            }`}
           >
-            <span className="truncate text-[17px] font-bold leading-tight text-ink">{actorName}</span>
-            <span className="tabular-nums text-[12px] font-medium text-ink-3">
-              {todayPackedCount} packed · {todayCount} returns ›
-            </span>
-          </button>
-          <div className="flex items-center gap-1">
-            {isOwnerActor && (
-              <Link href="/" className="pressable rounded-full px-2.5 py-2 text-[14px] font-semibold text-brand">
-                Dashboard
-              </Link>
-            )}
+            {tab === "pick" ? "Pick list" : "Returns"}
+          </p>
+
+          <div className="flex shrink-0 items-center gap-1">
             <Link
               href="/stock-in"
               aria-label="Shelf and stock updates"
               title="Shelf & stock"
-              className="pressable flex h-11 items-center gap-1 rounded-full px-3 text-[14px] font-bold text-brand hover:bg-brand-soft"
+              className="pressable flex h-11 items-center whitespace-nowrap rounded-full px-2.5 text-[16px] font-semibold text-brand hover:bg-black/[0.04]"
             >
-              <PackagePlus className="h-5 w-5" />
-              <span>Shelf &amp; stock</span>
+              Stock
             </Link>
             <button
               type="button"
               onClick={handleLockStaff}
               aria-label="Lock scanner"
               title="Lock scanner"
-              className="pressable flex h-11 w-11 items-center justify-center rounded-full text-ink-2 hover:bg-black/[0.04]"
+              className="pressable -mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-2 hover:bg-black/[0.04]"
             >
               <Lock className="h-5 w-5" />
             </button>
@@ -910,26 +848,48 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
         </div>
       </header>
 
-      <main className="anim-page-in mx-auto max-w-md space-y-5 px-5 pt-4">
+      <main className="anim-page-in mx-auto max-w-md space-y-5 px-5 pt-2">
+        {/* Zero-friction automatic alert banners (only shown when action is needed) */}
+        {cancelledToPullCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setPullSheetOpen(true)}
+            className="pressable flex w-full items-center gap-3 rounded-[var(--radius-card)] bg-missing px-4 py-3.5 text-left text-white shadow-[0_8px_24px_-10px_rgb(220_38_38/0.65)]"
+          >
+            <OctagonAlert className="h-6 w-6 shrink-0" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[16px] font-extrabold leading-tight">
+                STOP — Pull {cancelledToPullCount} cancelled{" "}
+                {cancelledToPullCount === 1 ? "label" : "labels"}
+              </span>
+              <span className="mt-0.5 block text-[14px] font-medium text-white/90">
+                Cancelled after printing. Tap to check tracking &amp; photo
+              </span>
+            </span>
+            <ChevronRight className="h-5 w-5 shrink-0 text-white/80" />
+          </button>
+        )}
+
+        {unpickedOverdueCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setUnpickedSheetOpen(true)}
+            className="pressable flex w-full items-center gap-3 rounded-[var(--radius-control)] bg-failed-soft px-4 py-3 text-left text-amber-950"
+          >
+            <Clock className="h-5 w-5 shrink-0 text-amber-700" />
+            <span className="min-w-0 flex-1 text-[14px] font-bold tabular-nums">
+              {unpickedOverdueCount} printed {unpickedOverdueCount === 1 ? "parcel" : "parcels"} not picked up yet (3h+)
+            </span>
+            <ChevronRight className="h-5 w-5 shrink-0 text-amber-800" />
+          </button>
+        )}
+
         <SegmentedControl
           options={PACKER_TABS}
           value={tab}
           onChange={handleTabChange}
           label="Packer mode"
         />
-
-        {packNotice && (
-          <div
-            role="status"
-            className={`anim-fade-in rounded-[var(--radius-control)] px-4 py-3 text-[15px] font-bold ${
-              packNotice.tone === "error"
-                ? "bg-missing-soft text-missing-ink"
-                : "bg-arrived-soft text-arrived"
-            }`}
-          >
-            {packNotice.text}
-          </div>
-        )}
 
         {saved && (
           <div
@@ -945,61 +905,32 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
             <span className="min-w-0">
               <span className="block text-[16px] font-bold leading-tight">
                 {saved.restocked
-                  ? "Saved · PUT BACK ON SHELF"
-                  : "Saved · PUT IN DISPUTE BIN (Do not restock)"}
+                  ? "Saved · Put back on shelf"
+                  : "Saved · Put in dispute bin"}
               </span>
               <span className="block truncate text-[14px] text-white/90">{saved.text}</span>
             </span>
           </div>
         )}
 
-        {/* ── TAB 1: PACK (OUTBOUND SCAN-TO-PACK) ────────────────────────── */}
-        {tab === "pack" && (
-          <section className="space-y-4">
-            <div className="space-y-2">
-              <div className="no-scrollbar -mx-5 flex gap-1.5 overflow-x-auto px-5" role="group" aria-label="Lock courier sack">
-                {COURIER_LOCKS.map((c) => {
-                  const active = courierLock === c.id;
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      aria-pressed={active}
-                      onClick={() => setCourierLock(c.id)}
-                      className={`pressable h-10 shrink-0 rounded-full px-3.5 text-[14px] font-semibold transition-colors ${
-                        active ? "bg-ink text-white" : "bg-white text-ink-2 shadow-[var(--shadow-card)]"
-                      }`}
-                    >
-                      {c.label}
-                    </button>
-                  );
-                })}
-              </div>
-              {courierLock !== "ALL" && (
-                <p className="px-1 text-[13px] font-semibold text-brand">
-                  Sack guard on: alerts if parcel isn&apos;t {courierLock}
-                </p>
-              )}
-            </div>
-
-            {unpackedWaveCount > 0 && (
-              <button
-                type="button"
-                onClick={() => setLeftoversOpen(true)}
-                className="pressable flex w-full items-center justify-between rounded-[var(--radius-control)] bg-failed-soft px-4 py-3 text-left text-[14px] font-bold text-amber-900"
-              >
-                <span className="tabular-nums">
-                  {unpackedWaveCount} printed today, still unpacked
-                </span>
-                <span>Check ›</span>
-              </button>
-            )}
-          </section>
+        {/* ── TAB 1: PICK LIST + MULTI-ITEM CHECK ────────────────────────── */}
+        {tab === "pick" && (
+          <PickListSection
+            waveData={waveData}
+            waveLoading={waveLoading}
+            waveError={waveError}
+            checkedPickKeys={checkedPickKeys}
+            reprintingSn={reprintingSn}
+            onToggleChecked={togglePickChecked}
+            onRefresh={() => void loadWave()}
+            onOpenCheckSheet={openCheckSheet}
+            onReprintLabel={handleReprintLabel}
+          />
         )}
 
-        {/* ── SHARED BARCODE SCANNER (PACK & RETURNS) ────────────────────── */}
-        {tab !== "pick" && showScannerBox && (
-          <section className="space-y-3.5">
+        {/* ── TAB 2: INBOUND RETURN SCANNER ──────────────────────────────── */}
+        {tab === "returns" && !matchedParcel && (
+          <section className="space-y-4">
             {cameraOpen ? (
               <div className="anim-fade-in relative overflow-hidden rounded-[var(--radius-sheet)] bg-slate-950">
                 {nativeCamera ? (
@@ -1020,18 +951,10 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
               <button
                 type="button"
                 onClick={startCamera}
-                className={`pressable flex w-full flex-col items-center justify-center gap-2.5 rounded-[var(--radius-sheet)] bg-brand text-white shadow-[0_12px_30px_-12px_rgb(15_118_110/0.7)] hover:bg-brand-hover ${
-                  outboundResult ? "min-h-28" : "min-h-44"
-                }`}
+                className="pressable flex min-h-48 w-full flex-col items-center justify-center gap-3 rounded-[var(--radius-sheet)] bg-brand text-white shadow-[0_12px_30px_-12px_rgb(15_118_110/0.7)] hover:bg-brand-hover"
               >
-                <ScanBarcode className={outboundResult ? "h-9 w-9" : "h-12 w-12"} strokeWidth={1.6} />
-                <span className="text-[19px] font-bold">
-                  {tab === "pack"
-                    ? outboundResult
-                      ? "Scan next waybill"
-                      : "Scan shipping waybill"
-                    : "Scan return waybill"}
-                </span>
+                <ScanBarcode className="h-12 w-12" strokeWidth={1.6} />
+                <span className="text-[20px] font-bold">Scan return waybill</span>
               </button>
             )}
 
@@ -1042,12 +965,12 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                void lookupBarcode(manualCode);
+                void lookupReturnBarcode(manualCode);
               }}
               className="flex gap-2"
             >
               <label className="min-w-0 flex-1">
-                <span className="sr-only">Tracking or order number</span>
+                <span className="sr-only">Tracking number</span>
                 <input
                   type="text"
                   inputMode="text"
@@ -1056,7 +979,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                   enterKeyHint="search"
                   value={manualCode}
                   onChange={(e) => setManualCode(e.target.value)}
-                  placeholder="Or type tracking / order number"
+                  placeholder="Or type return tracking number"
                   className="h-12 w-full rounded-[var(--radius-control)] bg-white px-4 text-[16px] text-ink shadow-[var(--shadow-card)] focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
                 />
               </label>
@@ -1075,371 +998,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                 {lookupError}
               </p>
             )}
-          </section>
-        )}
 
-        {/* ── OUTBOUND PACK RESULTS ──────────────────────────────────────── */}
-        {tab === "pack" && outboundChoices.length > 0 && (
-          <div className="anim-rise-in space-y-2" role="group" aria-label="Pick the package in your hand">
-            <p className="px-1 text-[15px] font-semibold text-ink-2">
-              {outboundChoices.length} packages match {lastScannedCode}. Tap one:
-            </p>
-            <ul className="divide-y divide-hairline overflow-hidden rounded-[var(--radius-card)] bg-white shadow-[var(--shadow-card)]">
-              {outboundChoices.map((c) => {
-                const first = c.lines[0];
-                return (
-                  <li key={c.packageId}>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        applyOutboundLookup(
-                          c,
-                          {
-                            status: c.isCancelled
-                              ? "BLOCKED_CANCELLED"
-                              : c.packedAt
-                                ? "ALREADY_PACKED"
-                                : c.isMultiPiece
-                                  ? "NEEDS_MULTI_CONFIRM"
-                                  : "READY_TO_PACK",
-                            courierMismatch: false,
-                            expectedCourier: null,
-                          },
-                          false
-                        )
-                      }
-                      className="pressable flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left hover:bg-black/[0.02]"
-                    >
-                      <ItemThumb src={first?.imageUrl ?? null} alt={first?.shortName ?? c.orderSn} size="md" />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[16px] font-semibold text-ink">
-                          {c.totalPieces}× {first?.shortName ?? c.orderSn}
-                        </span>
-                        <span className="block truncate text-[14px] text-ink-3">
-                          {c.orderSn} · {shortCourier(c.courier)}
-                          {c.packedAt ? " · already packed" : ""}
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        )}
-
-        {tab === "pack" && outboundResult && (
-          <section className="anim-rise-in space-y-4">
-            {outboundResult.evaluation.status === "BLOCKED_CANCELLED" && (
-              <div
-                role="alert"
-                className="space-y-3 rounded-[var(--radius-card)] bg-missing p-5 text-white shadow-[0_8px_24px_-10px_rgb(220_38_38/0.7)]"
-              >
-                <div className="flex items-start gap-3">
-                  <OctagonAlert className="mt-0.5 h-8 w-8 shrink-0" />
-                  <div>
-                    <p className="text-[20px] font-extrabold leading-tight">STOP — BUYER CANCELLED!</p>
-                    <p className="mt-1 text-[15px] font-medium text-white/95">
-                      Do not pack or hand to courier. Put these items back on the shelf.
-                    </p>
-                  </div>
-                </div>
-                <p className="tabular-nums text-[14px] font-semibold text-white/90">
-                  Order {outboundResult.pkg.orderSn} · {shortCourier(outboundResult.pkg.courier)}
-                </p>
-                <ul className="space-y-2 rounded-[var(--radius-control)] bg-black/15 p-3">
-                  {outboundResult.pkg.lines.map((line) => (
-                    <li key={line.id} className="flex items-center gap-3">
-                      <ItemThumb src={line.imageUrl} alt={line.shortName} size="sm" />
-                      <span className="min-w-0 flex-1 text-[15px] font-semibold">
-                        {line.quantity}× {line.shortName}
-                        {line.variationName ? ` (${line.variationName})` : ""}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {outboundResult.evaluation.status === "BLOCKED_WRONG_COURIER" && (
-              <div
-                role="alert"
-                className="space-y-3 rounded-[var(--radius-card)] bg-failed-soft p-5 text-amber-950 ring-2 ring-amber-500"
-              >
-                <div className="flex items-start gap-3">
-                  <ShieldAlert className="mt-0.5 h-8 w-8 shrink-0 text-amber-700" />
-                  <div>
-                    <p className="text-[20px] font-extrabold leading-tight">WRONG SACK!</p>
-                    <p className="mt-1 text-[15px] font-semibold">
-                      This parcel is {outboundResult.pkg.courier}, not {outboundResult.evaluation.expectedCourier}.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      setCourierLock(outboundResult.pkg.courier);
-                      void handleConfirmOutboundPack(outboundResult.pkg, true);
-                    }}
-                    disabled={packingConfirm}
-                    className="flex-1 bg-white"
-                  >
-                    Switch to {shortCourier(outboundResult.pkg.courier)} &amp; Pack
-                  </Button>
-                  <Button variant="plain" onClick={() => setOutboundResult(null)}>
-                    Dismiss
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {outboundResult.evaluation.status !== "BLOCKED_CANCELLED" &&
-              outboundResult.evaluation.status !== "BLOCKED_WRONG_COURIER" && (
-                <div className="overflow-hidden rounded-[var(--radius-card)] bg-white shadow-[var(--shadow-card)]">
-                  {outboundResult.autoPacked && (
-                    <div className="flex items-center justify-between gap-2 bg-arrived px-4 py-3 text-white">
-                      <span className="flex items-center gap-2 text-[16px] font-bold">
-                        <PackageCheck className="h-5 w-5" />
-                        Packed
-                        {outboundResult.pkg.wavePosition && outboundResult.pkg.waveTotal
-                          ? ` · Label #${outboundResult.pkg.wavePosition}/${outboundResult.pkg.waveTotal}`
-                          : ""}
-                      </span>
-                      <span className="text-[13px] font-semibold text-white/90">
-                        {shortCourier(outboundResult.pkg.courier)}
-                      </span>
-                    </div>
-                  )}
-
-                  {outboundResult.evaluation.status === "NEEDS_MULTI_CONFIRM" && (
-                    <div className="flex items-center justify-between gap-2 bg-failed-soft px-4 py-3 text-amber-950">
-                      <span className="flex items-center gap-2 text-[15px] font-extrabold">
-                        <AlertTriangle className="h-5 w-5 shrink-0 text-amber-700" />
-                        MULTI-ITEM ORDER ({outboundResult.pkg.totalPieces} pieces) — Check every piece
-                      </span>
-                    </div>
-                  )}
-
-                  {outboundResult.evaluation.status === "ALREADY_PACKED" && !outboundResult.autoPacked && (
-                    <div className="flex items-center gap-2 bg-failed-soft px-4 py-3 text-[15px] font-bold text-amber-950">
-                      <AlertTriangle className="h-5 w-5 shrink-0 text-amber-700" />
-                      <span>
-                        Already packed
-                        {outboundResult.pkg.packedByName ? ` by ${outboundResult.pkg.packedByName}` : ""}
-                        {outboundResult.pkg.packedAt ? ` at ${manilaTime(outboundResult.pkg.packedAt)}` : ""}
-                      </span>
-                    </div>
-                  )}
-
-                  <div className="space-y-4 p-4">
-                    <div className="flex items-center justify-between text-[13px] font-semibold text-ink-3 tabular-nums">
-                      <span>{outboundResult.pkg.orderSn}</span>
-                      <span>
-                        {outboundResult.pkg.platform === "SHOPEE" ? "Shopee" : "TikTok"} ·{" "}
-                        {shortCourier(outboundResult.pkg.courier)}
-                      </span>
-                    </div>
-
-                    <ul className="divide-y divide-hairline">
-                      {outboundResult.pkg.lines.map((line) => (
-                        <li key={line.id} className="flex items-center gap-3.5 py-2.5 first:pt-0 last:pb-0">
-                          <ItemThumb
-                            src={line.imageUrl}
-                            alt={line.shortName}
-                            size={outboundResult.pkg.lines.length === 1 ? "xl" : "lg"}
-                          />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-[18px] font-bold leading-snug text-ink">
-                              <span
-                                className={`mr-1.5 inline-flex items-center rounded-md px-1.5 py-0.5 text-[15px] font-extrabold tabular-nums ${
-                                  line.quantity > 1
-                                    ? "bg-missing text-white"
-                                    : "bg-slate-100 text-ink"
-                                }`}
-                              >
-                                {line.quantity}×
-                              </span>
-                              {line.shortName}
-                            </p>
-                            {line.variationName && (
-                              <p className="mt-1.5 inline-block rounded-lg bg-ink px-2.5 py-1 text-[14px] font-bold text-white">
-                                {line.variationName}
-                              </p>
-                            )}
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-
-                    <div className="space-y-2 pt-1">
-                      {(outboundResult.evaluation.status === "NEEDS_MULTI_CONFIRM" ||
-                        outboundResult.evaluation.status === "READY_TO_PACK") && (
-                        <Button
-                          full
-                          size="lg"
-                          disabled={packingConfirm}
-                          onClick={() => void handleConfirmOutboundPack(outboundResult.pkg)}
-                        >
-                          {packingConfirm
-                            ? "Saving…"
-                            : outboundResult.pkg.totalPieces > 1
-                              ? `Confirm all ${outboundResult.pkg.totalPieces} pieces packed`
-                              : "Confirm packed"}
-                        </Button>
-                      )}
-
-                      <div className="flex gap-2">
-                        {outboundResult.pkg.canReprint && (
-                          <Button
-                            full
-                            variant="secondary"
-                            disabled={reprintingSn === outboundResult.pkg.orderSn}
-                            onClick={() => void handleReprintLabel(outboundResult.pkg.orderSn)}
-                          >
-                            <Printer className="mr-2 h-4 w-4" />
-                            {reprintingSn === outboundResult.pkg.orderSn ? "Sending…" : "Reprint torn label"}
-                          </Button>
-                        )}
-                        {outboundResult.evaluation.status === "NEEDS_MULTI_CONFIRM" && (
-                          <Button
-                            variant="plain"
-                            onClick={() => setOutboundResult(null)}
-                            className="shrink-0"
-                          >
-                            Cancel
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-          </section>
-        )}
-
-        {/* ── TAB 2: LIVE PHOTO PICK LIST ────────────────────────────────── */}
-        {tab === "pick" && (
-          <section className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-[18px] font-extrabold text-ink">
-                  {waveData ? `Wave · ${waveData.parcelCount} parcels` : "Pick list"}
-                </h2>
-                {waveData && (
-                  <p className="text-[13px] text-ink-3 tabular-nums">
-                    {waveData.singles} single · {waveData.multis} multi · {manilaDateTime(waveData.createdAt)}
-                  </p>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => void loadWave()}
-                disabled={waveLoading}
-                aria-label="Refresh pick list"
-                className="pressable flex h-11 w-11 items-center justify-center rounded-full bg-white text-brand shadow-[var(--shadow-card)]"
-              >
-                <RefreshCw className={`h-5 w-5 ${waveLoading ? "animate-spin" : ""}`} />
-              </button>
-            </div>
-
-            {waveError && <p className="text-[15px] font-semibold text-missing-ink">{waveError}</p>}
-
-            {!waveLoading && !waveData && !waveError && (
-              <div className="rounded-[var(--radius-card)] bg-white p-5 text-[15px] text-ink-3 shadow-[var(--shadow-card)]">
-                No wave pick list yet. When the owner starts or previews a wave, garments and photos appear here.
-              </div>
-            )}
-
-            {waveData?.groups.map((g) => (
-              <div
-                key={g.key}
-                className="overflow-hidden rounded-[var(--radius-card)] bg-white shadow-[var(--shadow-card)]"
-              >
-                <div className="flex items-center justify-between border-b border-hairline px-4 py-3">
-                  <span className="text-[16px] font-bold text-ink">{g.title}</span>
-                  <span className="text-[13px] font-semibold text-ink-3 tabular-nums">{g.count} parcels</span>
-                </div>
-                <ul className="divide-y divide-hairline px-4">
-                  {g.garments.map((pg) => (
-                    <li key={pg.key} className="space-y-2.5 py-3.5">
-                      <div className="flex items-center gap-3">
-                        <ItemThumb src={pg.imageUrl} alt={pg.shortName} size="md" />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-[15px] font-bold text-ink">{pg.shortName}</p>
-                          <p className="text-[13px] font-semibold text-ink-3 tabular-nums">
-                            {pg.totalQty} {pg.totalQty === 1 ? "pc" : "pcs"} total
-                          </p>
-                        </div>
-                      </div>
-                      <div className="space-y-1.5">
-                        {pg.variants.map((v, idx) => {
-                          const checkKey = `${g.key}::${v.label}`;
-                          const checked = Boolean(checkedPickKeys[checkKey]);
-                          const stockLink = v.garmentVariantId
-                            ? `/stock-in?mode=EMPTY_SHELF&variantId=${encodeURIComponent(v.garmentVariantId)}`
-                            : `/stock-in?mode=EMPTY_SHELF&q=${encodeURIComponent(pg.shortName)}`;
-                          return (
-                            <div key={`${checkKey}-${idx}`} className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => togglePickChecked(checkKey)}
-                                className={`pressable flex min-h-12 flex-1 items-center gap-2.5 rounded-[var(--radius-control)] px-3 py-2 text-left transition-colors ${
-                                  checked
-                                    ? "bg-arrived-soft text-arrived"
-                                    : "bg-surface-subtle text-ink ring-1 ring-hairline/80"
-                                }`}
-                              >
-                                <span
-                                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 ${
-                                    checked
-                                      ? "border-arrived bg-arrived text-white"
-                                      : "border-hairline-strong bg-white"
-                                  }`}
-                                >
-                                  {checked && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
-                                </span>
-                                <span
-                                  className={`inline-flex min-w-8 shrink-0 items-center justify-center rounded-md px-1.5 py-0.5 text-[14px] font-extrabold tabular-nums ${
-                                    v.qty > 1 ? "bg-ink text-white" : "bg-white text-ink ring-1 ring-hairline"
-                                  }`}
-                                >
-                                  {v.qty}×
-                                </span>
-                                <span
-                                  className={`min-w-0 flex-1 text-[14px] font-semibold ${
-                                    checked ? "line-through opacity-75" : ""
-                                  }`}
-                                >
-                                  {v.color ?? "Standard"}
-                                </span>
-                                {v.size && (
-                                  <span className="shrink-0 rounded-md bg-white px-2 py-0.5 text-[13px] font-bold text-ink-2 ring-1 ring-hairline">
-                                    {v.size}
-                                  </span>
-                                )}
-                              </button>
-                              <Link
-                                href={stockLink}
-                                className="pressable shrink-0 rounded-[var(--radius-control)] bg-missing-soft px-2.5 py-2.5 text-[12px] font-bold text-missing-ink"
-                              >
-                                0 left?
-                              </Link>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </section>
-        )}
-
-        {/* ── TAB 3: INBOUND RETURN SCANNER ──────────────────────────────── */}
-        {tab === "returns" && !matchedParcel && (
-          <section className="space-y-4">
             {choices.length > 0 && (
               <div className="anim-rise-in space-y-2" role="group" aria-label="Pick the parcel in your hand">
                 <p className="px-1 text-[15px] font-semibold text-ink-2">
@@ -1472,12 +1031,40 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
               </div>
             )}
 
-            {pendingMissing > 0 && (
-              <p className="px-1 text-[15px] text-ink-3">
-                <span className="tabular-nums font-semibold text-missing-ink">{pendingMissing}</span> sent back,
-                still to scan
-              </p>
-            )}
+            <Group className="divide-y divide-hairline">
+              <button
+                type="button"
+                onClick={() => setRecentOpen(true)}
+                className="pressable flex min-h-[54px] w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-black/[0.015]"
+              >
+                <span className="text-[16px] font-semibold text-ink">Your returns today</span>
+                <span className="flex items-center gap-1.5 text-[15px] font-semibold text-ink-3 tabular-nums">
+                  <span>{todayCount}</span>
+                  <ChevronRight className="h-5 w-5 text-hairline-strong" />
+                </span>
+              </button>
+
+              {pendingMissing > 0 && (
+                <div className="flex min-h-[52px] items-center justify-between gap-3 px-4 py-3">
+                  <span className="text-[16px] font-semibold text-ink">Sent back, waiting to scan</span>
+                  <span className="text-[15px] font-bold text-missing-ink tabular-nums">
+                    {pendingMissing}
+                  </span>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={openCheckSheet}
+                className="pressable flex min-h-[54px] w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-black/[0.015]"
+              >
+                <span className="flex items-center gap-2.5 text-[16px] font-semibold text-ink">
+                  <Printer className="h-5 w-5 text-brand" />
+                  <span>Find or reprint a label</span>
+                </span>
+                <ChevronRight className="h-5 w-5 text-hairline-strong" />
+              </button>
+            </Group>
           </section>
         )}
 
@@ -1506,26 +1093,27 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
               </p>
             )}
 
-            {/* What should be inside */}
             {matchedParcel.lines.length > 1 ? (
-              <ul className="divide-y divide-hairline overflow-hidden rounded-[var(--radius-card)] bg-white px-4 shadow-[var(--shadow-card)]">
-                {matchedParcel.lines.map((line, idx) => (
-                  <li key={`${line.name}-${idx}`} className="flex items-center gap-3.5 py-3">
-                    <ItemThumb src={line.imageUrl} alt={line.name} size="lg" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[17px] font-bold leading-snug text-ink">
-                        <span className="tabular-nums">{line.quantity}× </span>
-                        {line.name}
-                      </p>
-                      {line.variationName && (
-                        <p className="mt-1 inline-block rounded-lg bg-ink px-2 py-0.5 text-[13px] font-bold text-white">
-                          {line.variationName}
+              <Group>
+                <ul className="divide-y divide-hairline px-4">
+                  {matchedParcel.lines.map((line, idx) => (
+                    <li key={`${line.name}-${idx}`} className="flex items-center gap-3.5 py-3">
+                      <ItemThumb src={line.imageUrl} alt={line.name} size="lg" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[17px] font-bold leading-snug text-ink">
+                          <span className="tabular-nums">{line.quantity}× </span>
+                          {line.name}
                         </p>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
+                        {line.variationName && (
+                          <p className="mt-1 text-[15px] font-semibold text-ink-2">
+                            {line.variationName}
+                          </p>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </Group>
             ) : (
               <div className="flex items-center gap-4">
                 <ItemThumb src={matchedParcel.itemImageUrl} alt={matchedParcel.itemSummary} size="xl" />
@@ -1535,7 +1123,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                     {matchedParcel.itemSummary}
                   </p>
                   {matchedParcel.variationName && (
-                    <p className="mt-2 inline-block rounded-lg bg-ink px-2.5 py-1 text-[15px] font-bold text-white">
+                    <p className="mt-1.5 inline-block rounded-lg bg-slate-200/80 px-2.5 py-1 text-[15px] font-bold text-ink">
                       {matchedParcel.variationName}
                     </p>
                   )}
@@ -1543,36 +1131,38 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
               </div>
             )}
 
-            <div role="radiogroup" aria-label="Condition" className="space-y-2">
-              {CONDITIONS.map((c) => {
-                const active = selectedCondition === c.id;
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    onClick={() => setSelectedCondition(c.id)}
-                    className={`pressable flex min-h-14 w-full items-center gap-3.5 rounded-[var(--radius-control)] px-4 text-left ${
-                      active ? TONE_SELECTED[c.tone] : "bg-white shadow-[var(--shadow-card)]"
-                    }`}
-                  >
-                    <span
-                      aria-hidden="true"
-                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors duration-150 ${
-                        active ? TONE_DOT[c.tone] : "border-hairline-strong bg-white"
+            <Group>
+              <div role="radiogroup" aria-label="Condition" className="divide-y divide-hairline">
+                {CONDITIONS.map((c) => {
+                  const active = selectedCondition === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setSelectedCondition(c.id)}
+                      className={`pressable flex min-h-14 w-full items-center gap-3.5 px-4 text-left transition-colors ${
+                        active ? TONE_SELECTED_ROW[c.tone] : "bg-white hover:bg-black/[0.015]"
                       }`}
                     >
-                      {active && <span className="anim-pop h-2 w-2 rounded-full bg-white" />}
-                    </span>
-                    <span className="flex-1 text-[17px] font-semibold text-ink">{c.label}</span>
-                    {c.needsPhoto && (
-                      <Camera className="h-5 w-5 text-ink-3" aria-label="Photo needed" />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+                      <span
+                        aria-hidden="true"
+                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors duration-150 ${
+                          active ? TONE_DOT[c.tone] : "border-hairline-strong bg-white"
+                        }`}
+                      >
+                        {active && <span className="anim-pop h-2 w-2 rounded-full bg-white" />}
+                      </span>
+                      <span className="flex-1 text-[17px] font-semibold text-ink">{c.label}</span>
+                      {c.needsPhoto && (
+                        <Camera className="h-5 w-5 text-ink-3" aria-label="Photo needed" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </Group>
 
             <div className="space-y-2">
               <label
@@ -1636,7 +1226,8 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
         )}
       </main>
 
-      <Sheet open={recentOpen} onClose={() => setRecentOpen(false)} title="Your scans today">
+      {/* Sheet 1: Recent return scans */}
+      <Sheet open={recentOpen} onClose={() => setRecentOpen(false)} title="Your returns today">
         {recentScans.length === 0 ? (
           <p className="py-6 text-[16px] text-ink-3">Nothing scanned yet</p>
         ) : (
@@ -1651,7 +1242,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                     <span className="tabular-nums block truncate text-[14px] text-ink-3">{s.scannedBarcode}</span>
                   </span>
                   <span className={`text-[15px] font-semibold ${good ? "text-arrived" : "text-missing"}`}>
-                    {good ? "Good" : "Issue"}
+                    {good ? "Shelf" : "Dispute"}
                   </span>
                 </li>
               );
@@ -1660,61 +1251,197 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
         )}
       </Sheet>
 
+      {/* Sheet 2: Pull cancelled labels off the table */}
       <Sheet
-        open={leftoversOpen}
-        onClose={() => setLeftoversOpen(false)}
-        title="Printed today, not packed"
+        open={pullSheetOpen}
+        onClose={() => setPullSheetOpen(false)}
+        title="Pull cancelled labels"
       >
         {waveLoading ? (
           <div className="h-32 animate-pulse rounded-[var(--radius-card)] bg-slate-100" />
-        ) : unpackedParcels.length === 0 ? (
-          <p className="py-6 text-[16px] text-ink-3">All printed labels from today are packed!</p>
+        ) : cancelledToPull.length === 0 ? (
+          <p className="py-6 text-[16px] text-ink-3">All clear — no cancelled labels to pull.</p>
         ) : (
           <ul className="divide-y divide-hairline">
-            {unpackedParcels.map((p) => {
+            {cancelledToPull.map((p) => {
               const first = p.lines[0];
+              const code6 = last6(p.trackingNumber, p.orderSn);
               return (
-                <li key={p.packageId} className="space-y-2.5 py-3.5">
+                <li key={p.packageId} className="space-y-3 py-4 first:pt-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="rounded-lg bg-missing px-2.5 py-1 text-[18px] font-extrabold tracking-wide text-white tabular-nums">
+                      ···{code6}
+                    </span>
+                    <span className="text-[14px] font-bold text-ink-2">
+                      {shortCourier(p.courier)}
+                    </span>
+                  </div>
+                  <p className="tabular-nums text-[13px] text-ink-3">
+                    {p.trackingNumber ? `${p.trackingNumber} · ` : ""}Order {p.orderSn}
+                  </p>
                   <div className="flex items-center gap-3">
                     <ItemThumb src={first?.imageUrl ?? null} alt={first?.shortName ?? p.orderSn} size="md" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-[15px] font-bold text-ink">
+                      <p className="text-[15px] font-bold text-ink">
                         {p.totalPieces}× {first?.shortName ?? p.orderSn}
                         {p.lines.length > 1 ? ` +${p.lines.length - 1} more` : ""}
                       </p>
-                      <p className="truncate text-[13px] text-ink-3 tabular-nums">
-                        {p.wavePosition && p.waveTotal ? `#${p.wavePosition}/${p.waveTotal} · ` : ""}
-                        {shortCourier(p.courier)} · {p.trackingNumber || p.orderSn}
-                      </p>
+                      {first?.variationName && (
+                        <p className="text-[13px] font-semibold text-ink-2">{first.variationName}</p>
+                      )}
                     </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="secondary"
-                      disabled={packingConfirm}
-                      onClick={() => void handleConfirmOutboundPack(p, true)}
-                      className="h-10 flex-1 text-[14px]"
-                    >
-                      Mark packed
-                    </Button>
-                    {p.canReprint && (
-                      <Button
-                        variant="plain"
-                        disabled={reprintingSn === p.orderSn}
-                        onClick={() => void handleReprintLabel(p.orderSn)}
-                        className="h-10 px-3 text-[14px]"
-                      >
-                        <Printer className="mr-1.5 h-4 w-4" />
-                        Reprint
-                      </Button>
-                    )}
-                  </div>
+                  <Button
+                    full
+                    variant="danger"
+                    disabled={pullingId === p.packageId}
+                    onClick={() => void handleMarkCancelledPulled(p)}
+                  >
+                    {pullingId === p.packageId ? "Saving…" : "Pulled off table"}
+                  </Button>
                 </li>
               );
             })}
           </ul>
         )}
       </Sheet>
+
+      {/* Sheet 3: Printed 3h+ ago, still not picked up by rider */}
+      <Sheet
+        open={unpickedSheetOpen}
+        onClose={() => setUnpickedSheetOpen(false)}
+        title="Not picked up yet (3h+)"
+      >
+        {waveLoading ? (
+          <div className="h-32 animate-pulse rounded-[var(--radius-card)] bg-slate-100" />
+        ) : unpickedParcels.length === 0 ? (
+          <p className="py-6 text-[16px] text-ink-3">All printed parcels have been picked up!</p>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-[14px] text-ink-3">
+              These labels printed 3+ hours ago but the courier hasn&apos;t scanned them yet. Check if a pouch was left behind or if the printer jammed.
+            </p>
+            <ul className="divide-y divide-hairline">
+              {unpickedParcels.map((p) => {
+                const first = p.lines[0];
+                const code6 = last6(p.trackingNumber, p.orderSn);
+                return (
+                  <li key={p.packageId} className="space-y-2.5 py-3.5">
+                    <div className="flex items-center gap-3">
+                      <ItemThumb src={first?.imageUrl ?? null} alt={first?.shortName ?? p.orderSn} size="md" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[15px] font-bold text-ink">
+                          <span className="mr-1.5 font-extrabold text-brand tabular-nums">···{code6}</span>
+                          {p.totalPieces}× {first?.shortName ?? p.orderSn}
+                        </p>
+                        <p className="truncate text-[13px] text-ink-3 tabular-nums">
+                          {shortCourier(p.courier)} · {p.orderSn}
+                        </p>
+                      </div>
+                    </div>
+                    {p.canReprint && (
+                      <Button
+                        full
+                        variant="secondary"
+                        disabled={reprintingSn === p.orderSn}
+                        onClick={() => void handleReprintLabel(p.orderSn)}
+                        className="h-10 text-[14px]"
+                      >
+                        <Printer className="mr-1.5 h-4 w-4" />
+                        {reprintingSn === p.orderSn ? "Sending…" : "Reprint missing label"}
+                      </Button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+      </Sheet>
+
+      {/* Sheet 4: Optional Check Photo / Reprint torn or jammed label */}
+      <Sheet
+        open={checkSheetOpen}
+        onClose={() => setCheckSheetOpen(false)}
+        title="Check item or reprint label"
+      >
+        <div className="space-y-4">
+          <p className="text-[14px] text-ink-3">
+            Type the last 6 digits, order number, or garment name to see photos or reprint a torn/jammed sticker.
+          </p>
+          <form onSubmit={handleCheckSearch} className="flex gap-2">
+            <label className="relative min-w-0 flex-1">
+              <span className="sr-only">Search parcel</span>
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-3" />
+              <input
+                value={checkQuery}
+                onChange={(e) => setCheckQuery(e.target.value)}
+                placeholder="Last 6 digits, order no. or item"
+                className="h-12 w-full rounded-[var(--radius-control)] bg-slate-100 pl-9 pr-3 text-[16px] text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
+              />
+            </label>
+            <Button
+              type="submit"
+              disabled={checkSearching || checkQuery.trim().length < 3}
+              className="shrink-0"
+            >
+              {checkSearching ? "…" : "Find"}
+            </Button>
+          </form>
+
+          {checkError && <p className="text-[14px] font-semibold text-missing-ink">{checkError}</p>}
+
+          {checkResults.length > 0 && (
+            <ul className="divide-y divide-hairline">
+              {checkResults.map((p) => (
+                <li key={p.packageId} className="space-y-3 py-3.5">
+                  <div className="flex items-center justify-between gap-2 text-[13px] font-bold text-ink-2 tabular-nums">
+                    <span>
+                      ···{last6(p.trackingNumber, p.orderSn)} · {shortCourier(p.courier)}
+                    </span>
+                    {p.isCancelled && (
+                      <span className="rounded-full bg-missing px-2 py-0.5 text-[12px] text-white">
+                        CANCELLED
+                      </span>
+                    )}
+                  </div>
+                  <ul className="space-y-2">
+                    {p.lines.map((line) => (
+                      <li key={line.id} className="flex items-center gap-3">
+                        <ItemThumb src={line.imageUrl} alt={line.shortName} size="md" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[15px] font-bold text-ink">
+                            {line.quantity}× {line.shortName}
+                          </p>
+                          {line.variationName && (
+                            <p className="mt-0.5 inline-block rounded bg-ink px-2 py-0.5 text-[12px] font-bold text-white">
+                              {line.variationName}
+                            </p>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  {!p.isCancelled && p.canReprint && (
+                    <Button
+                      full
+                      variant="secondary"
+                      disabled={reprintingSn === p.orderSn}
+                      onClick={() => void handleReprintLabel(p.orderSn)}
+                      className="h-10 text-[14px]"
+                    >
+                      <Printer className="mr-1.5 h-4 w-4" />
+                      {reprintingSn === p.orderSn ? "Sending…" : "Reprint label"}
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </Sheet>
+
+      <Toaster />
     </div>
   );
 }

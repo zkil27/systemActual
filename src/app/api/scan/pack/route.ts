@@ -19,6 +19,10 @@ const bodySchema = z.discriminatedUnion("action", [
     courierLock: z.string().max(64).optional(),
   }),
   z.object({
+    action: z.literal("mark_cancelled_pulled"),
+    packageId: z.string().min(1),
+  }),
+  z.object({
     action: z.literal("reprint_label"),
     orderSn: z.string().min(3).max(64),
   }),
@@ -66,6 +70,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Parcel not found." }, { status: 404 });
   }
 
+  const staffMemberId = await resolveActorStaffMemberId(session);
+  if (!staffMemberId) {
+    return NextResponse.json(
+      { error: "No active staff profile configured in Settings." },
+      { status: 400 }
+    );
+  }
+
+  if (parsed.data.action === "mark_cancelled_pulled") {
+    await prisma.package.update({
+      where: { id: pkg.id },
+      data: {
+        packedAt: pkg.packedAt ?? new Date(),
+        packedByStaffId: pkg.packedByStaffId ?? staffMemberId,
+      },
+    });
+    const stats = await getPackerStats(session);
+    return NextResponse.json({ ok: true, packageId: pkg.id, ...stats });
+  }
+
   if (isOrderCancelledForPacking(pkg.order)) {
     return NextResponse.json(
       { error: "STOP — Buyer cancelled this order. Do not pack or hand to courier." },
@@ -83,14 +107,6 @@ export async function POST(req: NextRequest) {
         { status: 409 }
       );
     }
-  }
-
-  const staffMemberId = await resolveActorStaffMemberId(session);
-  if (!staffMemberId) {
-    return NextResponse.json(
-      { error: "No active staff profile configured in Settings." },
-      { status: 400 }
-    );
   }
 
   const updated = await prisma.package.update({

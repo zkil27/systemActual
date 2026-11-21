@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildPdf, pdfEscape } from "@/lib/print/pdf";
 import { bearerDeviceToken, hashDeviceToken, isOnline, newDeviceToken } from "@/lib/print/device";
 import { applyReport } from "@/lib/print/jobs";
+import { buildCourierDividerLines, formatCourierDividerTitle } from "@/lib/print/render";
 import { isBriefDue } from "@/lib/reports/daily-brief";
 
 describe("buildPdf", () => {
@@ -92,5 +93,15 @@ describe("daily brief timing", () => {
   it("does not resend after midnight Manila for the previous day", () => {
     // 00:30 Nov 22 Manila: new Manila day, but before 8 PM
     expect(isBriefDue(new Date("2026-11-21T16:30:00Z"), "12:00", "2026-11-21")).toBe(false);
+  });
+});
+
+describe("courier divider slip", () => {
+  it("formats a bold 4x6 divider slip with courier title and parcel count", () => {
+    const title = formatCourierDividerTitle("TikTok · J&T Express", 91);
+    const lines = buildCourierDividerLines(title, new Date("2026-11-21T17:44:00Z"));
+    expect(lines.some((l) => l.includes("COURIER SACK DIVIDER"))).toBe(true);
+    expect(lines.some((l) => l.includes("TIKTOK · J&T EXPRESS"))).toBe(true);
+    expect(lines.some((l) => l.includes("91 PARCELS IN THIS STACK"))).toBe(true);
   });
 });

@@ -1,5 +1,7 @@
 import { PrintJobKind, WaveItemStatus, WaveStatus, type Platform, type Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { formatCourierDividerTitle } from "@/lib/print/render";
+import type { WaveSummary } from "@/lib/waves/plan";
 import { MAX_ATTEMPTS } from "./shopee-rules";
 
 /**
@@ -95,6 +97,38 @@ export async function markShipRequested(items: Item[]) {
 }
 
 /**
+ * Inserts a 4×6 courier divider slip right before the first label of each
+ * courier/shop group when a wave spans multiple couriers/shops.
+ */
+async function ensureCourierDivider(
+  tx: Prisma.TransactionClient,
+  waveId: string,
+  groupKey: string,
+  position: number,
+  now: Date
+) {
+  const wave = await tx.wave.findUnique({ where: { id: waveId }, select: { summaryJson: true } });
+  const summary = wave?.summaryJson as unknown as WaveSummary | undefined;
+  if (!summary?.groups || summary.groups.length <= 1) return;
+  const group = summary.groups.find((g) => g.key === groupKey);
+  if (!group) return;
+  const title = formatCourierDividerTitle(group.title, group.count);
+  const exists = await tx.printJob.count({
+    where: { waveId, kind: PrintJobKind.PICK_LIST, title },
+  });
+  if (exists > 0) return;
+  await tx.printJob.create({
+    data: {
+      kind: PrintJobKind.PICK_LIST,
+      title,
+      waveId,
+      position: Math.max(0, position),
+      createdAt: new Date(now.getTime() - 1),
+    },
+  });
+}
+
+/**
  * Label is ready: move the item to LABEL_READY and queue exactly one print
  * job (the status condition makes a repeat a no-op).
  */
@@ -122,6 +156,7 @@ export async function queueLabel(
     });
     if (moved.count !== 1) return;
     if (trackingNumber) await tx.package.update({ where: { id: item.packageId }, data: { trackingNumber } });
+    await ensureCourierDivider(tx, item.waveId, item.groupKey, item.position, now);
     await tx.printJob.create({
       data: {
         kind: PrintJobKind.LABEL,
@@ -177,6 +212,7 @@ export async function queueLabelBatch(
 
     const first = movedItems[0];
     const last = movedItems[movedItems.length - 1];
+    await ensureCourierDivider(tx, waveId, first.groupKey, first.position, now);
     const title =
       movedItems.length === 1
         ? `Label ${first.position + 1}/${total} · ${first.package.order.orderSn}`

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { tiktokRequest } from "@/lib/connectors/tiktok";
 import { ensureFreshToken } from "@/lib/connectors/tokens";
 import { recheckOrders } from "@/lib/waves/recheck";
+import { isOrderCancelledForPacking } from "./outbound";
 import {
   advance,
   dueItems,
@@ -154,7 +155,9 @@ async function labelBatch(shop: ShopConnection, token: string, waveTotals: Map<s
 
     for (const { item: i, label } of fetched) {
       done++;
-      if (label.url) {
+      if (isOrderCancelledForPacking(i.package.order)) {
+        await finish([i], WaveItemStatus.SKIPPED_CANCELLED, "Cancelled before printing", false);
+      } else if (label.url) {
         await queueLabel(
           i,
           WaveItemStatus.SHIPPING_ARRANGED,

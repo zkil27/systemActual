@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { shopeePost } from "@/lib/connectors/shopee";
 import { ensureFreshToken } from "@/lib/connectors/tokens";
 import { recheckOrders } from "@/lib/waves/recheck";
+import { isOrderCancelledForPacking } from "./outbound";
 import {
   advance,
   dueItems,
@@ -196,11 +197,24 @@ async function docCreateBatch(shop: ShopConnection, token: string): Promise<numb
 async function docResultBatch(shop: ShopConnection, token: string, waveTotals: Map<string, number>): Promise<number> {
   const items = await due(shop.id, WaveItemStatus.TRACKING_ASSIGNED, { docRequestedAt: { not: null } });
   if (!items.length) return 0;
+
+  // Skip printing any order that was cancelled while waiting for Shopee to generate the PDF.
+  const cancelled: Item[] = [];
+  const active: Item[] = [];
+  for (const i of items) {
+    if (isOrderCancelledForPacking(i.package.order)) cancelled.push(i);
+    else active.push(i);
+  }
+  if (cancelled.length) {
+    await finish(cancelled, WaveItemStatus.SKIPPED_CANCELLED, "Cancelled before printing", false);
+  }
+  if (!active.length) return items.length;
+
   let statuses = new Map<string, { status: string; error?: string }>();
   try {
     statuses = docStatuses(
       await shopeePost("/api/v2/logistics/get_shipping_document_result", shop.shopId, token, {
-        order_list: items.map((i) => ({
+        order_list: active.map((i) => ({
           order_sn: i.package.order.orderSn,
           package_number: i.package.packageNumber,
           shipping_document_type: DOC_TYPE,
@@ -212,7 +226,7 @@ async function docResultBatch(shop: ShopConnection, token: string, waveTotals: M
   }
   const now = new Date();
   const readyByGroup = new Map<string, Item[]>();
-  for (const i of items) {
+  for (const i of active) {
     const st = statuses.get(i.package.packageNumber);
     if (st?.status === "READY") {
       const key = `${i.waveId}:${i.groupKey}`;
