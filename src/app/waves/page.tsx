@@ -154,10 +154,10 @@ export default function WavesPage() {
     return data;
   }
 
-  async function preview() {
+  async function preview(limit?: number) {
     setBusy("preview");
     try {
-      const data = await post({ action: "preview" });
+      const data = await post({ action: "preview", ...(limit ? { limit } : {}) });
       toast(`${data.summary.total} parcels ready`);
       await load();
     } catch (e) {
@@ -191,8 +191,11 @@ export default function WavesPage() {
             See what a wave would ship right now, grouped by courier and item. Every order is checked live for
             cancellations. Nothing is shipped or changed on the shops.
           </p>
-          <Button full size="lg" disabled={busy !== null} onClick={preview}>
+          <Button full size="lg" disabled={busy !== null} onClick={() => preview()}>
             {busy === "preview" ? "Checking orders…" : "Preview wave"}
+          </Button>
+          <Button full variant="plain" disabled={busy !== null} onClick={() => preview(5)}>
+            Preview a test wave (5 parcels)
           </Button>
           {canShip && (
             <Button full variant="secondary" disabled={busy !== null || Boolean(running)} onClick={shipNowClick}>

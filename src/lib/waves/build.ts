@@ -34,6 +34,8 @@ export async function buildWavePreview(opts: {
    * seconds before shipping it, which is the check that matters.
    */
   recheck?: boolean;
+  /** Test waves: keep only the first N packages in label order (e.g. 5 for the first live wave). */
+  limit?: number;
 }) {
   const now = opts.now ?? new Date();
   const cutoff = new Date(now.getTime() - MIN_ORDER_AGE_MS);
@@ -112,7 +114,7 @@ export async function buildWavePreview(opts: {
     }
   }
 
-  const planned = planWave(ready);
+  const planned = planWave(ready).slice(0, opts.limit && opts.limit > 0 ? opts.limit : undefined);
   const summary = summarizeWave(planned, skipped);
 
   await prisma.wave.deleteMany({

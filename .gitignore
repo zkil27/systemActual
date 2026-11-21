@@ -15,4 +15,6 @@ public/uploads/*
 .env*
 !.env.example
 print-agent/backups
+# Real (redacted) shop responses: review before committing anything from here.
+src/lib/__fixtures__/live/
 

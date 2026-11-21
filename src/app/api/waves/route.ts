@@ -55,7 +55,7 @@ export async function GET() {
 }
 
 const actionSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("preview") }),
+  z.object({ action: z.literal("preview"), limit: z.number().int().min(1).max(2500).optional() }),
   z.object({ action: z.literal("print_pick_list"), waveId: z.string().min(1) }),
   z.object({ action: z.literal("start"), waveId: z.string().min(1) }),
   z.object({ action: z.literal("ship_now") }),
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
   try {
     if (parsed.data.action === "preview") {
       // Read-only: nothing is shipped or changed on the shops.
-      const result = await buildWavePreview({ deadline: Date.now() + RECHECK_BUDGET_MS });
+      const result = await buildWavePreview({ deadline: Date.now() + RECHECK_BUDGET_MS, limit: parsed.data.limit });
       return NextResponse.json({ ok: true, ...result });
     }
 
