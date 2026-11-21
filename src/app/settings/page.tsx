@@ -278,6 +278,10 @@ export default function SettingsPage() {
                 </a>
               );
             })}
+            <Link href="/items" className={rowLinkClass}>
+              <span className="text-[17px] text-ink">Items &amp; stock</span>
+              <ChevronRight className="h-5 w-5 text-ink-3" />
+            </Link>
             <Link href="/imports" className={rowLinkClass}>
               <span className="text-[17px] text-ink">Upload a file</span>
               <ChevronRight className="h-5 w-5 text-ink-3" />

@@ -5,6 +5,7 @@ import { pruneOldOrders } from "@/lib/ledger/store";
 import { syncOrders } from "@/lib/ledger/sync";
 import { detectFailedDeliveries, refreshOpenParcels, syncReturnRequests } from "@/lib/returns/sync";
 import { syncMoney } from "@/lib/money/sync";
+import { runStockImport } from "@/lib/catalog/import";
 import { runLocked } from "./lock";
 
 /**
@@ -26,6 +27,7 @@ export interface ShopTickResult {
   parcelsChecked: number;
   courierReturned: number;
   moneySaved: number;
+  stockImportPages?: number;
   caughtUp: boolean;
   error?: string;
 }
@@ -72,6 +74,13 @@ async function tickShop(shopId: string, deadline: number): Promise<ShopTickResul
       // Money problems must not hide return updates; report and continue.
       result.error = `Money sync: ${err instanceof Error ? err.message : String(err)}`;
       console.error(`[tick] ${shop.shopName} money`, err);
+    }
+    try {
+      const imported = await runStockImport(fresh, token, deadline);
+      result.stockImportPages = imported.pages;
+    } catch (err) {
+      result.error = `Stock import: ${err instanceof Error ? err.message : String(err)}`;
+      console.error(`[tick] ${shop.shopName} stock import`, err);
     }
     result.caughtUp = orders.caughtUp && returns.caughtUp;
     await prisma.shopConnection.update({ where: { id: shop.id }, data: { lastSyncedAt: new Date() } });

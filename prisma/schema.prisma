@@ -79,6 +79,11 @@ model ShopConnection {
   walletSyncedTo     DateTime?
   /// Last money sync. Money is pulled at most every 15 minutes.
   walletCheckedAt    DateTime?
+  /// Read-only starting-stock import: null | RUNNING | DONE. Runs in ticks, resumable.
+  stockImportStatus  String?
+  /// Shopee offset / TikTok page token for the next page of listings.
+  stockImportCursor  String?
+  stockImportedAt    DateTime?
   walletTransactions WalletTransaction[]
   lastSyncedAt       DateTime?
   orders             Order[]
@@ -269,9 +274,9 @@ model Package {
 
 /// Every listing variation seen on either shop. Filled from order lines.
 model ListingVariant {
-  id               String         @id @default(cuid())
+  id               String          @id @default(cuid())
   shopConnectionId String
-  shopConnection   ShopConnection @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
+  shopConnection   ShopConnection  @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
   platform         Platform
   listingId        String
   variationId      String
@@ -279,8 +284,40 @@ model ListingVariant {
   variationName    String?
   imageUrl         String?
   lastSeenAt       DateTime
+  /// The real garment this listing variation sells. Every listing variation
+  /// gets its own on first sight; the owner links twins across shops.
+  garmentVariantId String?
+  garmentVariant   GarmentVariant? @relation(fields: [garmentVariantId], references: [id], onDelete: SetNull)
+  /// "Available to sell" from the shop at the last stock import (excludes stock reserved by unshipped orders).
+  availableStock   Int?
+  stockCheckedAt   DateTime?
 
   @@unique([shopConnectionId, listingId, variationId])
+  @@index([garmentVariantId])
+}
+
+/// One real item across both shops, e.g. "Ribbed Top".
+model Garment {
+  id        String           @id @default(cuid())
+  name      String
+  imageUrl  String?
+  variants  GarmentVariant[]
+  createdAt DateTime         @default(now())
+}
+
+/// One real colour/size of a garment, e.g. "Black, M". Holds the stock count.
+model GarmentVariant {
+  id                 String           @id @default(cuid())
+  garmentId          String
+  garment            Garment          @relation(fields: [garmentId], references: [id], onDelete: Cascade)
+  label              String
+  listings           ListingVariant[]
+  /// Owner-confirmed starting count (Task 7). The stock ledger starts from it.
+  startingStock      Int?
+  startingStockSetAt DateTime?
+  createdAt          DateTime         @default(now())
+
+  @@index([garmentId])
 }
 
 /// Prevents two worker ticks from running at once. A tick that finds the lock

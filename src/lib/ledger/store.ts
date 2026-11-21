@@ -1,6 +1,7 @@
 import { Prisma, type Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { FINAL_ORDER_STATUSES, shouldApplyOrderUpdate, type NormalizedOrder } from "./normalize";
+import { ensureGarmentFor } from "@/lib/catalog/garments";
 
 export const ORDER_RETENTION_DAYS = 90;
 
@@ -89,7 +90,7 @@ export async function saveOrder(
       imageUrl: l.imageUrl,
       lastSeenAt: now,
     };
-    await prisma.listingVariant.upsert({
+    const lv = await prisma.listingVariant.upsert({
       where: {
         shopConnectionId_listingId_variationId: {
           shopConnectionId,
@@ -100,6 +101,7 @@ export async function saveOrder(
       create: { shopConnectionId, platform, listingId: l.listingId, variationId: l.variationId, ...listing },
       update: { ...listing, imageUrl: l.imageUrl ?? undefined },
     });
+    if (!lv.garmentVariantId) await ensureGarmentFor(lv);
   }
 
   return "saved";
