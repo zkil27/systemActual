@@ -9,6 +9,8 @@ import { runStockImport } from "@/lib/catalog/import";
 import { recordShipments } from "@/lib/stock/ledger";
 import { pushStock } from "@/lib/stock/push";
 import { sendDailyBriefIfDue } from "@/lib/reports/daily-brief";
+import { advanceShopeeWaves } from "@/lib/shipping/shopee-engine";
+import { finishDoneWaves } from "@/lib/waves/run";
 import { runLocked } from "./lock";
 
 /**
@@ -116,6 +118,14 @@ async function tickOnce(deadline: number): Promise<{ shops: ShopTickResult[]; pr
   } catch (err) {
     stock.error = err instanceof Error ? err.message : String(err);
     console.error("[tick] stock", err);
+  }
+
+  // Waves: arrange shipment, tracking numbers, labels. Only for shops whose write switch is on.
+  try {
+    await advanceShopeeWaves(deadline);
+    await finishDoneWaves();
+  } catch (err) {
+    console.error("[tick] waves", err);
   }
 
   try {

@@ -14,7 +14,21 @@ interface WaveRow {
   parcelCount: number;
   createdAt: string;
   summary: WaveSummary;
+  progress: Partial<Record<string, number>>;
+  failed: Array<{ orderSn: string; error: string | null }>;
 }
+
+const PROGRESS: Array<[string, string]> = [
+  ["READY", "waiting to ship"],
+  ["SHIPPING_ARRANGED", "shipped, waiting for waybill"],
+  ["TRACKING_ASSIGNED", "making label"],
+  ["LABEL_READY", "label queued"],
+  ["PRINTED", "printed"],
+  ["SKIPPED_CANCELLED", "cancelled, left out"],
+  ["FAILED", "need attention"],
+];
+
+const PREVIEW_MAX_AGE_MS = 30 * 60_000;
 
 const SKIP_LABELS: Array<[keyof WaveSummary["skipped"], string]> = [
   ["tooNew", "less than 1 hour old"],
@@ -28,16 +42,47 @@ const SKIP_LABELS: Array<[keyof WaveSummary["skipped"], string]> = [
 /** Preview what a wave would ship and print its pick list. Nothing is shipped from here yet. */
 export default function WavesPage() {
   const [waves, setWaves] = useState<WaveRow[] | null>(null);
-  const [busy, setBusy] = useState<"preview" | "print" | null>(null);
+  const [canShip, setCanShip] = useState(false);
+  const [busy, setBusy] = useState<"preview" | "print" | "start" | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/waves");
-    if (res.ok) setWaves((await res.json()).waves);
+    if (!res.ok) return;
+    const data = await res.json();
+    setWaves(data.waves);
+    setCanShip(Boolean(data.canShip));
   }, []);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  const running = waves?.some((w) => w.status === "RUNNING");
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, [running, load]);
+
+  async function start(wave: WaveRow) {
+    if (
+      !window.confirm(
+        `Ship ${wave.parcelCount} parcels now? Kyna Ops will arrange pickup on the shops and print the labels. This can't be undone. Each order is checked for cancellation again just before it ships.`
+      )
+    ) {
+      return;
+    }
+    setBusy("start");
+    try {
+      const data = await post({ action: "start", waveId: wave.id });
+      toast(`Shipping ${data.shipping} parcels`);
+      await load();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function post(body: Record<string, unknown>) {
     const res = await fetch("/api/waves", {
@@ -101,7 +146,8 @@ export default function WavesPage() {
             <Group className="p-5">
               <span className="flex items-baseline justify-between gap-3">
                 <span className="text-[17px] font-bold text-ink">
-                  {latest.status === "PREVIEW" ? "Preview" : latest.status} · {manilaDateTime(latest.createdAt)}
+                  {{ PREVIEW: "Preview", RUNNING: "Shipping", DONE: "Done", CANCELLED: "Stopped" }[latest.status] ?? latest.status} ·{" "}
+                  {manilaDateTime(latest.createdAt)}
                 </span>
               </span>
               <span className="mt-3 block text-[40px] font-extrabold leading-none tracking-[-0.03em] text-ink tabular-nums">
@@ -119,16 +165,41 @@ export default function WavesPage() {
                   ))}
                 </ul>
               )}
-              {s.total > 0 && (
-                <Button
-                  full
-                  variant="secondary"
-                  className="mt-4"
-                  disabled={busy !== null}
-                  onClick={() => printPickList(latest.id)}
-                >
-                  {busy === "print" ? "Sending…" : "Print pick list"}
-                </Button>
+              {latest.status !== "PREVIEW" && (
+                <ul className="mt-4 space-y-1 border-t border-hairline pt-3 text-[15px] tabular-nums">
+                  {PROGRESS.filter(([k]) => latest.progress[k]).map(([k, label]) => (
+                    <li key={k} className={k === "FAILED" ? "font-semibold text-missing-ink" : "text-ink-2"}>
+                      {latest.progress[k]} {label}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {latest.failed.length > 0 && (
+                <ul className="mt-2 space-y-1 text-[13px] text-ink-3">
+                  {latest.failed.map((f) => (
+                    <li key={f.orderSn}>
+                      {f.orderSn}: {f.error}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {latest.status === "PREVIEW" && s.total > 0 && (
+                <div className="mt-4 space-y-2">
+                  {canShip && Date.now() - new Date(latest.createdAt).getTime() < PREVIEW_MAX_AGE_MS ? (
+                    <Button full size="lg" disabled={busy !== null} onClick={() => start(latest)}>
+                      {busy === "start" ? "Starting…" : `Ship ${s.total} parcels`}
+                    </Button>
+                  ) : (
+                    <p className="text-[14px] text-ink-3">
+                      {canShip
+                        ? "Preview again to ship (previews expire after 30 minutes)."
+                        : "To ship from here, turn on \"Update … from Kyna Ops\" for a shop in Settings."}
+                    </p>
+                  )}
+                  <Button full variant="secondary" disabled={busy !== null} onClick={() => printPickList(latest.id)}>
+                    {busy === "print" ? "Sending…" : "Print pick list only"}
+                  </Button>
+                </div>
               )}
             </Group>
 

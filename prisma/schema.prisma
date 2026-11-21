@@ -506,8 +506,19 @@ model WaveItem {
   activePackageId String?        @unique
   trackingNumber  String?
   error           String?
+  /// Set just before asking the shop to arrange shipment. If the app crashes
+  /// or the call times out, this says "we may have shipped it": the next
+  /// fresh re-check decides, and an arranged order is then treated as ours.
+  shipRequestedAt DateTime?
+  /// Label document requested from the shop (waiting for it to be ready).
+  docRequestedAt  DateTime?
+  /// Tries in the current step; reset on every step change.
+  attempts        Int            @default(0)
+  /// Don't retry this item before this time.
+  nextAttemptAt   DateTime?
   updatedAt       DateTime       @updatedAt
 
   @@index([waveId, position])
+  @@index([status, nextAttemptAt])
   @@index([packageId])
 }

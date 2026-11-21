@@ -1,5 +1,6 @@
 import { PrintJobKind, PrintJobStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { markLabelPrinted } from "@/lib/waves/run";
 
 /** Labels handed to the PC per poll. Small enough that pausing stops within one chunk. */
 export const CHUNK_SIZE = 25;
@@ -55,11 +56,17 @@ export async function claimJobs(deviceId: string, now: Date = new Date()) {
 }
 
 export async function reportJob(deviceId: string, jobId: string, report: JobReport, now: Date = new Date()) {
-  const job = await prisma.printJob.findUnique({ where: { id: jobId }, select: { status: true, deviceId: true } });
+  const job = await prisma.printJob.findUnique({
+    where: { id: jobId },
+    select: { status: true, deviceId: true, kind: true, waveId: true, packageId: true },
+  });
   if (!job) return { ok: false as const, reason: "job not found" };
   const result = applyReport(job, deviceId, report, now);
   if (!result.ok) return result;
   await prisma.printJob.update({ where: { id: jobId }, data: result.data });
+  if (report.status === "PRINTED" && job.kind === PrintJobKind.LABEL && job.waveId && job.packageId) {
+    await markLabelPrinted(job.waveId, job.packageId);
+  }
   return { ok: true as const };
 }
 

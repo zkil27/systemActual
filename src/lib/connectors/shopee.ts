@@ -184,3 +184,45 @@ export async function shopeePost(
   }
   return data.response;
 }
+
+/**
+ * Signed POST that returns a file (e.g. download_shipping_document). Shopee
+ * answers with the PDF on success and with JSON on error.
+ */
+export async function shopeePostFile(
+  path: string,
+  shopId: string,
+  accessToken: string,
+  body: Record<string, unknown>,
+  fetchFn: typeof fetch = fetch
+): Promise<Buffer> {
+  const cfg = getShopeeConfig();
+  const timestamp = Math.floor(Date.now() / 1000);
+  const sign = signShopeeRequest({
+    partnerId: cfg.partnerId,
+    partnerKey: cfg.partnerKey,
+    path,
+    timestamp,
+    accessToken,
+    shopId,
+  });
+  const qs = new URLSearchParams({
+    partner_id: cfg.partnerId,
+    timestamp: String(timestamp),
+    access_token: accessToken,
+    shop_id: shopId,
+    sign,
+  });
+  const res = await fetchFn(`${cfg.baseUrl}${path}?${qs.toString()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
+  });
+  const type = res.headers.get("content-type") ?? "";
+  if (!res.ok || type.includes("json")) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.message || data.error || `Shopee couldn't give the file (${res.status})`);
+  }
+  return Buffer.from(await res.arrayBuffer());
+}
