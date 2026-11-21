@@ -95,8 +95,8 @@ describe("stock import mapping", () => {
       }
     );
     expect(rows).toEqual([
-      { listingId: "9001", variationId: "77", name: "Ribbed Top", variationName: "Black,M", imageUrl: "https://cf.shopee.ph/file/black", availableStock: 12 },
-      { listingId: "9001", variationId: "78", name: "Ribbed Top", variationName: "Beige,L", imageUrl: "https://cf.shopee.ph/file/main", availableStock: 0 },
+      { listingId: "9001", variationId: "77", name: "Ribbed Top", variationName: "Black,M", imageUrl: "https://cf.shopee.ph/file/black", availableStock: 12, warehouseId: null },
+      { listingId: "9001", variationId: "78", name: "Ribbed Top", variationName: "Beige,L", imageUrl: "https://cf.shopee.ph/file/main", availableStock: 0, warehouseId: null },
     ]);
   });
 
@@ -105,7 +105,9 @@ describe("stock import mapping", () => {
       { item_id: 9002, item_name: "Tote Bag", has_model: false, stock_info_v2: { summary_info: { total_available_stock: 40 } } },
       null
     );
-    expect(rows).toEqual([{ listingId: "9002", variationId: "0", name: "Tote Bag", variationName: null, imageUrl: null, availableStock: 40 }]);
+    expect(rows).toEqual([
+      { listingId: "9002", variationId: "0", name: "Tote Bag", variationName: null, imageUrl: null, availableStock: 40, warehouseId: null },
+    ]);
   });
 
   it("TikTok product: SKU label from sales attributes, stock summed across warehouses", () => {
@@ -129,6 +131,7 @@ describe("stock import mapping", () => {
         variationName: "Black, M",
         imageUrl: "https://p16.tiktokcdn.com/main",
         availableStock: 12,
+        warehouseId: "w1",
       },
     ]);
   });

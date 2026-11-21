@@ -104,10 +104,19 @@ function StockRow({
       <div className="flex items-center justify-between gap-3">
         <span className="min-w-0">
           <span className="block truncate text-[16px] font-semibold text-ink">{variant.label}</span>
-          <span className="block text-[13px] text-ink-3 tabular-nums">
-            {shops.length ? shops.join(" · ") : "No stock from shops yet"}
-            {variant.committed > 0 ? ` · ${variant.committed} on unshipped orders` : ""}
-          </span>
+          {variant.onShelf !== null ? (
+            <span className="block text-[13px] text-ink-3 tabular-nums">
+              {variant.onShelf} on shelf · {variant.committed} on orders · shops show {variant.available}
+              {variant.listings.some((l) => l.pushError) ? (
+                <span className="font-semibold text-missing-ink"> · not updated</span>
+              ) : null}
+            </span>
+          ) : (
+            <span className="block text-[13px] text-ink-3 tabular-nums">
+              {shops.length ? shops.join(" · ") : "No stock from shops yet"}
+              {variant.committed > 0 ? ` · ${variant.committed} on unshipped orders` : ""}
+            </span>
+          )}
           {variant.stock.conflict && variant.startingStock === null && (
             <span className="block text-[13px] font-semibold text-amber-800">Shops disagree. Count and check.</span>
           )}

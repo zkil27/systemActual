@@ -12,7 +12,9 @@ describe("OAuth state", () => {
   it("only accepts the exact value from this browser's cookie", () => {
     const s = newOAuthState();
     expect(statesMatch(s, s)).toBe(true);
-    expect(statesMatch(s, s.slice(0, -1) + "x")).toBe(false);
+    // Change the last character to a different one (never the same by chance).
+    const tampered = s.slice(0, -1) + (s.endsWith("A") ? "B" : "A");
+    expect(statesMatch(s, tampered)).toBe(false);
     expect(statesMatch(undefined, s)).toBe(false);
     expect(statesMatch(s, null)).toBe(false);
     expect(statesMatch("", "")).toBe(false);

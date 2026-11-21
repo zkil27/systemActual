@@ -24,6 +24,7 @@ async function saveImported(conn: ShopConnection, rows: ImportedListing[]) {
       availableStock: r.availableStock,
       stockCheckedAt: now,
       lastSeenAt: now,
+      ...(r.warehouseId ? { warehouseId: r.warehouseId } : {}),
     };
     const lv = await prisma.listingVariant.upsert({
       where: {

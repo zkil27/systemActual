@@ -8,6 +8,8 @@ export interface ImportedListing {
   variationName: string | null;
   imageUrl: string | null;
   availableStock: number;
+  /** TikTok only: needed later to update this SKU's stock. */
+  warehouseId: string | null;
 }
 
 type Raw = Record<string, unknown>;
@@ -34,7 +36,15 @@ export function mapShopeeItem(base: Raw, models: Raw | null): ImportedListing[] 
 
   if (!base.has_model || !models) {
     return [
-      { listingId, variationId: "0", name, variationName: null, imageUrl: itemImage, availableStock: shopeeAvailable(base.stock_info_v2) },
+      {
+        listingId,
+        variationId: "0",
+        name,
+        variationName: null,
+        imageUrl: itemImage,
+        availableStock: shopeeAvailable(base.stock_info_v2),
+        warehouseId: null,
+      },
     ];
   }
 
@@ -51,6 +61,7 @@ export function mapShopeeItem(base: Raw, models: Raw | null): ImportedListing[] 
         variationName: (m.model_name ? String(m.model_name) : null) ?? shopeeModelLabel(tiers, tierIndex),
         imageUrl: optionImage ? String(optionImage) : itemImage,
         availableStock: shopeeAvailable(m.stock_info_v2),
+        warehouseId: null,
       };
     });
 }
@@ -72,6 +83,7 @@ export function mapTikTokProduct(p: Raw): ImportedListing[] {
       variationName: label || null,
       imageUrl: skuImg.length ? String(skuImg[0]) : productImage,
       availableStock: arr(s.inventory).reduce((n, i) => n + num(i.quantity), 0),
+      warehouseId: arr(s.inventory)[0]?.warehouse_id ? String(arr(s.inventory)[0].warehouse_id) : null,
     };
   });
 }

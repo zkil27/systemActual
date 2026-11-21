@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Camera, Delete, Lock, ScanBarcode, X } from "lucide-react";
+import { AlertTriangle, Camera, Delete, Lock, PackagePlus, ScanBarcode, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ItemThumb } from "@/components/ui/ItemThumb";
 import { Sheet } from "@/components/ui/Sheet";
@@ -494,6 +494,15 @@ export default function ScanPage() {
                 Dashboard
               </Link>
             )}
+            <Link
+              href="/stock-in"
+              aria-label="Add new stock from a supplier"
+              title="New stock"
+              className="pressable flex h-11 items-center gap-1 rounded-full px-3 text-[15px] font-bold text-brand hover:bg-brand-soft"
+            >
+              <PackagePlus className="h-5 w-5" />
+              <span>New stock</span>
+            </Link>
             <button
               type="button"
               onClick={handleLockStaff}

@@ -16,6 +16,7 @@ interface SettingsPayload {
     defaultSellingPrice: number;
     overdueRtsDays: number;
     returnShippingEstimatePhp: number;
+    stockSafetyBuffer: number;
     telegramChatId: string;
     telegramDailyBriefUtc: string;
   };
@@ -132,6 +133,7 @@ export default function SettingsPage() {
   const [sellingPrice, setSellingPrice] = useState("199");
   const [overdueDays, setOverdueDays] = useState("10");
   const [returnShipping, setReturnShipping] = useState("40");
+  const [stockBuffer, setStockBuffer] = useState("0");
   const [telegramChatId, setTelegramChatId] = useState("");
   const [saving, setSaving] = useState(false);
   const [newStaffName, setNewStaffName] = useState("");
@@ -147,6 +149,7 @@ export default function SettingsPage() {
       setSellingPrice(String(payload.settings.defaultSellingPrice));
       setOverdueDays(String(payload.settings.overdueRtsDays));
       setReturnShipping(String(payload.settings.returnShippingEstimatePhp));
+      setStockBuffer(String(payload.settings.stockSafetyBuffer));
       setTelegramChatId(payload.settings.telegramChatId);
     }
   }
@@ -161,7 +164,30 @@ export default function SettingsPage() {
       sellingPrice !== String(data.settings.defaultSellingPrice) ||
       overdueDays !== String(data.settings.overdueRtsDays) ||
       returnShipping !== String(data.settings.returnShippingEstimatePhp) ||
+      stockBuffer !== String(data.settings.stockSafetyBuffer) ||
       telegramChatId !== data.settings.telegramChatId);
+
+  async function setShopWrites(shopConnectionId: string, label: string, active: boolean) {
+    if (
+      active &&
+      !window.confirm(
+        `Let Kyna Ops change ${label}? It will update stock (and later ship orders and print labels). Turn BigSeller's stock sync off for this shop first.`
+      )
+    ) {
+      return;
+    }
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "set_shop_writes", shopConnectionId, active }),
+    });
+    if (!res.ok) {
+      toast("Couldn't save", "error");
+      return;
+    }
+    toast(active ? `${label}: on` : `${label}: off`);
+    await loadSettings();
+  }
 
   async function saveGeneral(e: React.FormEvent) {
     e.preventDefault();
@@ -176,6 +202,7 @@ export default function SettingsPage() {
           defaultSellingPrice: Number(sellingPrice),
           overdueRtsDays: Number(overdueDays),
           returnShippingEstimatePhp: Number(returnShipping),
+          stockSafetyBuffer: Number(stockBuffer),
           telegramChatId,
         }),
       });
@@ -278,6 +305,24 @@ export default function SettingsPage() {
                 </a>
               );
             })}
+            {[shopee, tiktok]
+              .filter((s): s is ShopRow => Boolean(s?.connected))
+              .map((s) => {
+                const label = s.platform === "SHOPEE" ? "Shopee" : "TikTok";
+                return (
+                  <div key={s.id} className={rowClass}>
+                    <span className="flex flex-col">
+                      <span className="text-[17px] text-ink">Update {label} from Kyna Ops</span>
+                      <span className="text-[13px] text-ink-3">{s.writesEnabled ? "On: stock is sent to the shop" : "Off: nothing is changed on the shop"}</span>
+                    </span>
+                    <Switch
+                      checked={s.writesEnabled}
+                      onChange={(next) => setShopWrites(s.id, label, next)}
+                      label={`Update ${label} from Kyna Ops`}
+                    />
+                  </div>
+                );
+              })}
             <Link href="/items" className={rowLinkClass}>
               <span className="text-[17px] text-ink">Items &amp; stock</span>
               <ChevronRight className="h-5 w-5 text-ink-3" />
@@ -297,6 +342,7 @@ export default function SettingsPage() {
               <NumberRow label="Selling price" prefix="₱" value={sellingPrice} onChange={setSellingPrice} />
               <NumberRow label="Shipping back" prefix="₱" value={returnShipping} onChange={setReturnShipping} />
               <NumberRow label="Overdue after" suffix="days" value={overdueDays} onChange={setOverdueDays} />
+              <NumberRow label="Keep back from shops" suffix="pcs" value={stockBuffer} onChange={setStockBuffer} />
             </Group>
           </section>
 

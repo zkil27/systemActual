@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getScannerSession, redactParcelForStaff } from "@/lib/auth";
 import { saveProofPhoto } from "@/lib/storage";
 import { notifyOwnerTelegram } from "@/lib/telegram";
+import { recordGoodReturn } from "@/lib/stock/ledger";
 
 const VALID_CONDITIONS = new Set<string>(Object.values(PhysicalCondition));
 
@@ -85,6 +86,13 @@ export async function POST(req: NextRequest) {
         },
       }),
     ]);
+
+    // Sellable returns go back on the shelf (once per parcel item).
+    try {
+      await recordGoodReturn(parcel.id);
+    } catch (err) {
+      console.error("[scan] restock", err);
+    }
 
     if (
       condition === PhysicalCondition.WRONG_OR_SWAPPED_ITEM ||

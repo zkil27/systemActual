@@ -29,6 +29,7 @@ export async function GET() {
       defaultSellingPrice: Number(settings.defaultSellingPrice),
       overdueRtsDays: settings.overdueRtsDays,
       returnShippingEstimatePhp: Number(settings.returnShippingEstimatePhp),
+      stockSafetyBuffer: settings.stockSafetyBuffer,
       telegramChatId: settings.telegramChatId || "",
       telegramDailyBriefUtc: settings.telegramDailyBriefUtc,
     },
@@ -55,7 +56,16 @@ export async function GET() {
 }
 
 const updateSettingsSchema = z.object({
-  action: z.enum(["update_settings", "add_staff", "update_staff_pin", "toggle_staff", "send_test_telegram"]),
+  action: z.enum([
+    "update_settings",
+    "add_staff",
+    "update_staff_pin",
+    "toggle_staff",
+    "send_test_telegram",
+    "set_shop_writes",
+  ]),
+  shopConnectionId: z.string().optional(),
+  stockSafetyBuffer: z.number().int().min(0).max(1000).optional(),
   defaultUnitCostPhp: z.number().min(1).max(100000).optional(),
   defaultSellingPrice: z.number().min(1).max(100000).optional(),
   overdueRtsDays: z.number().int().min(1).max(60).optional(),
@@ -85,6 +95,7 @@ export async function POST(req: NextRequest) {
           defaultSellingPrice: data.defaultSellingPrice ?? 199,
           overdueRtsDays: data.overdueRtsDays ?? 10,
           returnShippingEstimatePhp: data.returnShippingEstimatePhp ?? 40,
+          stockSafetyBuffer: data.stockSafetyBuffer ?? 0,
           telegramChatId: data.telegramChatId?.trim() || null,
         },
         update: {
@@ -100,6 +111,7 @@ export async function POST(req: NextRequest) {
           ...(data.returnShippingEstimatePhp !== undefined
             ? { returnShippingEstimatePhp: data.returnShippingEstimatePhp }
             : {}),
+          ...(data.stockSafetyBuffer !== undefined ? { stockSafetyBuffer: data.stockSafetyBuffer } : {}),
           ...(data.telegramChatId !== undefined
             ? { telegramChatId: data.telegramChatId.trim() || null }
             : {}),
@@ -123,6 +135,15 @@ export async function POST(req: NextRequest) {
         where: { id: data.staffId },
         // A new PIN from the owner also clears any lockout.
         data: { pinHash, failedPinAttempts: 0, pinLockedUntil: null },
+      });
+      return NextResponse.json({ ok: true });
+    }
+
+    if (data.action === "set_shop_writes" && data.shopConnectionId && data.active !== undefined) {
+      // The one switch that lets the app change a shop (stock now, shipping later). Off by default.
+      await prisma.shopConnection.update({
+        where: { id: data.shopConnectionId },
+        data: { writesEnabled: data.active },
       });
       return NextResponse.json({ ok: true });
     }

@@ -1,6 +1,8 @@
 import { Platform, type ListingVariant } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { COMMITTED_ORDER_STATUSES, computeStartingStock, pairVariations, type StartingStockView } from "./variants";
+import { onShelfByVariant, resetStock, setShelfCount } from "@/lib/stock/ledger";
+import { availableToSell } from "@/lib/stock/rules";
 
 type ListingRef = Pick<ListingVariant, "id" | "shopConnectionId" | "listingId" | "name" | "variationName" | "imageUrl" | "garmentVariantId">;
 
@@ -70,12 +72,13 @@ export async function linkListings(a: ListingKey, b: ListingKey) {
     lb.map((l) => ({ id: l.garmentVariantId!, label: l.variationName }))
   );
 
+  // Two shops' counts of the same pieces must not be added together: start over.
+  await resetStock(pairs.filter(([into, from]) => into !== from).map(([into]) => into));
   await prisma.$transaction(async (tx) => {
     for (const [into, from] of pairs) {
       if (into === from) continue;
       await tx.listingVariant.updateMany({ where: { garmentVariantId: from }, data: { garmentVariantId: into } });
-      await tx.garmentVariant.update({ where: { id: into }, data: { startingStock: null, startingStockSetAt: null } });
-      await tx.garmentVariant.delete({ where: { id: from } });
+      await tx.garmentVariant.delete({ where: { id: from } }); // its movements cascade
     }
     await tx.garmentVariant.updateMany({
       where: { id: { in: leftoverB.map((v) => v.id) } },
@@ -91,9 +94,9 @@ export async function linkListings(a: ListingKey, b: ListingKey) {
 export async function mergeVariants(intoId: string, fromId: string) {
   if (intoId === fromId) return;
   const from = await prisma.garmentVariant.findUniqueOrThrow({ where: { id: fromId }, select: { garmentId: true } });
+  await resetStock([intoId]);
   await prisma.$transaction([
     prisma.listingVariant.updateMany({ where: { garmentVariantId: fromId }, data: { garmentVariantId: intoId } }),
-    prisma.garmentVariant.update({ where: { id: intoId }, data: { startingStock: null, startingStockSetAt: null } }),
     prisma.garmentVariant.delete({ where: { id: fromId } }),
   ]);
   await deleteEmptyGarments([from.garmentId]);
@@ -109,11 +112,9 @@ export async function unlinkGarment(garmentId: string) {
   for (const l of listings) await ensureGarmentFor({ ...l, garmentVariantId: null });
 }
 
+/** First count starts the stock ledger; later counts are recounts. */
 export async function setStartingStock(variantId: string, count: number) {
-  await prisma.garmentVariant.update({
-    where: { id: variantId },
-    data: { startingStock: Math.max(0, Math.floor(count)), startingStockSetAt: new Date() },
-  });
+  await setShelfCount(variantId, count);
 }
 
 // ---------------------------------------------------------------- the owner's catalog view
@@ -138,6 +139,9 @@ export interface CatalogVariant {
   startingStock: number | null;
   committed: number;
   stock: StartingStockView;
+  /** Live, once a starting count exists: pieces on the shelf and what the shops are told. */
+  onShelf: number | null;
+  available: number | null;
   listings: Array<{
     id: string;
     platform: Platform;
@@ -145,6 +149,8 @@ export interface CatalogVariant {
     variationId: string;
     variationName: string | null;
     availableStock: number | null;
+    pushedStock: number | null;
+    pushError: string | null;
   }>;
 }
 
@@ -158,7 +164,7 @@ export interface CatalogGarment {
 }
 
 export async function getCatalog(): Promise<CatalogGarment[]> {
-  const [garments, committed] = await Promise.all([
+  const [garments, committed, onShelf, settings] = await Promise.all([
     prisma.garment.findMany({
       orderBy: { name: "asc" },
       include: {
@@ -169,7 +175,10 @@ export async function getCatalog(): Promise<CatalogGarment[]> {
       },
     }),
     committedUnitsByListing(),
+    onShelfByVariant(),
+    prisma.appSettings.findUnique({ where: { id: "default" }, select: { stockSafetyBuffer: true } }),
   ]);
+  const buffer = settings?.stockSafetyBuffer ?? 0;
 
   return garments.map((g) => {
     const listingMap = new Map<string, CatalogGarment["listings"][number]>();
@@ -181,6 +190,8 @@ export async function getCatalog(): Promise<CatalogGarment[]> {
         variationId: l.variationId,
         variationName: l.variationName,
         availableStock: l.availableStock,
+        pushedStock: l.pushedStock,
+        pushError: l.pushError,
       }));
       for (const l of v.listings) {
         const key = `${l.shopConnectionId}:${l.listingId}`;
@@ -201,6 +212,8 @@ export async function getCatalog(): Promise<CatalogGarment[]> {
         startingStock: v.startingStock,
         committed: units,
         stock: computeStartingStock(ls, units),
+        onShelf: v.startingStockSetAt ? onShelf.get(v.id) ?? 0 : null,
+        available: v.startingStockSetAt ? availableToSell(onShelf.get(v.id) ?? 0, units, buffer) : null,
         listings: ls,
       };
     });

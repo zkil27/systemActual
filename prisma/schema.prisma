@@ -203,6 +203,8 @@ model AppSettings {
   overdueRtsDays            Int      @default(10)
   /// What one return/failed-delivery shipment costs the seller (Shopee PH charges it since June 2025).
   returnShippingEstimatePhp Decimal  @default(40.00) @db.Decimal(10, 2)
+  /// Pieces held back from what the shops show, so a late sync can't oversell.
+  stockSafetyBuffer         Int      @default(0)
   telegramChatId            String?
   telegramDailyBriefUtc     String   @default("12:00")
   updatedAt                 DateTime @updatedAt
@@ -226,6 +228,8 @@ model Order {
   shippedAt               DateTime?
   cancelBy                String?
   cancelReason            String?
+  /// Set once the order left the "unshipped" statuses and its stock movement was recorded.
+  stockRecordedAt         DateTime?
   /// Set once a cancelled-after-shipping order has been checked for a failed delivery.
   failedDeliveryCheckedAt DateTime?
   lines                   OrderLine[]
@@ -291,6 +295,13 @@ model ListingVariant {
   /// "Available to sell" from the shop at the last stock import (excludes stock reserved by unshipped orders).
   availableStock   Int?
   stockCheckedAt   DateTime?
+  /// TikTok warehouse the SKU's stock lives in (needed to update it).
+  warehouseId      String?
+  /// Last stock number sent to the shop, and how that went.
+  pushedStock      Int?
+  pushedAt         DateTime?
+  pushError        String?
+  pushFailures     Int             @default(0)
 
   @@unique([shopConnectionId, listingId, variationId])
   @@index([garmentVariantId])
@@ -315,6 +326,7 @@ model GarmentVariant {
   /// Owner-confirmed starting count (Task 7). The stock ledger starts from it.
   startingStock      Int?
   startingStockSetAt DateTime?
+  movements          StockMovement[]
   createdAt          DateTime         @default(now())
 
   @@index([garmentId])
@@ -356,4 +368,33 @@ model WalletTransaction {
 
   @@unique([platform, externalId])
   @@index([occurredAt, kind])
+}
+
+enum StockReason {
+  /// Owner's starting count
+  INITIAL
+  /// Staff recorded a supplier delivery
+  SUPPLIER_IN
+  /// A return scanned as good / restockable
+  RETURN_GOOD
+  /// Courier picked up an order
+  SHIPPED
+  /// Owner recount
+  ADJUSTMENT
+}
+
+/// Pieces on the shelf = sum of movements. Each movement has a unique source
+/// key, so recording the same event twice changes nothing.
+model StockMovement {
+  id               String         @id @default(cuid())
+  garmentVariantId String
+  garmentVariant   GarmentVariant @relation(fields: [garmentVariantId], references: [id], onDelete: Cascade)
+  delta            Int
+  reason           StockReason
+  sourceKey        String         @unique
+  note             String?
+  staffMemberId    String?
+  createdAt        DateTime       @default(now())
+
+  @@index([garmentVariantId])
 }

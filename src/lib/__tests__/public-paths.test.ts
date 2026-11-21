@@ -19,6 +19,8 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/login")).toBe(true);
     expect(isPublicPath("/scan")).toBe(true);
     expect(isPublicPath("/api/scan/lookup")).toBe(true);
+    expect(isPublicPath("/stock-in")).toBe(true);
+    expect(isPublicPath("/api/stock-in")).toBe(true);
   });
 
   it("lets the worker tick through (it checks WORKER_SECRET itself)", () => {

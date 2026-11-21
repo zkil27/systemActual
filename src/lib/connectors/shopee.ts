@@ -146,3 +146,41 @@ export async function shopeeGet(
   }
   return data.response;
 }
+
+/** Signed Shopee shop-level POST (JSON body, common params in the query). */
+export async function shopeePost(
+  path: string,
+  shopId: string,
+  accessToken: string,
+  body: Record<string, unknown>,
+  fetchFn: typeof fetch = fetch
+) {
+  const cfg = getShopeeConfig();
+  const timestamp = Math.floor(Date.now() / 1000);
+  const sign = signShopeeRequest({
+    partnerId: cfg.partnerId,
+    partnerKey: cfg.partnerKey,
+    path,
+    timestamp,
+    accessToken,
+    shopId,
+  });
+  const qs = new URLSearchParams({
+    partner_id: cfg.partnerId,
+    timestamp: String(timestamp),
+    access_token: accessToken,
+    shop_id: shopId,
+    sign,
+  });
+  const res = await fetchFn(`${cfg.baseUrl}${path}?${qs.toString()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15_000),
+  });
+  const data = await res.json();
+  if (!res.ok || data.error) {
+    throw new Error(data.message || data.error || `Shopee API error on ${path}`);
+  }
+  return data.response;
+}

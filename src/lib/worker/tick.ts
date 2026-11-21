@@ -6,6 +6,8 @@ import { syncOrders } from "@/lib/ledger/sync";
 import { detectFailedDeliveries, refreshOpenParcels, syncReturnRequests } from "@/lib/returns/sync";
 import { syncMoney } from "@/lib/money/sync";
 import { runStockImport } from "@/lib/catalog/import";
+import { recordShipments } from "@/lib/stock/ledger";
+import { pushStock } from "@/lib/stock/push";
 import { runLocked } from "./lock";
 
 /**
@@ -37,6 +39,7 @@ export interface TickResult {
   reason: TickReason;
   shops: ShopTickResult[];
   pruned: number;
+  stock: { shipped: number; pushed: number; failed: number; error?: string };
   ms: number;
 }
 
@@ -91,7 +94,7 @@ async function tickShop(shopId: string, deadline: number): Promise<ShopTickResul
   return result;
 }
 
-async function tickOnce(deadline: number): Promise<{ shops: ShopTickResult[]; pruned: number }> {
+async function tickOnce(deadline: number): Promise<{ shops: ShopTickResult[]; pruned: number; stock: TickResult["stock"] }> {
   const shops = await prisma.shopConnection.findMany({
     where: { isDemo: false, accessToken: { not: null } },
     orderBy: { platform: "asc" },
@@ -103,8 +106,19 @@ async function tickOnce(deadline: number): Promise<{ shops: ShopTickResult[]; pr
     const share = (deadline - Date.now()) / (shops.length - i);
     results.push(await tickShop(shops[i].id, Math.min(deadline, Date.now() + share)));
   }
+  // Stock spans both shops, so it runs once per tick after every shop's orders are in.
+  let stock: TickResult["stock"] = { shipped: 0, pushed: 0, failed: 0 };
+  try {
+    const shipped = await recordShipments(deadline);
+    const pushedRes = await pushStock(deadline);
+    stock = { shipped: shipped.movements, pushed: pushedRes.pushed, failed: pushedRes.failed };
+  } catch (err) {
+    stock.error = err instanceof Error ? err.message : String(err);
+    console.error("[tick] stock", err);
+  }
+
   const pruned = await pruneOldOrders();
-  return { shops: results, pruned };
+  return { shops: results, pruned, stock };
 }
 
 export async function runTick(reason: TickReason): Promise<TickResult> {
@@ -121,6 +135,7 @@ export async function runTick(reason: TickReason): Promise<TickResult> {
     ran: run.ran,
     reason,
     shops: last?.shops ?? [],
+    stock: last?.stock ?? { shipped: 0, pushed: 0, failed: 0 },
     pruned: run.passes.reduce((n, p) => n + p.pruned, 0),
     ms: Date.now() - started,
   };
