@@ -78,7 +78,9 @@ async function* tiktokWindowOrders(
       accessToken,
       shopCipher: conn.shopCipher,
       query: {
-        page_size: "100",
+        // A 100-order page can take ~17s to come back; smaller pages leave
+        // time in the tick to save what was fetched.
+        page_size: "50",
         sort_field: "update_time",
         sort_order: "ASC",
         ...(pageToken ? { page_token: pageToken } : {}),
@@ -104,13 +106,20 @@ export async function syncOrders(conn: ShopConnection, deadline: number): Promis
   let cursor = conn.ordersSyncedTo;
   let saved = 0;
   let windows = 0;
+  // TikTok pages come sorted by update_time ascending, so everything up to the
+  // last saved order is done. Keeping that point lets a window too busy for one
+  // tick finish over several ticks instead of restarting from its start forever.
+  const canResumeMidWindow = conn.platform === Platform.TIKTOK;
+  let lastSavedAt: Date | null = null;
 
   try {
     for (;;) {
       const w = nextSyncWindow(cursor, new Date());
       for await (const batch of pages(conn, accessToken, w, deadline)) {
         for (const order of batch) {
+          if (canResumeMidWindow) checkDeadline(deadline);
           if ((await saveOrder(conn.id, conn.platform, order)) === "saved") saved++;
+          lastSavedAt = order.updatedAt;
         }
       }
       cursor = w.to;
@@ -123,7 +132,15 @@ export async function syncOrders(conn: ShopConnection, deadline: number): Promis
       checkDeadline(deadline);
     }
   } catch (err) {
-    if (err instanceof OutOfTime) return { saved, windows, caughtUp: false };
+    if (err instanceof OutOfTime) {
+      if (canResumeMidWindow && lastSavedAt && (!cursor || lastSavedAt > cursor)) {
+        await prisma.shopConnection.update({
+          where: { id: conn.id },
+          data: { ordersSyncedTo: lastSavedAt },
+        });
+      }
+      return { saved, windows, caughtUp: false };
+    }
     throw err;
   }
 }

@@ -47,6 +47,15 @@ export interface TickResult {
   ms: number;
 }
 
+/**
+ * A deadline `fraction` of the way from now to `deadline`. Backfills (orders,
+ * return requests) get a slice instead of the whole budget, so a shop that's
+ * days behind still gets its failed deliveries and courier checks every tick.
+ */
+export function sliceDeadline(deadline: number, fraction: number, now = Date.now()): number {
+  return Math.min(deadline, now + Math.max(0, deadline - now) * fraction);
+}
+
 async function tickShop(shopId: string, deadline: number): Promise<ShopTickResult> {
   const shop = await prisma.shopConnection.findUniqueOrThrow({ where: { id: shopId } });
   const result: ShopTickResult = {
@@ -66,10 +75,12 @@ async function tickShop(shopId: string, deadline: number): Promise<ShopTickResul
   try {
     const token = await ensureFreshToken(shop);
     // Order ledger first: returns and failed deliveries read packages from it.
-    const orders = await syncOrders(shop, deadline);
+    // Orders saved in earlier ticks are enough for the later steps, so a long
+    // backfill must not use the whole budget and starve them.
+    const orders = await syncOrders(shop, sliceDeadline(deadline, 0.5));
     result.ordersSaved = orders.saved;
     const fresh = await prisma.shopConnection.findUniqueOrThrow({ where: { id: shop.id } });
-    const returns = await syncReturnRequests(fresh, token, deadline);
+    const returns = await syncReturnRequests(fresh, token, sliceDeadline(deadline, 0.5));
     result.returnsSaved = returns.saved;
     result.failedDeliveriesFound = (await detectFailedDeliveries(fresh, token, deadline)).created;
     const refreshed = await refreshOpenParcels(fresh, token, deadline);

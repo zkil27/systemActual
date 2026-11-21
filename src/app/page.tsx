@@ -193,6 +193,8 @@ export default function DashboardPage() {
       if (customDate) params.set("date", customDate);
       const res = await fetch(`/api/dashboard?${params.toString()}`);
       if (res.ok) setReport(await res.json());
+    } catch {
+      toast("No connection", "error");
     } finally {
       setLoading(false);
     }
