@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  getManilaDateRangeBounds,
   getManilaDateString,
   getManilaDayBounds,
   isWithinBounds,
@@ -23,5 +24,23 @@ describe("Asia/Manila (UTC+8) calendar boundaries", () => {
 
     const prevBounds = getManilaDayBounds("2026-11-20");
     expect(isWithinBounds(earlyManila, prevBounds.start, prevBounds.end)).toBe(false);
+  });
+
+  it("computes Manila preset and custom inclusive date range bounds", () => {
+    const now = new Date("2026-11-21T13:30:00+08:00");
+    expect(getManilaDateRangeBounds({ range: "all", now })).toBeNull();
+
+    const today = getManilaDateRangeBounds({ range: "today", now })!;
+    expect(today.start?.toISOString()).toBe("2026-11-20T16:00:00.000Z");
+    expect(today.end?.toISOString()).toBe("2026-11-21T16:00:00.000Z");
+
+    const seven = getManilaDateRangeBounds({ range: "7days", now })!;
+    expect(seven.start?.toISOString()).toBe("2026-11-14T16:00:00.000Z");
+    expect(seven.end?.toISOString()).toBe("2026-11-21T16:00:00.000Z");
+
+    // Reversed from/to still produces valid ordered bounds
+    const reversed = getManilaDateRangeBounds({ from: "2026-11-20", to: "2026-11-18", now })!;
+    expect(reversed.start?.toISOString()).toBe("2026-11-17T16:00:00.000Z");
+    expect(reversed.end?.toISOString()).toBe("2026-11-20T16:00:00.000Z");
   });
 });

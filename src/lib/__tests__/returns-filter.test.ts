@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { RETURN_FILTERS, parseReturnFilter, returnsUrl } from "@/lib/ui/returns-filter";
+import {
+  EMPTY_DATE_FILTER,
+  RETURN_DATE_PRESETS,
+  RETURN_FILTERS,
+  hasActiveDateFilter,
+  parseReturnDateFilter,
+  parseReturnFilter,
+  returnsUrl,
+} from "@/lib/ui/returns-filter";
 
 describe("returns filter URL mapping", () => {
   it("round-trips every filter through the URL", () => {
@@ -24,5 +32,44 @@ describe("returns filter URL mapping", () => {
     for (const id of ["missing", "failed", "refund", "overdue"]) {
       expect(parseReturnFilter(id)).toBe(id);
     }
+  });
+
+  it("round-trips date presets and custom date ranges through the URL", () => {
+    for (const p of RETURN_DATE_PRESETS) {
+      const url = new URL(returnsUrl("failed", { ...EMPTY_DATE_FILTER, range: p.id }), "http://x");
+      const parsed = parseReturnDateFilter(url.searchParams);
+      expect(parsed.range).toBe(p.id);
+      expect(hasActiveDateFilter(parsed)).toBe(p.id !== "all");
+    }
+
+    const customUrl = new URL(
+      returnsUrl("all", { from: "2026-11-10", to: "2026-11-20" }),
+      "http://x"
+    );
+    expect(customUrl.pathname + customUrl.search).toBe("/returns?from=2026-11-10&to=2026-11-20");
+    expect(parseReturnDateFilter(customUrl.searchParams)).toEqual({
+      range: "all",
+      date: "",
+      from: "2026-11-10",
+      to: "2026-11-20",
+    });
+
+    const singleDayUrl = new URL(returnsUrl("missing", { date: "2026-11-21" }), "http://x");
+    expect(parseReturnDateFilter(singleDayUrl.searchParams)).toEqual({
+      range: "all",
+      date: "2026-11-21",
+      from: "",
+      to: "",
+    });
+  });
+
+  it("ignores malformed date params", () => {
+    const sp = new URLSearchParams({ range: "bogus", from: "not-a-date", to: "2026-11-21" });
+    expect(parseReturnDateFilter(sp)).toEqual({
+      range: "all",
+      date: "",
+      from: "",
+      to: "2026-11-21",
+    });
   });
 });

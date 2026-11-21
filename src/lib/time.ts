@@ -73,6 +73,60 @@ export function getManilaRangeBounds(
   return { ...bounds, label: `Today • ${formatManilaShortDate(bounds.start)}` };
 }
 
+const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Exact UTC bounds for a Manila calendar preset (`today`, `yesterday`, `7days`, `30days`),
+ * a single `date` (`YYYY-MM-DD`), or an inclusive `[from, to]` Manila date range.
+ * Returns null when no date filter applies.
+ */
+export function getManilaDateRangeBounds(opts: {
+  range?: string | null;
+  date?: string | null;
+  from?: string | null;
+  to?: string | null;
+  now?: Date;
+}): { start?: Date; end?: Date } | null {
+  const date = opts.date && YMD_RE.test(opts.date) ? opts.date : null;
+  if (date) {
+    const { start, end } = getManilaDayBounds(date);
+    return { start, end };
+  }
+
+  let from = opts.from && YMD_RE.test(opts.from) ? opts.from : null;
+  let to = opts.to && YMD_RE.test(opts.to) ? opts.to : null;
+  if (from || to) {
+    if (from && to && from > to) [from, to] = [to, from];
+    return {
+      ...(from ? { start: getManilaDayBounds(from).start } : {}),
+      ...(to ? { end: getManilaDayBounds(to).end } : {}),
+    };
+  }
+
+  const todayStr = getManilaDateString(opts.now ?? new Date());
+  const todayBounds = getManilaDayBounds(todayStr);
+  switch (opts.range) {
+    case "today":
+      return { start: todayBounds.start, end: todayBounds.end };
+    case "yesterday": {
+      const y = getManilaDayBounds(shiftManilaDateString(todayStr, -1));
+      return { start: y.start, end: y.end };
+    }
+    case "7days":
+      return {
+        start: getManilaDayBounds(shiftManilaDateString(todayStr, -6)).start,
+        end: todayBounds.end,
+      };
+    case "30days":
+      return {
+        start: getManilaDayBounds(shiftManilaDateString(todayStr, -29)).start,
+        end: todayBounds.end,
+      };
+    default:
+      return null;
+  }
+}
+
 export function isWithinBounds(
   value: Date | null | undefined,
   start: Date,

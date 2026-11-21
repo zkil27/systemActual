@@ -2,15 +2,22 @@
 
 import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search } from "lucide-react";
+import { CalendarDays, Search, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { ParcelDetailSheet } from "@/components/ParcelDetailSheet";
 import { ParcelRow } from "@/components/ParcelRow";
 import { Group } from "@/components/ui/Button";
+import { manilaDayLabel } from "@/lib/ui/format";
 import {
+  EMPTY_DATE_FILTER,
+  RETURN_DATE_PRESETS,
   RETURN_FILTERS,
+  hasActiveDateFilter,
+  parseReturnDateFilter,
   parseReturnFilter,
   returnsUrl,
+  type ReturnDateFilter,
+  type ReturnDatePreset,
   type ReturnFilter,
 } from "@/lib/ui/returns-filter";
 
@@ -90,13 +97,32 @@ function FilterChips({
   );
 }
 
+function customDateSummary(df: ReturnDateFilter): string | null {
+  if (df.date) return manilaDayLabel(df.date);
+  if (df.from && df.to) {
+    return df.from === df.to
+      ? manilaDayLabel(df.from)
+      : `${manilaDayLabel(df.from)} – ${manilaDayLabel(df.to)}`;
+  }
+  if (df.from) return `From ${manilaDayLabel(df.from)}`;
+  if (df.to) return `Until ${manilaDayLabel(df.to)}`;
+  return null;
+}
+
 function ReturnsExplorerInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
   const [filter, setFilter] = useState<ReturnFilter>(() => parseReturnFilter(searchParams.get("filter")));
+  const [dateFilter, setDateFilter] = useState<ReturnDateFilter>(() =>
+    parseReturnDateFilter(searchParams)
+  );
+  const [customOpen, setCustomOpen] = useState(() =>
+    Boolean(searchParams.get("date") || searchParams.get("from") || searchParams.get("to"))
+  );
   const [query, setQuery] = useState("");
   const [parcels, setParcels] = useState<ReturnRow[] | null>(null);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Rows stagger in on the first load only; filter changes swap in place.
@@ -104,6 +130,9 @@ function ReturnsExplorerInner() {
 
   useEffect(() => {
     setFilter(parseReturnFilter(searchParams.get("filter")));
+    const nextDate = parseReturnDateFilter(searchParams);
+    setDateFilter(nextDate);
+    if (nextDate.date || nextDate.from || nextDate.to) setCustomOpen(true);
   }, [searchParams]);
 
   const loadParcels = useCallback(async () => {
@@ -111,15 +140,25 @@ function ReturnsExplorerInner() {
     try {
       const sp = new URLSearchParams({ filter });
       if (query.trim()) sp.set("q", query.trim());
+      if (dateFilter.date) {
+        sp.set("date", dateFilter.date);
+      } else if (dateFilter.from || dateFilter.to) {
+        if (dateFilter.from) sp.set("from", dateFilter.from);
+        if (dateFilter.to) sp.set("to", dateFilter.to);
+      } else if (dateFilter.range !== "all") {
+        sp.set("range", dateFilter.range);
+      }
       const res = await fetch(`/api/returns?${sp.toString()}`);
       if (res.ok) {
         const data = await res.json();
-        setParcels(data.parcels ?? []);
+        const rows: ReturnRow[] = data.parcels ?? [];
+        setParcels(rows);
+        setTotalCount(typeof data.totalCount === "number" ? data.totalCount : rows.length);
       }
     } finally {
       setLoading(false);
     }
-  }, [filter, query]);
+  }, [filter, query, dateFilter]);
 
   useEffect(() => {
     const t = setTimeout(loadParcels, 180);
@@ -135,17 +174,65 @@ function ReturnsExplorerInner() {
 
   function selectFilter(next: ReturnFilter) {
     setFilter(next);
-    router.replace(returnsUrl(next), { scroll: false });
+    router.replace(returnsUrl(next, dateFilter), { scroll: false });
+  }
+
+  function applyDateFilter(next: ReturnDateFilter) {
+    setDateFilter(next);
+    router.replace(returnsUrl(filter, next), { scroll: false });
+  }
+
+  function selectDatePreset(preset: ReturnDatePreset) {
+    setCustomOpen(false);
+    applyDateFilter({ ...EMPTY_DATE_FILTER, range: preset });
+  }
+
+  function updateCustomBound(field: "from" | "to", value: string) {
+    const baseFrom = dateFilter.date || dateFilter.from;
+    const baseTo = dateFilter.date || dateFilter.to;
+    applyDateFilter({
+      range: "all",
+      date: "",
+      from: field === "from" ? value : baseFrom,
+      to: field === "to" ? value : baseTo,
+    });
   }
 
   const stagger = firstLoad.current;
+  const dateActive = hasActiveDateFilter(dateFilter);
+  const customLabel = customDateSummary(dateFilter);
+  const isCustomActive = Boolean(customLabel);
 
   return (
     <AppShell
       title="Returns"
-      missingCount={filter === "missing" && parcels && !loading ? parcels.length : undefined}
+      missingCount={
+        filter === "missing" && !dateActive && totalCount !== null && !loading
+          ? totalCount
+          : undefined
+      }
+      headerRight={
+        <button
+          type="button"
+          aria-label="Filter by date range"
+          title="Filter by date range"
+          aria-expanded={customOpen}
+          onClick={() => setCustomOpen((o) => !o)}
+          className={`pressable relative flex h-11 w-11 items-center justify-center rounded-full hover:bg-black/[0.04] ${
+            customOpen || isCustomActive ? "text-brand" : "text-ink-2"
+          }`}
+        >
+          <CalendarDays className="h-[22px] w-[22px]" />
+          {isCustomActive && (
+            <span
+              aria-hidden="true"
+              className="absolute right-2 top-2 h-2 w-2 rounded-full bg-brand ring-2 ring-ground"
+            />
+          )}
+        </button>
+      }
     >
-      <div className="sticky top-[calc(env(safe-area-inset-top)+48px)] z-20 -mx-5 space-y-3 bg-ground px-5 pb-4 md:top-16">
+      <div className="sticky top-[calc(env(safe-area-inset-top)+48px)] z-20 -mx-5 space-y-2.5 bg-ground px-5 pb-3.5 md:top-16">
         <label className="relative block">
           <span className="sr-only">Search returns</span>
           <Search className="pointer-events-none absolute left-3 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-ink-3" />
@@ -158,8 +245,92 @@ function ReturnsExplorerInner() {
             className="h-11 w-full rounded-[var(--radius-control)] bg-slate-200/60 pl-10 pr-3 text-[16px] text-ink transition-colors focus:bg-white focus:shadow-[inset_0_0_0_1.5px_var(--color-brand)] focus:outline-none"
           />
         </label>
+
         <FilterChips value={filter} onChange={selectFilter} />
+
+        <div
+          role="group"
+          aria-label="Filter by date"
+          className="no-scrollbar -mx-5 flex items-center gap-1.5 overflow-x-auto px-5 pt-0.5"
+        >
+          {RETURN_DATE_PRESETS.map((preset) => {
+            const active = !isCustomActive && dateFilter.range === preset.id;
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                aria-pressed={active}
+                onClick={() => selectDatePreset(preset.id)}
+                className={`h-8 shrink-0 rounded-full px-3 text-[13px] font-semibold transition-colors ${
+                  active
+                    ? "bg-brand/12 text-brand shadow-[inset_0_0_0_1px_rgb(13_148_136/0.35)]"
+                    : "bg-white/70 text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline)] hover:bg-white active:bg-slate-100"
+                }`}
+              >
+                {preset.label}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            aria-pressed={isCustomActive || customOpen}
+            onClick={() => setCustomOpen((o) => !o)}
+            className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-semibold transition-colors ${
+              isCustomActive || customOpen
+                ? "bg-brand/12 text-brand shadow-[inset_0_0_0_1px_rgb(13_148_136/0.35)]"
+                : "bg-white/70 text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline)] hover:bg-white active:bg-slate-100"
+            }`}
+          >
+            <CalendarDays className="h-3.5 w-3.5" />
+            <span>{customLabel ?? "Custom"}</span>
+          </button>
+        </div>
+
+        {customOpen && (
+          <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] bg-white p-2.5 shadow-[var(--shadow-card)]">
+            <label className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-medium text-ink-3">
+              <span className="shrink-0">From</span>
+              <input
+                type="date"
+                aria-label="From date"
+                value={dateFilter.date || dateFilter.from}
+                onChange={(e) => updateCustomBound("from", e.target.value)}
+                className="h-9 min-w-0 flex-1 rounded-lg bg-slate-100 px-2.5 text-[14px] text-ink tabular-nums focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
+              />
+            </label>
+            <label className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-medium text-ink-3">
+              <span className="shrink-0">To</span>
+              <input
+                type="date"
+                aria-label="To date"
+                value={dateFilter.date || dateFilter.to}
+                onChange={(e) => updateCustomBound("to", e.target.value)}
+                className="h-9 min-w-0 flex-1 rounded-lg bg-slate-100 px-2.5 text-[14px] text-ink tabular-nums focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
+              />
+            </label>
+            {dateActive && (
+              <button
+                type="button"
+                onClick={() => selectDatePreset("all")}
+                aria-label="Clear date filter"
+                className="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg px-2.5 text-[13px] font-semibold text-ink-2 hover:bg-slate-100 hover:text-ink"
+              >
+                <X className="h-3.5 w-3.5" />
+                Clear
+              </button>
+            )}
+          </div>
+        )}
       </div>
+
+      {parcels !== null && totalCount !== null && (
+        <p className="mb-2 px-1 text-[13px] font-medium text-ink-3 tabular-nums">
+          {totalCount > parcels.length
+            ? `Showing ${parcels.length} of ${totalCount} parcels`
+            : `${totalCount} ${totalCount === 1 ? "parcel" : "parcels"}`}
+          {customLabel ? ` · ${customLabel}` : ""}
+        </p>
+      )}
 
       {parcels === null ? (
         <div className="space-y-2" aria-busy="true" aria-label="Loading">
@@ -169,7 +340,11 @@ function ReturnsExplorerInner() {
         </div>
       ) : parcels.length === 0 ? (
         <p className="anim-fade-in px-1 py-10 text-center text-[16px] text-ink-3">
-          {query.trim() ? `No results for “${query.trim()}”` : "No parcels here"}
+          {query.trim()
+            ? `No results for “${query.trim()}”`
+            : dateActive
+              ? "No parcels in this date range"
+              : "No parcels here"}
         </p>
       ) : (
         <Group className={`transition-opacity duration-150 ${loading ? "opacity-60" : ""}`}>
