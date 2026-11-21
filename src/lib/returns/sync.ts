@@ -17,8 +17,8 @@ import {
 
 /** Returns can be raised up to ~2 weeks after delivery; look further back on first connect. */
 const RETURNS_INITIAL_LOOKBACK_MS = 21 * 24 * 3600_000;
-/** Returns are much sparser than orders; 3-day windows finish a 21-day backfill in 7 calls instead of 252. */
-const RETURNS_WINDOW_MS = 3 * 24 * 3600_000;
+/** Returns are much sparser than orders; 1-day windows finish a 21-day backfill in 21 calls instead of 252 while staying well inside a tick budget. */
+const RETURNS_WINDOW_MS = 24 * 3600_000;
 /** Open parcels are rechecked this often until they arrive or the courier says they did. */
 const RECHECK_EVERY_MS = 30 * 60_000;
 /** Stop asking couriers after this long; the parcel still shows as overdue. */
