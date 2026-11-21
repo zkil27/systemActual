@@ -15,7 +15,19 @@ interface WaveRow {
   createdAt: string;
   summary: WaveSummary;
   progress: Partial<Record<string, number>>;
-  failed: Array<{ orderSn: string; error: string | null }>;
+  failed: Array<{ id: string; orderSn: string; error: string | null }>;
+}
+
+interface Schedule {
+  auto: boolean;
+  times: string[];
+  nextAt: string | null;
+}
+
+/** "08:30" → "8:30 AM" */
+function clock(hhmm: string) {
+  const [h, m] = hhmm.split(":").map(Number);
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }
 
 const PROGRESS: Array<[string, string]> = [
@@ -43,7 +55,10 @@ const SKIP_LABELS: Array<[keyof WaveSummary["skipped"], string]> = [
 export default function WavesPage() {
   const [waves, setWaves] = useState<WaveRow[] | null>(null);
   const [canShip, setCanShip] = useState(false);
-  const [busy, setBusy] = useState<"preview" | "print" | "start" | null>(null);
+  const [schedule, setSchedule] = useState<Schedule | null>(null);
+  const [timesText, setTimesText] = useState("");
+  const [reprintSn, setReprintSn] = useState("");
+  const [busy, setBusy] = useState<"preview" | "print" | "start" | "ship" | "retry" | "schedule" | "reprint" | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/waves");
@@ -51,7 +66,51 @@ export default function WavesPage() {
     const data = await res.json();
     setWaves(data.waves);
     setCanShip(Boolean(data.canShip));
+    setSchedule(data.schedule);
+    setTimesText((prev) => prev || (data.schedule?.times ?? []).join(", "));
   }, []);
+
+  async function run(kind: NonNullable<typeof busy>, fn: () => Promise<string | void>) {
+    setBusy(kind);
+    try {
+      const msg = await fn();
+      if (msg) toast(msg);
+      await load();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function saveSchedule(auto: boolean) {
+    if (
+      auto &&
+      !window.confirm(
+        "Ship waves by themselves at these times? Each one arranges pickup on the shops and prints labels, with no tap. The warehouse PC must be on."
+      )
+    ) {
+      return;
+    }
+    await run("schedule", async () => {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_settings", waveTimes: timesText, wavesAutoEnabled: auto }),
+      });
+      if (!res.ok) throw new Error("Couldn't save");
+      setTimesText("");
+      return auto ? "Automatic waves on" : "Saved";
+    });
+  }
+
+  function shipNowClick() {
+    if (!window.confirm("Ship everything that's ready now? This arranges pickup on the shops and prints labels. It can't be undone.")) return;
+    run("ship", async () => {
+      const data = await post({ action: "ship_now" });
+      return data.shipping ? `Shipping ${data.shipping} parcels` : "Nothing ready to ship";
+    });
+  }
 
   useEffect(() => {
     load();
@@ -135,6 +194,77 @@ export default function WavesPage() {
           <Button full size="lg" disabled={busy !== null} onClick={preview}>
             {busy === "preview" ? "Checking orders…" : "Preview wave"}
           </Button>
+          {canShip && (
+            <Button full variant="secondary" disabled={busy !== null || Boolean(running)} onClick={shipNowClick}>
+              {busy === "ship" ? "Starting…" : running ? "A wave is shipping" : "Print wave now"}
+            </Button>
+          )}
+        </Group>
+
+        <Group className="space-y-3 p-4">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-[17px] font-bold text-ink">Wave times</span>
+            <span className={`text-[15px] font-semibold ${schedule?.auto ? "text-arrived" : "text-ink-3"}`}>
+              {schedule?.auto ? "Automatic" : "Off"}
+            </span>
+          </div>
+          {schedule?.auto && schedule.nextAt && (
+            <p className="text-[14px] text-ink-3">Next wave {manilaDateTime(schedule.nextAt)}</p>
+          )}
+          <label className="block">
+            <span className="sr-only">Wave times, Manila time</span>
+            <input
+              value={timesText}
+              onChange={(e) => setTimesText(e.target.value)}
+              placeholder="08:30, 12:30, 15:30"
+              className="h-12 w-full rounded-[var(--radius-control)] bg-slate-100 px-4 text-[16px] tabular-nums text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
+            />
+          </label>
+          {schedule && schedule.times.length > 0 && (
+            <p className="text-[13px] text-ink-3">{schedule.times.map(clock).join(" · ")} (Manila time, 24-hour HH:MM)</p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {schedule?.auto ? (
+              <>
+                <Button variant="secondary" disabled={busy !== null} onClick={() => saveSchedule(true)}>
+                  Save times
+                </Button>
+                <Button variant="plain" disabled={busy !== null} onClick={() => saveSchedule(false)}>
+                  Turn off
+                </Button>
+              </>
+            ) : (
+              <Button disabled={busy !== null || !canShip} onClick={() => saveSchedule(true)}>
+                Ship waves automatically
+              </Button>
+            )}
+          </div>
+        </Group>
+
+        <Group className="space-y-3 p-4">
+          <span className="block text-[17px] font-bold text-ink">Reprint a label</span>
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              run("reprint", async () => {
+                const data = await post({ action: "reprint", orderSn: reprintSn });
+                setReprintSn("");
+                return `Reprinting ${data.orderSn}`;
+              });
+            }}
+          >
+            <input
+              value={reprintSn}
+              onChange={(e) => setReprintSn(e.target.value)}
+              placeholder="Order number"
+              autoCapitalize="characters"
+              className="h-12 min-w-0 flex-1 rounded-[var(--radius-control)] bg-slate-100 px-4 text-[16px] text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
+            />
+            <Button type="submit" variant="secondary" disabled={busy !== null || reprintSn.trim().length < 3}>
+              Reprint
+            </Button>
+          </form>
         </Group>
 
         {waves === null ? (
@@ -175,13 +305,46 @@ export default function WavesPage() {
                 </ul>
               )}
               {latest.failed.length > 0 && (
-                <ul className="mt-2 space-y-1 text-[13px] text-ink-3">
-                  {latest.failed.map((f) => (
-                    <li key={f.orderSn}>
-                      {f.orderSn}: {f.error}
-                    </li>
-                  ))}
-                </ul>
+                <div className="mt-3 space-y-2">
+                  <ul className="divide-y divide-hairline">
+                    {latest.failed.map((f) => (
+                      <li key={f.id} className="flex items-center justify-between gap-3 py-2">
+                        <span className="min-w-0 text-[14px]">
+                          <span className="block font-semibold text-ink">{f.orderSn}</span>
+                          <span className="block text-ink-3">{f.error}</span>
+                        </span>
+                        <Button
+                          variant="secondary"
+                          className="h-10 shrink-0 px-3"
+                          disabled={busy !== null}
+                          onClick={() =>
+                            run("retry", async () => {
+                              await post({ action: "retry_item", itemId: f.id });
+                              return "Trying again";
+                            })
+                          }
+                        >
+                          Retry
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                  {latest.failed.length > 1 && (
+                    <Button
+                      full
+                      variant="secondary"
+                      disabled={busy !== null}
+                      onClick={() =>
+                        run("retry", async () => {
+                          const data = await post({ action: "retry_failed", waveId: latest.id });
+                          return `Trying ${data.retried} again`;
+                        })
+                      }
+                    >
+                      Retry all
+                    </Button>
+                  )}
+                </div>
               )}
               {latest.status === "PREVIEW" && s.total > 0 && (
                 <div className="mt-4 space-y-2">

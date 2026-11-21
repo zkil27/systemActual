@@ -24,7 +24,17 @@ const readyWhere = (): Prisma.OrderWhereInput => ({
  * Plans a wave without touching the shops: picks every package ready to ship,
  * re-checks each order live, and saves the order and pick list as a PREVIEW.
  */
-export async function buildWavePreview(opts: { deadline: number; trigger?: string; now?: Date }) {
+export async function buildWavePreview(opts: {
+  deadline: number;
+  trigger?: string;
+  now?: Date;
+  /**
+   * Re-fetch every order now (for an accurate preview). Waves that start
+   * straight away skip this: the shipping engine re-checks every batch
+   * seconds before shipping it, which is the check that matters.
+   */
+  recheck?: boolean;
+}) {
   const now = opts.now ?? new Date();
   const cutoff = new Date(now.getTime() - MIN_ORDER_AGE_MS);
 
@@ -38,7 +48,8 @@ export async function buildWavePreview(opts: { deadline: number; trigger?: strin
     }),
   ]);
 
-  const rechecked = await recheckOrders(candidates, opts.deadline);
+  const rechecked =
+    opts.recheck === false ? new Set(candidates.map((c) => c.id)) : await recheckOrders(candidates, opts.deadline);
 
   const orders = await prisma.order.findMany({
     where: { id: { in: [...rechecked] } },

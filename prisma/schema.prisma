@@ -209,6 +209,12 @@ model AppSettings {
   telegramDailyBriefUtc     String   @default("12:00")
   /// Manila date ("2026-11-21") the 8 PM brief was last sent, so it goes out once a day.
   dailyBriefSentOn          String?
+  /// Manila wave times, "HH:MM" comma-separated.
+  waveTimes                 String   @default("08:30,12:30,15:30")
+  /// Ship waves at those times without a tap. Off until the owner turns it on.
+  wavesAutoEnabled          Boolean  @default(false)
+  /// Last wave slot that fired ("2026-11-21 08:30"), so each slot runs once.
+  lastWaveSlot              String?
   updatedAt                 DateTime @updatedAt
 }
 

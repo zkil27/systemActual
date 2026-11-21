@@ -7,6 +7,7 @@ import { isTikTokConfigured } from "@/lib/connectors/tiktok";
 import { getDailyTruthReport } from "@/lib/analytics/daily-returns";
 import { formatTelegramDailyBrief } from "@/lib/reports/brief";
 import { sendTelegramMessage } from "@/lib/telegram";
+import { parseWaveTimes } from "@/lib/waves/schedule";
 
 export async function GET() {
   const [settings, staff, shops, report] = await Promise.all([
@@ -66,6 +67,8 @@ const updateSettingsSchema = z.object({
   ]),
   shopConnectionId: z.string().optional(),
   stockSafetyBuffer: z.number().int().min(0).max(1000).optional(),
+  waveTimes: z.string().max(100).optional(),
+  wavesAutoEnabled: z.boolean().optional(),
   defaultUnitCostPhp: z.number().min(1).max(100000).optional(),
   defaultSellingPrice: z.number().min(1).max(100000).optional(),
   overdueRtsDays: z.number().int().min(1).max(60).optional(),
@@ -112,6 +115,8 @@ export async function POST(req: NextRequest) {
             ? { returnShippingEstimatePhp: data.returnShippingEstimatePhp }
             : {}),
           ...(data.stockSafetyBuffer !== undefined ? { stockSafetyBuffer: data.stockSafetyBuffer } : {}),
+          ...(data.waveTimes !== undefined ? { waveTimes: parseWaveTimes(data.waveTimes).join(",") } : {}),
+          ...(data.wavesAutoEnabled !== undefined ? { wavesAutoEnabled: data.wavesAutoEnabled } : {}),
           ...(data.telegramChatId !== undefined
             ? { telegramChatId: data.telegramChatId.trim() || null }
             : {}),
