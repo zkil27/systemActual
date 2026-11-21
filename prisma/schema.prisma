@@ -230,6 +230,8 @@ model Order {
   shippedAt               DateTime?
   cancelBy                String?
   cancelReason            String?
+  /// Buyer asked to cancel (Shopee IN_CANCEL / TikTok is_buyer_request_cancel). Never ship these.
+  cancelRequested         Boolean        @default(false)
   /// Set once the order left the "unshipped" statuses and its stock movement was recorded.
   stockRecordedAt         DateTime?
   /// Set once a cancelled-after-shipping order has been checked for a failed delivery.
@@ -263,9 +265,9 @@ model OrderLine {
 }
 
 model Package {
-  id             String  @id @default(cuid())
+  id             String     @id @default(cuid())
   orderId        String
-  order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order          Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
   /// Shopee package_number / TikTok package id
   packageNumber  String
   trackingNumber String?
@@ -273,6 +275,7 @@ model Package {
   channelId      String?
   /// Raw platform package/logistics status.
   status         String?
+  waveItems      WaveItem[]
 
   @@unique([orderId, packageNumber])
   @@index([trackingNumber])
@@ -448,4 +451,63 @@ model PrintJob {
 
   @@index([status, createdAt])
   @@index([waveId])
+}
+
+enum WaveStatus {
+  /// Read-only plan: what a wave would ship. Nothing sent to the shops.
+  PREVIEW
+  RUNNING
+  DONE
+  CANCELLED
+}
+
+/// One package's progress through a wave. Shipping states are used from Task 11.
+enum WaveItemStatus {
+  READY
+  SHIPPING_ARRANGED
+  TRACKING_ASSIGNED
+  LABEL_READY
+  PRINTED
+  SKIPPED_CANCELLED
+  FAILED
+}
+
+model Wave {
+  id          String     @id @default(cuid())
+  status      WaveStatus @default(PREVIEW)
+  /// MANUAL (owner tapped) or SCHEDULED
+  trigger     String     @default("MANUAL")
+  parcelCount Int
+  /// Groups, pick-list lines and skip counts, frozen when the wave was planned.
+  summaryJson Json
+  createdAt   DateTime   @default(now())
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  items       WaveItem[]
+
+  @@index([status, createdAt])
+}
+
+model WaveItem {
+  id              String         @id @default(cuid())
+  waveId          String
+  wave            Wave           @relation(fields: [waveId], references: [id], onDelete: Cascade)
+  packageId       String
+  package         Package        @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  orderId         String
+  platform        Platform
+  /// Packages with the same key are shipped together (same shop + courier channel).
+  groupKey        String
+  /// Packing / label order within the wave.
+  position        Int
+  status          WaveItemStatus @default(READY)
+  /// Set to the packageId while this item may ship it. Unique, so a package is
+  /// never in two running waves (Tasks 11–13). Null for previews.
+  activePackageId String?        @unique
+  trackingNumber  String?
+  error           String?
+  updatedAt       DateTime       @updatedAt
+
+  @@index([waveId, position])
+  @@index([packageId])
 }

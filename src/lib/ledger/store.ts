@@ -30,6 +30,7 @@ export async function saveOrder(
     shippedAt: n.shippedAt,
     cancelBy: n.cancelBy,
     cancelReason: n.cancelReason,
+    cancelRequested: n.cancelRequested,
   };
 
   await prisma.$transaction(async (tx) => {

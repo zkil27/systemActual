@@ -1,6 +1,8 @@
 import { PrintJobKind, type PrintJob } from "@prisma/client";
 import { formatManilaDateTime } from "@/lib/time";
 import { buildPdf } from "./pdf";
+import { prisma } from "@/lib/prisma";
+import { pickListPages, type WaveSummary } from "@/lib/waves/plan";
 
 export class NotPrintableError extends Error {}
 
@@ -9,7 +11,10 @@ export class NotPrintableError extends Error {}
  * reprints just ask again. Label and pick-list kinds are added with waves
  * and shipping (Tasks 10–12).
  */
-export async function renderJobPdf(job: Pick<PrintJob, "kind" | "title" | "createdAt">, printerName?: string | null): Promise<Buffer> {
+export async function renderJobPdf(
+  job: Pick<PrintJob, "kind" | "title" | "createdAt" | "waveId">,
+  printerName?: string | null
+): Promise<Buffer> {
   switch (job.kind) {
     case PrintJobKind.TEST:
       return buildPdf([
@@ -24,8 +29,13 @@ export async function renderJobPdf(job: Pick<PrintJob, "kind" | "title" | "creat
           "printing is set up correctly.",
         ],
       ], { fontSize: 14 });
+    case PrintJobKind.PICK_LIST: {
+      if (!job.waveId) throw new NotPrintableError("Pick list has no wave.");
+      const wave = await prisma.wave.findUnique({ where: { id: job.waveId } });
+      if (!wave) throw new NotPrintableError("That wave was deleted.");
+      return buildPdf(pickListPages(wave.summaryJson as unknown as WaveSummary, wave.createdAt), { fontSize: 10 });
+    }
     case PrintJobKind.LABEL:
-    case PrintJobKind.PICK_LIST:
-      throw new NotPrintableError(`${job.kind} printing isn't available yet.`);
+      throw new NotPrintableError("Label printing isn't available yet.");
   }
 }

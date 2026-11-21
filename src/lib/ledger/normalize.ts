@@ -31,6 +31,8 @@ export interface NormalizedOrder {
   shippedAt: Date | null;
   cancelBy: string | null;
   cancelReason: string | null;
+  /** Buyer asked to cancel; the order must not be shipped. */
+  cancelRequested: boolean;
   lines: NormalizedLine[];
   packages: NormalizedPackage[];
 }
@@ -103,6 +105,7 @@ export function mapShopeeOrder(o: Raw): NormalizedOrder {
     shippedAt: fromUnix(o.pickup_done_time),
     cancelBy: str(o.cancel_by),
     cancelReason: str(o.cancel_reason) ?? str(o.buyer_cancel_reason),
+    cancelRequested: String(o.order_status ?? "").toUpperCase() === "IN_CANCEL",
     lines: mergeLines(lines),
     packages,
   };
@@ -160,6 +163,7 @@ export function mapTikTokOrder(o: Raw): NormalizedOrder {
     shippedAt,
     cancelBy: str(o.cancellation_initiator),
     cancelReason: str(o.cancel_reason),
+    cancelRequested: o.is_buyer_request_cancel === true,
     lines: mergeLines(lines),
     packages: [...packages.values()].sort((a, b) => a.packageNumber.localeCompare(b.packageNumber)),
   };

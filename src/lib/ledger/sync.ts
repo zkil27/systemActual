@@ -13,7 +13,7 @@ export interface OrderSyncResult {
   caughtUp: boolean;
 }
 
-const SHOPEE_DETAIL_FIELDS = [
+export const SHOPEE_DETAIL_FIELDS = [
   "item_list",
   "package_list",
   "total_amount",
