@@ -14,10 +14,10 @@ const PUBLIC_PREFIXES = [
   "/api/scan/",
   "/api/webhooks/",
   "/api/telegram/",
-  "/api/schedules/",
   "/api/oauth/",
-  // Authenticated by WORKER_SECRET in the route, not by the owner session.
+  // Authenticated by WORKER_SECRET or the printer PC's device token in the route.
   "/api/worker/",
+  "/api/agent/",
   "/_next/",
 ];
 

@@ -23,8 +23,13 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/api/stock-in")).toBe(true);
   });
 
-  it("lets the worker tick through (it checks WORKER_SECRET itself)", () => {
+  it("lets the worker tick and the printer agent through (they check their own tokens)", () => {
     expect(isPublicPath("/api/worker/tick")).toBe(true);
+    expect(isPublicPath("/api/agent/poll")).toBe(true);
+  });
+
+  it("keeps the owner's printer controls private", () => {
+    expect(isPublicPath("/api/printer")).toBe(false);
   });
 
   it("protects owner pages and owner APIs", () => {

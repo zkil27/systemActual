@@ -207,6 +207,8 @@ model AppSettings {
   stockSafetyBuffer         Int      @default(0)
   telegramChatId            String?
   telegramDailyBriefUtc     String   @default("12:00")
+  /// Manila date ("2026-11-21") the 8 PM brief was last sent, so it goes out once a day.
+  dailyBriefSentOn          String?
   updatedAt                 DateTime @updatedAt
 }
 
@@ -397,4 +399,53 @@ model StockMovement {
   createdAt        DateTime       @default(now())
 
   @@index([garmentVariantId])
+}
+
+enum PrintJobKind {
+  TEST
+  LABEL
+  PICK_LIST
+}
+
+enum PrintJobStatus {
+  QUEUED
+  PRINTING
+  PRINTED
+  FAILED
+}
+
+/// The warehouse PC running the print agent. Authenticates with a token whose
+/// SHA-256 is stored here; the token itself is shown to the owner once.
+model PrintDevice {
+  id           String     @id @default(cuid())
+  name         String
+  tokenHash    String     @unique
+  paused       Boolean    @default(false)
+  lastSeenAt   DateTime?
+  agentVersion String?
+  printerName  String?
+  createdAt    DateTime   @default(now())
+  jobs         PrintJob[]
+}
+
+model PrintJob {
+  id        String         @id @default(cuid())
+  kind      PrintJobKind
+  status    PrintJobStatus @default(QUEUED)
+  title     String
+  /// Package for LABEL jobs (Tasks 11–12).
+  packageId String?
+  /// Wave this job belongs to (Tasks 10–13); position is its order within the wave.
+  waveId    String?
+  position  Int            @default(0)
+  attempts  Int            @default(0)
+  error     String?
+  deviceId  String?
+  device    PrintDevice?   @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  claimedAt DateTime?
+  printedAt DateTime?
+  createdAt DateTime       @default(now())
+
+  @@index([status, createdAt])
+  @@index([waveId])
 }

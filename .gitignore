@@ -13,4 +13,6 @@ public/uploads/*
 
 .vercel
 .env*
+!.env.example
+print-agent/backups
 

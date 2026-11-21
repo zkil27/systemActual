@@ -8,6 +8,7 @@ import { syncMoney } from "@/lib/money/sync";
 import { runStockImport } from "@/lib/catalog/import";
 import { recordShipments } from "@/lib/stock/ledger";
 import { pushStock } from "@/lib/stock/push";
+import { sendDailyBriefIfDue } from "@/lib/reports/daily-brief";
 import { runLocked } from "./lock";
 
 /**
@@ -115,6 +116,12 @@ async function tickOnce(deadline: number): Promise<{ shops: ShopTickResult[]; pr
   } catch (err) {
     stock.error = err instanceof Error ? err.message : String(err);
     console.error("[tick] stock", err);
+  }
+
+  try {
+    await sendDailyBriefIfDue();
+  } catch (err) {
+    console.error("[tick] daily brief", err);
   }
 
   const pruned = await pruneOldOrders();

@@ -1,23 +1,3 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "src/app/api/schedules/poll-sync/route.ts": {
-      "experimentalTriggers": [{ "type": "schedule/v1beta" }]
-    },
-    "src/app/api/schedules/daily-brief/route.ts": {
-      "experimentalTriggers": [{ "type": "schedule/v1beta" }]
-    }
-  },
-  "schedules": {
-    "poll-sync": {
-      "schedule": "*/15 * * * *",
-      "timezone": "Asia/Manila",
-      "function": "api/schedules/poll-sync"
-    },
-    "daily-brief": {
-      "schedule": "0 20 * * *",
-      "timezone": "Asia/Manila",
-      "function": "api/schedules/daily-brief"
-    }
-  }
+  "$schema": "https://openapi.vercel.sh/vercel.json"
 }

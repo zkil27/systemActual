@@ -13,6 +13,8 @@ const eslintConfig = [
       ".vercel/**",
       ".kiro/**",
       ".impeccable/**",
+      // Plain Node script for the warehouse PC, not part of the Next app.
+      "print-agent/**",
       "public/**",
       "next-env.d.ts",
       "*.tsbuildinfo",

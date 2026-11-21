@@ -9,6 +9,7 @@ import { Button, Group } from "@/components/ui/Button";
 import { Disclosure } from "@/components/ui/Disclosure";
 import { toast } from "@/components/ui/Toast";
 import { formatManilaDateTime } from "@/lib/time";
+import { PrinterSettings } from "@/components/PrinterSettings";
 
 interface SettingsPayload {
   settings: {
@@ -333,6 +334,8 @@ export default function SettingsPage() {
             </Link>
           </Group>
         </section>
+
+        <PrinterSettings />
 
         <form onSubmit={saveGeneral} className="space-y-8">
           <section>
