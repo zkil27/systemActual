@@ -8,6 +8,12 @@ export function formatPeso(amount: number): string {
   return `₱${Math.round(amount).toLocaleString("en-PH")}`;
 }
 
+/** "−₱1,200" for money out, "₱350" for money in. */
+export function formatSignedPeso(amount: number): string {
+  const rounded = Math.round(amount);
+  return rounded < 0 ? `−${formatPeso(-rounded)}` : formatPeso(rounded);
+}
+
 export function shortCourier(courier: string): string {
   return courier.replace(/\s*Express$/i, "");
 }

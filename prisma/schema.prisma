@@ -58,30 +58,35 @@ model StaffMember {
 }
 
 model ShopConnection {
-  id              String           @id @default(cuid())
-  platform        Platform
-  shopId          String           @unique
-  shopName        String
-  shopCipher      String?
-  accessToken     String?
-  refreshToken    String?
-  tokenExpiresAt  DateTime?
+  id                 String              @id @default(cuid())
+  platform           Platform
+  shopId             String              @unique
+  shopName           String
+  shopCipher         String?
+  accessToken        String?
+  refreshToken       String?
+  tokenExpiresAt     DateTime?
   /// Set when token refresh starts failing; cleared on the next success. Used to alert once.
-  tokenErrorAt    DateTime?
-  tokenError      String?
+  tokenErrorAt       DateTime?
+  tokenError         String?
   /// Per-shop switch for anything that changes the shop (ship, print, stock). Off by default.
-  writesEnabled   Boolean          @default(false)
+  writesEnabled      Boolean             @default(false)
   /// Orders updated up to this time are in the ledger. Advanced one window at a time.
-  ordersSyncedTo  DateTime?
+  ordersSyncedTo     DateTime?
   /// Return/refund requests updated up to this time are synced.
-  returnsSyncedTo DateTime?
-  lastSyncedAt    DateTime?
-  orders          Order[]
-  listings        ListingVariant[]
-  isDemo          Boolean          @default(false)
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  parcels         ReturnParcel[]
+  returnsSyncedTo    DateTime?
+  /// Shopee wallet transactions created up to this time are synced.
+  walletSyncedTo     DateTime?
+  /// Last money sync. Money is pulled at most every 15 minutes.
+  walletCheckedAt    DateTime?
+  walletTransactions WalletTransaction[]
+  lastSyncedAt       DateTime?
+  orders             Order[]
+  listings           ListingVariant[]
+  isDemo             Boolean             @default(false)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  parcels            ReturnParcel[]
 }
 
 model ReturnParcel {
@@ -285,4 +290,33 @@ model WorkerLock {
   lockedUntil    DateTime
   holder         String?
   rerunRequested Boolean  @default(false)
+}
+
+enum MoneyKind {
+  /// Order income credited to the seller (Shopee escrow released / TikTok statement paid)
+  CREDIT
+  ADS
+  ADJUSTMENT
+  WITHDRAWAL
+  OTHER
+}
+
+/// Shopee wallet transactions and paid TikTok statements. "Credited today"
+/// is the sum of CREDIT rows whose occurredAt falls on the Manila day.
+model WalletTransaction {
+  id               String         @id @default(cuid())
+  shopConnectionId String
+  shopConnection   ShopConnection @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
+  platform         Platform
+  /// Shopee transaction_id / TikTok statement id
+  externalId       String
+  kind             MoneyKind
+  rawType          String
+  amountPhp        Decimal        @db.Decimal(14, 2)
+  /// Shopee create_time / TikTok payment_time
+  occurredAt       DateTime
+  orderSn          String?
+
+  @@unique([platform, externalId])
+  @@index([occurredAt, kind])
 }

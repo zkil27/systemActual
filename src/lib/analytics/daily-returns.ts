@@ -1,6 +1,7 @@
 import { PhysicalCondition, Platform, ReturnCategory } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getManilaRangeBounds, isWithinBounds } from "@/lib/time";
+import { getMoneySummary, type MoneySummary } from "@/lib/money/summary";
 import {
   costAtRiskPhp,
   isMissingDiscrepancy as isMissing,
@@ -25,6 +26,7 @@ export interface CategoryDailyTruth {
 export interface DailyTruthReport {
   rangeLabel: string;
   dateStr: string;
+  money: MoneySummary;
   defaultUnitCostPhp: number;
   overdueRtsDays: number;
   failedDelivery: CategoryDailyTruth;
@@ -108,7 +110,7 @@ export async function getDailyTruthReport(options?: {
     options?.date
   );
 
-  const [settings, shops, parcels] = await Promise.all([
+  const [settings, shops, parcels, money] = await Promise.all([
     prisma.appSettings.findUnique({ where: { id: "default" } }),
     prisma.shopConnection.findMany({ orderBy: { platform: "asc" } }),
     prisma.returnParcel.findMany({
@@ -121,6 +123,7 @@ export async function getDailyTruthReport(options?: {
       },
       orderBy: [{ courierReturnedToSellerAt: "desc" }, { digitalReturnTaggedAt: "desc" }],
     }),
+    getMoneySummary(start, end),
   ]);
 
   const defaultUnitCostPhp = Number(settings?.defaultUnitCostPhp ?? 82);
@@ -305,6 +308,7 @@ export async function getDailyTruthReport(options?: {
   return {
     rangeLabel: label,
     dateStr,
+    money,
     defaultUnitCostPhp,
     overdueRtsDays,
     failedDelivery,

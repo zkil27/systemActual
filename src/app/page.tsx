@@ -14,7 +14,8 @@ import { Sheet } from "@/components/ui/Sheet";
 import { ParcelRow } from "@/components/ParcelRow";
 import { toast } from "@/components/ui/Toast";
 import type { CategoryDailyTruth, DailyTruthReport } from "@/lib/analytics/daily-returns";
-import { manilaDayLabel } from "@/lib/ui/format";
+import { formatPeso, formatSignedPeso, manilaDayLabel, manilaTime } from "@/lib/ui/format";
+import type { MoneySummary } from "@/lib/money/summary";
 import { haptic } from "@/lib/ui/motion";
 
 type Range = "today" | "yesterday" | "7days";
@@ -73,6 +74,42 @@ function CategoryCard({
         ))}
       </span>
     </button>
+  );
+}
+
+/**
+ * The owner's main number: money actually credited (Shopee wallet / TikTok
+ * statement paid). Orders placed sit underneath, muted, because they aren't money yet.
+ */
+function MoneyCard({ money }: { money: MoneySummary }) {
+  const extras = [
+    money.adsPhp ? `Ads ${formatSignedPeso(money.adsPhp)}` : null,
+    money.adjustmentsPhp ? `Adjustments ${formatSignedPeso(money.adjustmentsPhp)}` : null,
+  ].filter(Boolean);
+  return (
+    <section
+      aria-label={`Money credited ${formatPeso(money.creditedPhp)}`}
+      className="rounded-[var(--radius-card)] bg-white p-5 shadow-[var(--shadow-card)]"
+    >
+      <span className="flex items-baseline justify-between gap-3">
+        <span className="text-[17px] font-bold text-ink">Money credited</span>
+        {money.updatedAt && (
+          <span className="text-[13px] text-ink-3">as of {manilaTime(money.updatedAt)}</span>
+        )}
+      </span>
+      <span className="mt-3 block text-[40px] font-extrabold leading-none tracking-[-0.03em] text-ink tabular-nums">
+        {formatPeso(money.creditedPhp)}
+      </span>
+      <span className="mt-2 block text-[15px] text-ink-2 tabular-nums">
+        Shopee {formatPeso(money.creditedShopeePhp)} · TikTok {formatPeso(money.creditedTikTokPhp)}
+      </span>
+      {extras.length > 0 && (
+        <span className="mt-1 block text-[15px] text-ink-3 tabular-nums">{extras.join(" · ")}</span>
+      )}
+      <span className="mt-4 block border-t border-hairline pt-3 text-[14px] text-ink-3 tabular-nums">
+        {money.ordersPlacedCount} orders placed · {formatPeso(money.ordersPlacedPhp)}, not money yet
+      </span>
+    </section>
   );
 }
 
@@ -248,6 +285,8 @@ export default function DashboardPage() {
           <HomeSkeleton />
         ) : (
           <div className="anim-fade-in space-y-8">
+            <MoneyCard money={report.money} />
+
             <MissingStatus report={report} />
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

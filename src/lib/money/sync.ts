@@ -1,0 +1,101 @@
+import { Platform, Prisma, type ShopConnection } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
+import { shopeeGet } from "@/lib/connectors/shopee";
+import { tiktokRequest } from "@/lib/connectors/tiktok";
+import { nextSyncWindow } from "@/lib/ledger/window";
+import { mapShopeeWalletTransaction, mapTikTokStatement, type MoneyRow } from "./map";
+
+/** Money doesn't need minute-by-minute freshness. */
+export const MONEY_EVERY_MS = 15 * 60_000;
+/** TikTok statements are re-read for this long so one that turns PAID is picked up. */
+const TIKTOK_STATEMENT_LOOKBACK_MS = 14 * 24 * 3600_000;
+
+const sec = (d: Date) => Math.floor(d.getTime() / 1000);
+
+export function isMoneySyncDue(walletCheckedAt: Date | null, now: number): boolean {
+  return !walletCheckedAt || now - walletCheckedAt.getTime() >= MONEY_EVERY_MS;
+}
+
+async function saveRows(conn: ShopConnection, rows: MoneyRow[]) {
+  for (const r of rows) {
+    const data = {
+      kind: r.kind,
+      rawType: r.rawType,
+      amountPhp: new Prisma.Decimal(r.amountPhp.toFixed(2)),
+      occurredAt: r.occurredAt,
+      orderSn: r.orderSn,
+    };
+    await prisma.walletTransaction.upsert({
+      where: { platform_externalId: { platform: conn.platform, externalId: r.externalId } },
+      create: { shopConnectionId: conn.id, platform: conn.platform, externalId: r.externalId, ...data },
+      update: data,
+    });
+  }
+}
+
+async function syncShopeeWallet(conn: ShopConnection, token: string, deadline: number) {
+  let cursor = conn.walletSyncedTo;
+  let saved = 0;
+  for (;;) {
+    // Windows are 2 hours, well inside Shopee's 15-day limit for this call.
+    const w = nextSyncWindow(cursor, new Date());
+    for (let pageNo = 0; ; pageNo++) {
+      if (Date.now() >= deadline) return saved;
+      const resp = await shopeeGet("/api/v2/payment/get_wallet_transaction_list", conn.shopId, token, {
+        page_no: pageNo,
+        page_size: 100,
+        create_time_from: sec(w.from),
+        create_time_to: sec(w.to),
+      });
+      const list: Record<string, unknown>[] = Array.isArray(resp?.transaction_list) ? resp.transaction_list : [];
+      const rows = list.map(mapShopeeWalletTransaction).filter((r): r is MoneyRow => r !== null);
+      await saveRows(conn, rows);
+      saved += rows.length;
+      if (!resp?.more || list.length === 0) break;
+    }
+    cursor = w.to;
+    await prisma.shopConnection.update({ where: { id: conn.id }, data: { walletSyncedTo: cursor } });
+    if (w.last) return saved;
+  }
+}
+
+async function syncTikTokStatements(conn: ShopConnection, token: string, deadline: number) {
+  const now = new Date();
+  let pageToken = "";
+  let saved = 0;
+  for (;;) {
+    if (Date.now() >= deadline) return saved;
+    const data = await tiktokRequest({
+      method: "GET",
+      path: "/finance/202309/statements",
+      accessToken: token,
+      shopCipher: conn.shopCipher,
+      query: {
+        statement_time_ge: String(sec(new Date(now.getTime() - TIKTOK_STATEMENT_LOOKBACK_MS))),
+        statement_time_lt: String(sec(now)),
+        sort_field: "statement_time",
+        page_size: "100",
+        ...(pageToken ? { page_token: pageToken } : {}),
+      },
+    });
+    const list: Record<string, unknown>[] = Array.isArray(data?.statements) ? data.statements : [];
+    const rows = list.map(mapTikTokStatement).filter((r): r is MoneyRow => r !== null);
+    await saveRows(conn, rows);
+    saved += rows.length;
+    if (!data?.next_page_token || list.length === 0) return saved;
+    pageToken = String(data.next_page_token);
+  }
+}
+
+/** Pulls credited money for one shop, at most every 15 minutes. */
+export async function syncMoney(conn: ShopConnection, token: string, deadline: number) {
+  if (!isMoneySyncDue(conn.walletCheckedAt, Date.now())) return { saved: 0, skipped: true };
+  const saved =
+    conn.platform === Platform.SHOPEE
+      ? await syncShopeeWallet(conn, token, deadline)
+      : await syncTikTokStatements(conn, token, deadline);
+  if (Date.now() < deadline) {
+    await prisma.shopConnection.update({ where: { id: conn.id }, data: { walletCheckedAt: new Date() } });
+  }
+  return { saved, skipped: false };
+}

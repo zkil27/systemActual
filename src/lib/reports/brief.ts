@@ -5,9 +5,20 @@ export function formatTelegramDailyBrief(report: DailyTruthReport): string {
   const rr = report.returnRefund;
   const c = report.combined;
 
+  const m = report.money;
+  const peso = (n: number) => `PHP ${Math.round(n).toLocaleString("en-PH")}`;
+  const signed = (n: number) => (Math.round(n) < 0 ? `-${peso(-n)}` : peso(n));
+
   const lines: string[] = [
-    `KYNA OPS — DAILY RETURN SUMMARY`,
+    `KYNA OPS — DAILY SUMMARY`,
     `${report.rangeLabel} (Manila Time)`,
+    ``,
+    `MONEY CREDITED: ${peso(m.creditedPhp)}`,
+    `• Shopee: ${peso(m.creditedShopeePhp)} | TikTok: ${peso(m.creditedTikTokPhp)}`,
+    ...(m.adsPhp || m.adjustmentsPhp
+      ? [`• Ads: ${signed(m.adsPhp)} | Adjustments: ${signed(m.adjustmentsPhp)}`]
+      : []),
+    `• Orders placed (not yet money): ${m.ordersPlacedCount} — ${peso(m.ordersPlacedPhp)}`,
     ``,
     `FAILED DELIVERY (Undelivered / COD)`,
     `• Driver Tagged Today: ${fd.taggedCount} (${fd.taggedPieces} pcs)`,

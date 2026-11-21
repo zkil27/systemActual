@@ -4,6 +4,7 @@ import { ensureFreshToken } from "@/lib/connectors/tokens";
 import { pruneOldOrders } from "@/lib/ledger/store";
 import { syncOrders } from "@/lib/ledger/sync";
 import { detectFailedDeliveries, refreshOpenParcels, syncReturnRequests } from "@/lib/returns/sync";
+import { syncMoney } from "@/lib/money/sync";
 import { runLocked } from "./lock";
 
 /**
@@ -24,6 +25,7 @@ export interface ShopTickResult {
   failedDeliveriesFound: number;
   parcelsChecked: number;
   courierReturned: number;
+  moneySaved: number;
   caughtUp: boolean;
   error?: string;
 }
@@ -45,6 +47,7 @@ async function tickShop(shopId: string, deadline: number): Promise<ShopTickResul
     failedDeliveriesFound: 0,
     parcelsChecked: 0,
     courierReturned: 0,
+    moneySaved: 0,
     caughtUp: false,
   };
   if (shop.platform === Platform.TIKTOK && !shop.shopCipher) {
@@ -63,6 +66,13 @@ async function tickShop(shopId: string, deadline: number): Promise<ShopTickResul
     const refreshed = await refreshOpenParcels(fresh, token, deadline);
     result.parcelsChecked = refreshed.checked;
     result.courierReturned = refreshed.returned;
+    try {
+      result.moneySaved = (await syncMoney(fresh, token, deadline)).saved;
+    } catch (err) {
+      // Money problems must not hide return updates; report and continue.
+      result.error = `Money sync: ${err instanceof Error ? err.message : String(err)}`;
+      console.error(`[tick] ${shop.shopName} money`, err);
+    }
     result.caughtUp = orders.caughtUp && returns.caughtUp;
     await prisma.shopConnection.update({ where: { id: shop.id }, data: { lastSyncedAt: new Date() } });
   } catch (err) {

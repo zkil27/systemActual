@@ -121,7 +121,7 @@ Kyna Ops is an Operate surface: a shop owner checks it between live selling and 
 
 Each screen answers one question with as few words as possible:
 
-- **Home:** is anything missing, and what came back today?
+- **Home:** how much money was credited, is anything missing, and what came back today? "Credited" means money in the Shopee wallet or a paid TikTok statement; orders placed are shown muted underneath because they aren't money yet.
 - **Returns:** find a parcel.
 - **Scan:** check this parcel in.
 - **Settings:** change a rule.
