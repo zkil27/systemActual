@@ -56,7 +56,7 @@ function LoginForm() {
         <form onSubmit={handleSubmit} className="mt-10 space-y-4">
           <div
             key={shakeKey}
-            className={`divide-y divide-hairline overflow-hidden rounded-[var(--radius-card)] bg-white shadow-[var(--shadow-card)] focus-within:shadow-[0_0_0_2px_var(--color-brand)] ${
+            className={`divide-y divide-hairline overflow-hidden rounded-[var(--radius-card)] bg-surface shadow-[var(--shadow-card)] focus-within:shadow-[0_0_0_2px_var(--color-brand)] ${
               shakeKey > 0 ? "anim-shake" : ""
             }`}
           >

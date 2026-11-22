@@ -126,7 +126,7 @@ function EdgeButton({ side, onClick, label }: { side: "start" | "end"; onClick: 
       tabIndex={-1}
       aria-label={label}
       onClick={onClick}
-      className={`pressable absolute top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-ground/90 text-ink-3 after:absolute after:-inset-2 after:content-[''] hover:text-ink active:bg-slate-200/70 ${
+      className={`anim-fade-in pressable absolute top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-ground/90 text-ink-3 after:absolute after:-inset-2 after:content-[''] hover:text-ink active:bg-surface-track/80 ${
         side === "end" ? "right-1.5" : "left-1.5"
       }`}
     >

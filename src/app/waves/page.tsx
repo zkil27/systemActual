@@ -4,8 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { WaveParcelSheet, type WaveParcelSelection } from "@/components/WaveParcelSheet";
+import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { Button, Group } from "@/components/ui/Button";
 import { ItemThumb } from "@/components/ui/ItemThumb";
+import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { toast } from "@/components/ui/Toast";
 import { formatPeso, manilaDateTime } from "@/lib/ui/format";
 import { useLiveRefresh } from "@/lib/ui/use-live-refresh";
@@ -352,8 +354,8 @@ export default function WavesPage() {
                     type="button"
                     aria-pressed={active}
                     onClick={() => setPlatformFilter(opt.id)}
-                    className={`h-9 rounded-full px-3 text-[13px] font-semibold transition-colors ${
-                      active ? "bg-ink text-white" : "bg-slate-100 text-ink-2 hover:bg-slate-200/70"
+                    className={`pressable h-9 rounded-full px-3 text-[13px] font-semibold ${
+                      active ? "bg-ink text-ink-inverse" : "bg-surface-muted text-ink-2 hover:bg-surface-track"
                     }`}
                   >
                     {opt.label}
@@ -368,8 +370,8 @@ export default function WavesPage() {
                   type="button"
                   aria-pressed={courierFilter === "ALL"}
                   onClick={() => setCourierFilter("ALL")}
-                  className={`h-9 rounded-full px-3 text-[13px] font-semibold transition-colors ${
-                    courierFilter === "ALL" ? "bg-brand text-white" : "bg-slate-100 text-ink-2 hover:bg-slate-200/70"
+                  className={`pressable h-9 rounded-full px-3 text-[13px] font-semibold ${
+                    courierFilter === "ALL" ? "bg-brand-solid text-on-brand" : "bg-surface-muted text-ink-2 hover:bg-surface-track"
                   }`}
                 >
                   All couriers
@@ -382,8 +384,8 @@ export default function WavesPage() {
                       type="button"
                       aria-pressed={active}
                       onClick={() => setCourierFilter(c.courier)}
-                      className={`h-9 rounded-full px-3 text-[13px] font-semibold tabular-nums transition-colors ${
-                        active ? "bg-brand text-white" : "bg-slate-100 text-ink-2 hover:bg-slate-200/70"
+                      className={`pressable h-9 rounded-full px-3 text-[13px] font-semibold tabular-nums ${
+                        active ? "bg-brand-solid text-on-brand" : "bg-surface-muted text-ink-2 hover:bg-surface-track"
                       }`}
                     >
                       {c.courier} ({c.count})
@@ -434,10 +436,10 @@ export default function WavesPage() {
               type="button"
               aria-pressed={continuousMode}
               onClick={() => setContinuousMode((c) => !c)}
-              className={`flex min-h-11 w-full items-center justify-between rounded-[var(--radius-control)] px-3.5 py-2 text-left text-[14px] font-semibold transition-colors ${
+              className={`pressable flex min-h-11 w-full items-center justify-between rounded-[var(--radius-control)] px-3.5 py-2 text-left text-[14px] font-semibold ${
                 continuousMode
                   ? "bg-brand-soft text-brand shadow-[inset_0_0_0_1.5px_var(--color-brand)]"
-                  : "bg-slate-100 text-ink-2"
+                  : "bg-surface-muted text-ink-2"
               }`}
             >
               <span>Continuous auto-ship (every 15 mins)</span>
@@ -456,8 +458,8 @@ export default function WavesPage() {
                         type="button"
                         aria-pressed={active}
                         onClick={() => toggleTime(t)}
-                        className={`h-9 rounded-full px-3 text-[13px] font-semibold tabular-nums transition-colors ${
-                          active ? "bg-ink text-white" : "bg-slate-100 text-ink-2"
+                        className={`pressable h-9 rounded-full px-3 text-[13px] font-semibold tabular-nums ${
+                          active ? "bg-ink text-ink-inverse" : "bg-surface-muted text-ink-2 hover:bg-surface-track"
                         }`}
                       >
                         {clock(t)}
@@ -470,7 +472,7 @@ export default function WavesPage() {
                     value={customTime}
                     onChange={(e) => setCustomTime(e.target.value)}
                     placeholder="Add HH:MM (e.g. 19:00)"
-                    className="h-10 min-w-0 flex-1 rounded-[var(--radius-control)] bg-slate-100 px-3 text-[14px] tabular-nums text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
+                    className="h-10 min-w-0 flex-1 rounded-[var(--radius-control)] bg-surface-muted px-3 text-[14px] tabular-nums text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
                   />
                   <Button variant="plain" type="button" onClick={addCustomTime} className="h-10 px-3">
                     Add
@@ -515,7 +517,7 @@ export default function WavesPage() {
                 onChange={(e) => setReprintSn(e.target.value)}
                 placeholder="Order number"
                 autoCapitalize="characters"
-                className="h-12 min-w-0 flex-1 rounded-[var(--radius-control)] bg-slate-100 px-4 text-[16px] text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
+                className="h-12 min-w-0 flex-1 rounded-[var(--radius-control)] bg-surface-muted px-4 text-[16px] text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
               />
               <Button type="submit" variant="secondary" disabled={busy !== null || reprintSn.trim().length < 3}>
                 Reprint
@@ -526,7 +528,7 @@ export default function WavesPage() {
 
         <div>
           {waves === null ? (
-            <div className="h-40 animate-pulse rounded-[var(--radius-card)] bg-slate-200/60" aria-busy="true" />
+            <div className="h-40 animate-pulse rounded-[var(--radius-card)] bg-surface-track/60" aria-busy="true" />
           ) : !latest || !s ? (
             <p className="px-1 text-[16px] text-ink-3">No waves yet.</p>
           ) : (
@@ -538,16 +540,17 @@ export default function WavesPage() {
                     {manilaDateTime(latest.createdAt)}
                   </span>
                 </span>
-                <span className="mt-3 block text-[40px] font-extrabold leading-none tracking-[-0.03em] text-ink tabular-nums">
-                  {s.total}
-                </span>
+                <AnimatedNumber
+                  value={s.total}
+                  className="mt-3 block text-[40px] font-extrabold leading-none tracking-[-0.03em] text-ink"
+                />
                 <span className="mt-2 block text-[15px] text-ink-2 tabular-nums">
                   parcels · {s.singles} single piece · {s.multis} multi
                 </span>
                 {skips.length > 0 && (
                   <ul className="mt-4 space-y-1 border-t border-hairline pt-3 text-[14px] text-ink-3 tabular-nums">
                     {skips.map(([k, label]) => (
-                      <li key={k} className={k === "notRechecked" ? "font-semibold text-amber-800" : undefined}>
+                      <li key={k} className={k === "notRechecked" ? "font-semibold text-failed-ink" : undefined}>
                         {s.skipped[k]} left out: {label}
                       </li>
                     ))}
@@ -628,43 +631,26 @@ export default function WavesPage() {
                 <div className="flex flex-wrap items-center justify-between gap-2 px-1 pt-1">
                   <h2 className="text-[17px] font-bold text-ink">Pick list</h2>
                   <div className="flex items-center gap-2">
-                    <div
-                      role="group"
-                      aria-label="Pick list view"
-                      className="inline-flex h-9 items-center rounded-full bg-slate-200/70 p-0.5"
-                    >
-                      {(
-                        [
-                          { id: "items", label: "By item" },
-                          { id: "parcels", label: "Parcels" },
-                        ] as const
-                      ).map((opt) => {
-                        const active = pickView === opt.id;
-                        return (
-                          <button
-                            key={opt.id}
-                            type="button"
-                            aria-pressed={active}
-                            onClick={() => setPickView(opt.id)}
-                            className={`h-8 rounded-full px-3 text-[13px] font-semibold transition-colors ${
-                              active
-                                ? "bg-white text-ink shadow-xs"
-                                : "text-ink-2 hover:text-ink"
-                            }`}
-                          >
-                            {opt.label}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <SegmentedControl
+                      label="Pick list view"
+                      size="sm"
+                      shape="pill"
+                      options={[
+                        { id: "items", label: "By item" },
+                        { id: "parcels", label: "Parcels" },
+                      ] as const}
+                      value={pickView}
+                      onChange={setPickView}
+                      className="min-w-[164px]"
+                    />
                     <button
                       type="button"
                       aria-pressed={showFullNames}
                       onClick={() => setShowFullNames((v) => !v)}
-                      className={`h-9 rounded-full px-3 text-[13px] font-semibold transition-colors ${
+                      className={`pressable h-9 rounded-full px-3 text-[13px] font-semibold ${
                         showFullNames
-                          ? "bg-ink text-white"
-                          : "bg-slate-200/70 text-ink-2 hover:bg-slate-200"
+                          ? "bg-ink text-ink-inverse"
+                          : "bg-surface-track/80 text-ink-2 hover:bg-surface-track"
                       }`}
                     >
                       {showFullNames ? "Short names" : "Full names"}
@@ -686,22 +672,22 @@ export default function WavesPage() {
                       onClick={() =>
                         setCollapsedGroups((prev) => ({ ...prev, [g.key]: !prev[g.key] }))
                       }
-                      className="flex min-h-12 w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 active:bg-slate-100"
+                      className="pressable-row flex min-h-12 w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-surface-subtle active:bg-surface-muted"
                     >
                       <span className="text-[16px] font-bold text-ink">{g.title}</span>
                       <span className="flex shrink-0 items-center gap-2 text-[14px] text-ink-3 tabular-nums">
                         <span>
                           {g.count} parcels · {groupPieces} pcs
                         </span>
-                        {collapsed ? (
-                          <ChevronRight className="h-4 w-4 text-ink-3" />
-                        ) : (
-                          <ChevronDown className="h-4 w-4 text-ink-3" />
-                        )}
+                        <ChevronDown
+                          className={`h-4 w-4 text-ink-3 transition-transform duration-200 ease-[var(--ease-ios)] ${
+                            collapsed ? "-rotate-90" : "rotate-0"
+                          }`}
+                        />
                       </span>
                     </button>
                     {!collapsed && pickView === "items" && (
-                      <ul className="divide-y divide-hairline border-t border-hairline px-4">
+                      <ul className="anim-disclosure-in divide-y divide-hairline border-t border-hairline px-4">
                         {garmentGroups.map((pg) => {
                           const multi = pg.variants.length > 1;
                           return (
@@ -716,7 +702,7 @@ export default function WavesPage() {
                                   {showFullNames ? pg.fullName : pg.shortName}
                                 </span>
                                 {(multi || pg.totalQty > 1) && (
-                                  <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[12px] font-bold text-ink-2 tabular-nums">
+                                  <span className="shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[12px] font-bold text-ink-2 tabular-nums">
                                     {pg.totalQty} pcs
                                   </span>
                                 )}
@@ -749,13 +735,13 @@ export default function WavesPage() {
                                           parcels: matchingParcels,
                                         })
                                       }
-                                      className="pressable flex w-full items-center gap-2 rounded-[var(--radius-control)] bg-surface-subtle px-2.5 py-1.5 text-left ring-1 ring-hairline/80 transition-colors hover:bg-slate-100/80 hover:ring-ink/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                                      className="group pressable flex w-full items-center gap-2 rounded-[var(--radius-control)] bg-surface-subtle px-2.5 py-1.5 text-left ring-1 ring-hairline/80 transition-colors hover:bg-surface-muted hover:ring-ink/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                                     >
                                       <span
                                         className={`inline-flex min-w-8 shrink-0 items-center justify-center rounded-md px-1.5 py-0.5 text-[14px] font-extrabold tabular-nums ${
                                           v.qty > 1
-                                            ? "bg-ink text-white"
-                                            : "bg-white text-ink ring-1 ring-hairline"
+                                            ? "bg-ink text-ink-inverse"
+                                            : "bg-surface text-ink ring-1 ring-hairline"
                                         }`}
                                       >
                                         {v.qty}×
@@ -764,7 +750,7 @@ export default function WavesPage() {
                                         {v.color ?? (showFullNames ? v.label : "Standard")}
                                       </span>
                                       {v.size && (
-                                        <span className="shrink-0 whitespace-nowrap rounded-md bg-white px-2 py-0.5 text-[13px] font-semibold text-ink-2 ring-1 ring-hairline tabular-nums">
+                                        <span className="shrink-0 whitespace-nowrap rounded-md bg-surface px-2 py-0.5 text-[13px] font-semibold text-ink-2 ring-1 ring-hairline tabular-nums">
                                           {v.size}
                                         </span>
                                       )}
@@ -773,7 +759,7 @@ export default function WavesPage() {
                                           {matchingParcels.length}p
                                         </span>
                                       )}
-                                      <ChevronRight className="h-4 w-4 shrink-0 text-ink-3/70" />
+                                      <ChevronRight className="chevron-nudge h-4 w-4 shrink-0 text-ink-3/70" />
                                     </button>
                                   );
                                 })}
@@ -785,11 +771,11 @@ export default function WavesPage() {
                     )}
                     {!collapsed && pickView === "parcels" && (
                       groupParcels.length === 0 ? (
-                        <p className="border-t border-hairline px-4 py-4 text-[14px] text-ink-3">
+                        <p className="anim-disclosure-in border-t border-hairline px-4 py-4 text-[14px] text-ink-3">
                           Parcel details are not available for this wave.
                         </p>
                       ) : (
-                        <ul className="divide-y divide-hairline border-t border-hairline">
+                        <ul className="anim-disclosure-in divide-y divide-hairline border-t border-hairline">
                           {groupParcels.map((parcel) => {
                             const leadLine = parcel.lines[0];
                             const isMulti = parcel.totalPieces > 1 || parcel.lines.length > 1;
@@ -811,7 +797,7 @@ export default function WavesPage() {
                                       initialParcelId: parcel.id,
                                     })
                                   }
-                                  className="pressable flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 active:bg-slate-100"
+                                  className="group pressable flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-subtle active:bg-surface-muted"
                                 >
                                   <ItemThumb
                                     src={leadLine?.imageUrl ?? null}
@@ -821,7 +807,7 @@ export default function WavesPage() {
                                   <div className="min-w-0 flex-1">
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                       <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                                        <span className="inline-flex items-center rounded-md bg-ink px-1.5 py-0.5 text-[12px] font-bold text-white tabular-nums">
+                                        <span className="inline-flex items-center rounded-md bg-ink px-1.5 py-0.5 text-[12px] font-bold text-ink-inverse tabular-nums">
                                           #{parcel.position}
                                         </span>
                                         <span className="truncate text-[15px] font-bold text-ink tabular-nums">
@@ -841,7 +827,7 @@ export default function WavesPage() {
                                       {itemsText}
                                     </p>
                                   </div>
-                                  <ChevronRight className="h-5 w-5 shrink-0 text-hairline-strong" />
+                                  <ChevronRight className="chevron-nudge h-5 w-5 shrink-0 text-hairline-strong" />
                                 </button>
                               </li>
                             );

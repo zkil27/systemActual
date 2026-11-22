@@ -70,7 +70,7 @@ function SingleParcelView({
         <button
           type="button"
           onClick={onBack}
-          className="pressable inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1.5 text-[13px] font-semibold text-ink-2 hover:bg-slate-200/70"
+          className="pressable inline-flex items-center gap-1 rounded-full bg-surface-muted px-3 py-1.5 text-[13px] font-semibold text-ink-2 hover:bg-surface-track"
         >
           <ChevronLeft className="h-4 w-4" />
           Back to {selection.parcels.length} parcels
@@ -79,7 +79,7 @@ function SingleParcelView({
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex h-7 items-center rounded-full bg-ink px-2.5 text-[13px] font-bold text-white tabular-nums">
+          <span className="inline-flex h-7 items-center rounded-full bg-ink px-2.5 text-[13px] font-bold text-ink-inverse tabular-nums">
             Parcel #{parcel.position} of {parcel.totalInWave}
           </span>
           <StatusPill label={statusInfo.label} tone={statusInfo.tone} />
@@ -87,7 +87,7 @@ function SingleParcelView({
         <div className="flex items-center gap-1.5">
           <span
             className={`inline-flex h-7 items-center rounded-full px-2.5 text-[12px] font-bold ${
-              parcel.isCod ? "bg-amber-100 text-amber-900" : "bg-emerald-50 text-emerald-800"
+              parcel.isCod ? "bg-failed-soft text-failed-ink" : "bg-arrived-soft text-arrived"
             }`}
           >
             {parcel.isCod ? "COD" : "Prepaid"}
@@ -128,7 +128,7 @@ function SingleParcelView({
                 <div className="min-w-0 flex-1 pt-0.5">
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-[16px] font-bold leading-snug text-ink" title={line.name}>
-                      <span className="mr-1.5 inline-flex min-w-7 items-center justify-center rounded-md bg-ink px-1.5 py-0.5 text-[13px] font-extrabold text-white tabular-nums">
+                      <span className="mr-1.5 inline-flex min-w-7 items-center justify-center rounded-md bg-ink px-1.5 py-0.5 text-[13px] font-extrabold text-ink-inverse tabular-nums">
                         {line.quantity}×
                       </span>
                       {displayName}
@@ -137,17 +137,17 @@ function SingleParcelView({
                   {(line.color || line.size || line.variationName) && (
                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
                       {line.color && (
-                        <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[13px] font-semibold text-ink">
+                        <span className="rounded-md bg-surface-muted px-2 py-0.5 text-[13px] font-semibold text-ink">
                           {line.color}
                         </span>
                       )}
                       {line.size && (
-                        <span className="rounded-md bg-white px-2 py-0.5 text-[13px] font-semibold text-ink-2 ring-1 ring-hairline tabular-nums">
+                        <span className="rounded-md bg-surface px-2 py-0.5 text-[13px] font-semibold text-ink-2 ring-1 ring-hairline tabular-nums">
                           {line.size}
                         </span>
                       )}
                       {!line.color && !line.size && line.variationName && (
-                        <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[13px] font-semibold text-ink">
+                        <span className="rounded-md bg-surface-muted px-2 py-0.5 text-[13px] font-semibold text-ink">
                           {line.variationName}
                         </span>
                       )}
@@ -233,7 +233,7 @@ function MultiParcelListView({
               <button
                 type="button"
                 onClick={() => onSelectParcel(parcel.id)}
-                className="pressable flex w-full items-center gap-3 py-3 text-left transition-colors hover:bg-slate-50 active:bg-slate-100"
+                className="group pressable flex w-full items-center gap-3 py-3 text-left transition-colors hover:bg-surface-subtle active:bg-surface-muted"
               >
                 <ItemThumb
                   src={matchingLine?.imageUrl ?? null}
@@ -242,14 +242,14 @@ function MultiParcelListView({
                 />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="inline-flex items-center rounded-md bg-ink px-1.5 py-0.5 text-[12px] font-bold text-white tabular-nums">
+                    <span className="inline-flex items-center rounded-md bg-ink px-1.5 py-0.5 text-[12px] font-bold text-ink-inverse tabular-nums">
                       #{parcel.position}
                     </span>
                     <span className="truncate text-[15px] font-bold text-ink tabular-nums">
                       {parcel.orderSn}
                     </span>
                     {matchingLine && (
-                      <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[12px] font-bold text-ink tabular-nums">
+                      <span className="inline-flex items-center rounded-md bg-surface-muted px-1.5 py-0.5 text-[12px] font-bold text-ink tabular-nums">
                         {matchingLine.quantity}×
                       </span>
                     )}
@@ -281,7 +281,7 @@ function MultiParcelListView({
                     {manilaDateTime(parcel.createdAt)}
                   </p>
                 </div>
-                <ChevronRight className="h-5 w-5 shrink-0 text-hairline-strong" />
+                <ChevronRight className="chevron-nudge h-5 w-5 shrink-0 text-hairline-strong" />
               </button>
             </li>
           );

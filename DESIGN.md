@@ -10,9 +10,9 @@ colors:
   ink-3: "#556477"
   hairline: "#e2e8f0"
   hairline-strong: "#cbd5e1"
-  brand: "#0f766e"
-  brand-hover: "#115e59"
-  brand-soft: "#f0fdfa"
+  brand: "#b83b6b"
+  brand-hover: "#9e2d59"
+  brand-soft: "#fdf2f6"
   missing: "#dc2626"
   missing-ink: "#991b1b"
   missing-soft: "#fef2f2"
@@ -69,12 +69,12 @@ spacing:
   xl: "32px"
 components:
   button-primary:
-    backgroundColor: "{colors.brand}"
-    textColor: "{colors.surface}"
+    backgroundColor: "#f4a7c1"
+    textColor: "#4a1228"
     rounded: "{rounded.control}"
     height: "48px"
   button-primary-hover:
-    backgroundColor: "{colors.brand-hover}"
+    backgroundColor: "#ee92b2"
   button-secondary:
     backgroundColor: "#f1f5f9"
     textColor: "{colors.ink}"
@@ -138,21 +138,23 @@ The product rules stay fixed:
 
 ## Colors
 
-The palette is unchanged from the Clean Merchant Standard. Color carries meaning only. It is never decoration.
+The palette follows the Clean Merchant Standard in both light mode and an optional dark mode (`Light` / `Dark` / `Auto` under **Settings → Appearance**). Color carries meaning only. It is never decoration.
 
-| Token | Value | Role |
-| :--- | :--- | :--- |
-| `ground` | `#f4f7f8` | Page canvas, bars at rest |
-| `surface` | `#ffffff` | Cards, grouped lists, sheets, keypad keys |
-| `ink` / `ink-2` / `ink-3` | `#0f172a` / `#475569` / `#556477` | Text: primary, secondary, muted. `ink-3` passes 4.5:1 on both ground and the search field |
-| `hairline` | `#e2e8f0` | Inset row separators |
-| `brand` | `#0f766e` | Primary buttons, active tab, links, focus ring, sheet timeline |
-| `missing` | `#dc2626` | The Missing status card and missing counts |
-| `arrived` | `#047857` | "Arrived" numbers, scan-saved card |
-| `failed` / `refund` | `#b45309` / `#1d4ed8` | Category dots only (amber = Failed delivery, blue = Buyer return) |
+| Token | Light | Dark | Role |
+| :--- | :--- | :--- | :--- |
+| `ground` | `#f4f7f8` | `#09090b` | Page canvas, bars at rest |
+| `surface` | `#ffffff` | `#121215` | Cards, grouped lists, sheets, keypad keys |
+| `surface-subtle` / `surface-muted` / `surface-track` | `#f8fafb` / `#f1f5f9` / `#e2e8f0` | `#18181c` / `#1f1f24` / `#27272d` | Row hovers, input wells, segmented tracks |
+| `ink` / `ink-2` / `ink-3` / `ink-inverse` | `#0f172a` / `#475569` / `#556477` / `#ffffff` | `#f4f4f5` / `#d4d4d8` / `#9a9aa4` / `#09090b` | Text: primary, secondary, muted, inverse pills |
+| `hairline` / `hairline-strong` | `#e2e8f0` / `#cbd5e1` | `#242429` / `#36363e` | Inset row separators and chip outlines |
+| `brand` / `brand-solid` / `on-brand` | `#b83b6b` / `#f4a7c1` / `#4a1228` | `#e8a4bc` / `#e89bb6` / `#3d0f21` | Text/links (`brand`), pastel pink solid fills (`brand-solid`), and rose-berry text (`on-brand`) |
+| `missing` / `missing-solid` | `#dc2626` / `#dc2626` | `#e58b90` / `#99333a` | Missing text/dots and crimson Missing status card |
+| `arrived` / `arrived-solid` | `#047857` / `#047857` | `#6fc4a0` / `#1e664b` | "Arrived" numbers, scan-saved card, progress fill |
+| `failed` / `failed-ink` / `refund` | `#b45309` / `#92400e` / `#1d4ed8` | `#e2b46d` / `#edd09a` / `#8cb4e8` | Failed delivery / overdue / Buyer return accents |
 
 - Status always pairs color with a dot and a word (`StatusText`, `StatusPill`).
 - Secondary text on a colored fill uses white or a tint of that hue, never grey.
+- Theme selection is stored in `kyna:theme` (`localStorage`), initialized synchronously in `<head>` before first paint to prevent light/dark flash, and transitions surfaces gently over 200ms when switched in Settings.
 
 ## Typography
 
@@ -221,11 +223,12 @@ Shared building blocks live in `src/components/ui/`:
   - Slides up. Closes on a downward swipe of the handle (`shouldDismiss`), a backdrop tap, the close button or Escape.
   - Focus moves into the sheet, stays there on Tab, and goes back to where it was on close. Body scroll is locked while open.
   - It keeps its last content while sliding away.
-- **Disclosure:** a folded row whose body renders only while open.
-- **AnimatedNumber:** counts to each new value over 400ms with ease-out-expo. Screen readers get the final value.
+- **Disclosure:** a folded row whose body renders only while open and slides down softly (`.anim-disclosure-in`).
+- **Switch:** an iOS-style toggle whose white thumb elongates slightly while pressed.
+- **AnimatedNumber:** counts to each new value over 400ms with ease-out-expo (including `MoneyCard` peso totals and `Waves` counts). Screen readers get the final value.
 - **ItemThumb:** the garment photo in sm, md, lg and xl sizes, with a shirt icon as fallback.
 - **StatusPill / StatusText:** one status per parcel from `getParcelStatus`. Priority is Missing, then Issue, Arrived, Overdue and On the way.
-- **Toast:** a single dark capsule under the top bar that leaves after 2.6s. It replaces the old inline notice banners.
+- **Toast:** a single dark capsule under the top bar that rises in, pops its icon, and eases out after 2.6s (`.anim-toast-out`). It replaces the old inline notice banners.
 - **Pull to sync (`PullIndicator` + `usePullToRefresh`):** pull down from the top of any page to sync, the way a phone browser refreshes. Pages opt in with `AppShell onRefresh`.
   - Touch only. It starts only at scroll top, never inside a sheet or a field, and lets sideways drags through to chip rows.
   - It fires past 72px of finger travel with one vibration tick. A white capsule drops from under the top bar: "Pull to sync" → "Release to sync" → "Syncing…" → check.
@@ -249,24 +252,33 @@ Motion follows Apple's HIG: it has a purpose, it's short, it never blocks input,
 
 | Moment | Motion | Time |
 | :--- | :--- | :--- |
-| Press any control | scale 0.97 (`.pressable`) | 120ms |
-| Page opens | fade + 8px rise on `<main>`; the tab bar stays still | 250ms |
-| Counts load or change | count up (`AnimatedNumber`) | 400ms |
+| Press any button / card | scale 0.97 (`.pressable`) | 120ms |
+| Press a list row | subtle scale 0.99 (`.pressable-row`) | 120ms |
+| Hover interactive card (pointer) | 1px lift + float shadow (`.hover-lift`), trailing chevron nudges 2px (`.chevron-nudge`) | 250ms / 120ms |
+| Page opens or tab switches | fade + 8px rise on `<main>`, crossfade between `/scan` modes | 250ms |
+| Counts load or change | count up (`AnimatedNumber` on Home, Money credited, Waves) | 400ms |
 | Missing ↔ All clear | crossfade | 250ms |
-| Segmented / tab / filter selection | highlight slides | 200ms |
+| Segmented / tab / filter selection | highlight slides (Home, Returns, Items, Pick list, Waves, Settings theme) | 200ms |
+| Switch press & toggle | thumb elongates while pressed, slides across track | 200ms |
+| Disclosure / pick group expand | chevron rotates, body fades & slides down (`anim-disclosure-in`) | 200ms |
+| Pick list progress bar | GPU-composited `scaleX` transition | 300ms |
 | Sheet open / close | slide on `cubic-bezier(0.32,0.72,0,1)` + backdrop fade | 350ms / 280ms |
+| Toast arrive / leave | rise in + icon pop, then fade/lift out | 320ms / 180ms |
 | Wrong PIN or wrong password | shake + Android vibration | 300ms |
-| PIN dot filled, badge change | pop | 260ms |
+| PIN dot, badge, star pin, theme icon | pop (`anim-pop`) | 260ms |
+| Live online printer dot | gentle expanding ring pulse (`anim-pulse-dot`) | 2.2s |
 | Scan saved | checkmark draws in on a green card + vibration; the scanner stays usable | 400ms |
 | Sync | spin, then a checkmark pop + toast | — |
 | Pull to sync | capsule follows the finger, icon turns with travel; settles back | 300ms |
 | First chip row ever | scrolls 56px and back, once per device | ~650ms |
+| Theme toggle in Settings | surface/ink colors crossfade | 200ms |
 
-- Returns rows rise in 30ms apart on first load only. Filter changes swap in place.
+- Home attention/top lists, Imports history, Items (first load), and Returns rows (first load) stagger in softly. Filter changes swap in place.
 - With `prefers-reduced-motion: reduce`:
-  - Slides, scales and shakes turn off.
-  - The page rise, list rise and pop become plain fades.
+  - Slides, scales, hover lifts, chevron nudges, and shakes turn off.
+  - The page rise, disclosure drop, list rise, toast exit, and pop become plain fades.
   - Press feedback becomes an opacity dip.
+  - Theme transitions snap cleanly; pulse dot stops.
   - Counts show the final value straight away.
 
 ## Do's and Don'ts

@@ -72,11 +72,11 @@ function FilterChips({
           data-motion="slide"
           className={`absolute top-0.5 left-0 h-10 rounded-full transition-[transform,width,background-color] duration-200 ease-[var(--ease-ios)] ${
             value === "missing"
-              ? "bg-missing"
+              ? "bg-missing-solid"
               : value === "returned"
-                ? "bg-brand"
+                ? "bg-brand-solid"
                 : value === "arrived"
-                  ? "bg-arrived"
+                  ? "bg-arrived-solid"
                   : "bg-ink"
           }`}
           style={{ width: box.w, transform: `translateX(${box.x}px)` }}
@@ -84,6 +84,12 @@ function FilterChips({
       )}
       {RETURN_FILTERS.map((f) => {
         const active = f.id === value;
+        const activeText =
+          f.id === "returned"
+            ? "text-on-brand"
+            : f.id === "missing" || f.id === "arrived"
+              ? "text-white"
+              : "text-ink-inverse";
         return (
           <button
             key={f.id}
@@ -94,10 +100,10 @@ function FilterChips({
             role="tab"
             aria-selected={active}
             onClick={() => onChange(f.id)}
-            className={`relative z-10 h-10 shrink-0 rounded-full px-4 text-[15px] font-semibold transition-colors duration-200 ${
+            className={`pressable relative z-10 h-10 shrink-0 rounded-full px-4 text-[15px] font-semibold ${
               active
-                ? "text-white"
-                : "text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] active:bg-black/[0.04]"
+                ? activeText
+                : "text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] active:bg-ink/[0.05]"
             }`}
           >
             {f.label}
@@ -329,7 +335,7 @@ function ReturnsExplorerInner() {
           title="Filter by date range"
           aria-expanded={customOpen}
           onClick={() => setCustomOpen((o) => !o)}
-          className={`pressable relative hidden h-11 w-11 items-center justify-center rounded-full hover:bg-black/[0.04] lg:flex ${
+          className={`pressable relative hidden h-11 w-11 items-center justify-center rounded-full hover:bg-ink/[0.05] lg:flex ${
             customOpen || isCustomActive ? "text-brand" : "text-ink-2"
           }`}
         >
@@ -337,7 +343,7 @@ function ReturnsExplorerInner() {
           {isCustomActive && (
             <span
               aria-hidden="true"
-              className="absolute right-2 top-2 h-2 w-2 rounded-full bg-brand ring-2 ring-ground"
+              className="anim-pop absolute right-2 top-2 h-2 w-2 rounded-full bg-brand ring-2 ring-ground"
             />
           )}
         </button>
@@ -356,7 +362,7 @@ function ReturnsExplorerInner() {
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Item, tracking or order"
                 enterKeyHint="search"
-                className="h-11 w-full rounded-[var(--radius-control)] bg-slate-200/60 pl-10 pr-3 text-[16px] text-ink transition-colors focus:bg-white focus:shadow-[inset_0_0_0_1.5px_var(--color-brand)] focus:outline-none"
+                className="h-11 w-full rounded-[var(--radius-control)] bg-surface-track/60 pl-10 pr-3 text-[16px] text-ink transition-colors focus:bg-surface focus:shadow-[inset_0_0_0_1.5px_var(--color-brand)] focus:outline-none"
               />
             </label>
 
@@ -371,10 +377,10 @@ function ReturnsExplorerInner() {
                     type="button"
                     aria-pressed={active}
                     onClick={() => selectDatePreset(preset.id)}
-                    className={`h-9 shrink-0 rounded-full px-3.5 text-[14px] font-semibold transition-colors ${
+                    className={`pressable h-9 shrink-0 rounded-full px-3.5 text-[14px] font-semibold ${
                       active
-                        ? "bg-brand/12 text-brand shadow-[inset_0_0_0_1px_rgb(13_148_136/0.35)]"
-                        : "bg-white text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] hover:text-ink active:bg-slate-100"
+                        ? "bg-brand/12 text-brand ring-1 ring-inset ring-brand/35"
+                        : "bg-surface text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] hover:text-ink active:bg-surface-muted"
                     }`}
                   >
                     {preset.label}
@@ -385,10 +391,10 @@ function ReturnsExplorerInner() {
                 type="button"
                 aria-pressed={isCustomActive || customOpen}
                 onClick={() => setCustomOpen((o) => !o)}
-                className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-semibold transition-colors ${
+                className={`pressable inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-semibold ${
                   isCustomActive || customOpen
-                    ? "bg-brand/12 text-brand shadow-[inset_0_0_0_1px_rgb(13_148_136/0.35)]"
-                    : "bg-white text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] hover:text-ink active:bg-slate-100"
+                    ? "bg-brand/12 text-brand ring-1 ring-inset ring-brand/35"
+                    : "bg-surface text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] hover:text-ink active:bg-surface-muted"
                 }`}
               >
                 <CalendarDays className="h-3.5 w-3.5" />
@@ -397,7 +403,7 @@ function ReturnsExplorerInner() {
             </ScrollChips>
 
             {customOpen && (
-              <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] bg-white p-2.5 shadow-[var(--shadow-card)]">
+              <div className="anim-disclosure-in flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] bg-surface p-2.5 shadow-[var(--shadow-card)]">
                 <label className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-medium text-ink-3">
                   <span className="shrink-0">From</span>
                   <input
@@ -405,7 +411,7 @@ function ReturnsExplorerInner() {
                     aria-label="From date"
                     value={dateFilter.date || dateFilter.from}
                     onChange={(e) => updateCustomBound("from", e.target.value)}
-                    className="h-9 min-w-0 flex-1 rounded-lg bg-slate-100 px-2.5 text-[14px] text-ink tabular-nums focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
+                    className="h-9 min-w-0 flex-1 rounded-lg bg-surface-muted px-2.5 text-[14px] text-ink tabular-nums focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
                   />
                 </label>
                 <label className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-medium text-ink-3">
@@ -415,7 +421,7 @@ function ReturnsExplorerInner() {
                     aria-label="To date"
                     value={dateFilter.date || dateFilter.to}
                     onChange={(e) => updateCustomBound("to", e.target.value)}
-                    className="h-9 min-w-0 flex-1 rounded-lg bg-slate-100 px-2.5 text-[14px] text-ink tabular-nums focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
+                    className="h-9 min-w-0 flex-1 rounded-lg bg-surface-muted px-2.5 text-[14px] text-ink tabular-nums focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
                   />
                 </label>
                 {dateActive && (
@@ -423,7 +429,7 @@ function ReturnsExplorerInner() {
                     type="button"
                     onClick={() => selectDatePreset("all")}
                     aria-label="Clear date filter"
-                    className="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg px-2.5 text-[13px] font-semibold text-ink-2 hover:bg-slate-100 hover:text-ink"
+                    className="pressable inline-flex h-9 shrink-0 items-center gap-1 rounded-lg px-2.5 text-[13px] font-semibold text-ink-2 hover:bg-surface-muted hover:text-ink"
                   >
                     <X className="h-3.5 w-3.5" />
                     Clear
@@ -450,7 +456,7 @@ function ReturnsExplorerInner() {
           {parcels === null ? (
             <div className="space-y-2" aria-busy="true" aria-label="Loading">
               {[0, 1, 2, 3].map((i) => (
-                <div key={i} className="h-[76px] animate-pulse rounded-[var(--radius-card)] bg-slate-200/60" />
+                <div key={i} className="h-[76px] animate-pulse rounded-[var(--radius-card)] bg-surface-track/60" />
               ))}
             </div>
           ) : parcels.length === 0 ? (
@@ -495,7 +501,7 @@ function ReturnsExplorerInner() {
         <aside
           ref={asideRef}
           aria-label="Parcel details"
-          className="hidden overscroll-contain rounded-[var(--radius-card)] bg-white shadow-[var(--shadow-card)] lg:sticky lg:top-20 lg:block lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto"
+          className="hidden overscroll-contain rounded-[var(--radius-card)] bg-surface shadow-[var(--shadow-card)] lg:sticky lg:top-20 lg:block lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto"
         >
           {isDesktop &&
             (selectedId ? (

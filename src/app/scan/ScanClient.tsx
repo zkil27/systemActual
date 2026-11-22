@@ -78,16 +78,16 @@ const PACKER_TABS: readonly { id: PackerTab; label: string }[] = [
 
 const TONE_SELECTED_ROW: Record<ConditionTone, string> = {
   good: "bg-arrived-soft/75",
-  neutral: "bg-slate-100/90",
+  neutral: "bg-surface-muted",
   warn: "bg-failed-soft/75",
   bad: "bg-missing-soft/80",
 };
 
 const TONE_DOT: Record<ConditionTone, string> = {
-  good: "border-arrived bg-arrived",
-  neutral: "border-ink-2 bg-ink-2",
+  good: "border-arrived-solid bg-arrived-solid",
+  neutral: "border-slate-600 bg-slate-600",
   warn: "border-amber-600 bg-amber-600",
-  bad: "border-missing bg-missing",
+  bad: "border-missing-solid bg-missing-solid",
 };
 
 const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "clear", "0", "back"] as const;
@@ -711,7 +711,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                     setUnlockError("");
                   }}
                   className={`pressable h-12 truncate rounded-[var(--radius-control)] px-2 text-[16px] font-semibold ${
-                    active ? "bg-ink text-white" : "bg-white text-ink shadow-[var(--shadow-card)]"
+                    active ? "bg-ink text-ink-inverse" : "bg-surface text-ink shadow-[var(--shadow-card)]"
                   }`}
                 >
                   {s.name}
@@ -752,7 +752,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                   key={k}
                   type="button"
                   onClick={() => pressKey("clear")}
-                  className="pressable mx-auto h-[72px] w-[72px] rounded-full text-[16px] font-semibold text-ink-2 active:bg-black/[0.05]"
+                  className="pressable mx-auto h-[72px] w-[72px] rounded-full text-[16px] font-semibold text-ink-2 active:bg-ink/[0.06]"
                 >
                   Clear
                 </button>
@@ -762,7 +762,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                   type="button"
                   aria-label="Delete last digit"
                   onClick={() => pressKey("back")}
-                  className="pressable mx-auto flex h-[72px] w-[72px] items-center justify-center rounded-full text-ink-2 active:bg-black/[0.05]"
+                  className="pressable mx-auto flex h-[72px] w-[72px] items-center justify-center rounded-full text-ink-2 active:bg-ink/[0.06]"
                 >
                   <Delete className="h-6 w-6" />
                 </button>
@@ -772,7 +772,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                   type="button"
                   disabled={unlocking}
                   onClick={() => pressKey(k)}
-                  className="pressable tabular-nums mx-auto h-[72px] w-[72px] rounded-full bg-white text-[28px] font-semibold text-ink shadow-[var(--shadow-card)] active:bg-slate-100"
+                  className="pressable tabular-nums mx-auto h-[72px] w-[72px] rounded-full bg-surface text-[28px] font-semibold text-ink shadow-[var(--shadow-card)] active:bg-surface-muted"
                 >
                   {k}
                 </button>
@@ -806,7 +806,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
       <header
         className={`safe-top sticky top-0 z-30 transition-[background-color,border-color,backdrop-filter] duration-200 ${
           scrolled
-            ? "border-b border-hairline bg-white/80 backdrop-blur-xl backdrop-saturate-150"
+            ? "border-b border-hairline bg-surface/80 backdrop-blur-xl backdrop-saturate-150"
             : "border-b border-transparent bg-ground"
         }`}
       >
@@ -814,7 +814,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
           {isOwnerActor ? (
             <Link
               href="/"
-              className="pressable -ml-2 flex h-11 items-center gap-0.5 whitespace-nowrap rounded-full px-2 text-[16px] font-semibold text-brand hover:bg-black/[0.04]"
+              className="pressable -ml-2 flex h-11 items-center gap-0.5 whitespace-nowrap rounded-full px-2 text-[16px] font-semibold text-brand hover:bg-ink/[0.05]"
             >
               <ChevronLeft className="h-5 w-5 shrink-0" strokeWidth={2.4} />
               <span>Dashboard</span>
@@ -823,7 +823,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
             <button
               type="button"
               onClick={() => setRecentOpen(true)}
-              className="pressable -ml-2 flex h-11 min-w-0 items-center rounded-full px-2 text-left text-[16px] font-bold text-ink hover:bg-black/[0.04]"
+              className="pressable -ml-2 flex h-11 min-w-0 items-center rounded-full px-2 text-left text-[16px] font-bold text-ink hover:bg-ink/[0.05]"
             >
               <span className="truncate">{actorName}</span>
             </button>
@@ -843,7 +843,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
               href="/stock-in"
               aria-label="Shelf and stock updates"
               title="Shelf & stock"
-              className="pressable flex h-11 items-center whitespace-nowrap rounded-full px-2.5 text-[16px] font-semibold text-brand hover:bg-black/[0.04]"
+              className="pressable flex h-11 items-center whitespace-nowrap rounded-full px-2.5 text-[16px] font-semibold text-brand hover:bg-ink/[0.05]"
             >
               Stock
             </Link>
@@ -852,7 +852,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
               onClick={handleLockStaff}
               aria-label="Lock scanner"
               title="Lock scanner"
-              className="pressable -mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-2 hover:bg-black/[0.04]"
+              className="pressable -mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-2 hover:bg-ink/[0.05]"
             >
               <Lock className="h-5 w-5" />
             </button>
@@ -868,7 +868,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
           <button
             type="button"
             onClick={() => setPullSheetOpen(true)}
-            className="pressable flex w-full items-center gap-3 rounded-[var(--radius-card)] bg-missing px-4 py-3.5 text-left text-white shadow-[0_8px_24px_-10px_rgb(220_38_38/0.65)]"
+            className="group anim-rise-in pressable flex w-full items-center gap-3 rounded-[var(--radius-card)] bg-missing-solid px-4 py-3.5 text-left text-white shadow-[0_8px_24px_-10px_rgb(220_38_38/0.65)] dark:shadow-[var(--shadow-card)]"
           >
             <OctagonAlert className="h-6 w-6 shrink-0" />
             <span className="min-w-0 flex-1">
@@ -880,7 +880,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                 Cancelled after printing. Tap to check tracking &amp; photo
               </span>
             </span>
-            <ChevronRight className="h-5 w-5 shrink-0 text-white/80" />
+            <ChevronRight className="chevron-nudge h-5 w-5 shrink-0 text-white/80" />
           </button>
         )}
 
@@ -888,13 +888,13 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
           <button
             type="button"
             onClick={() => setUnpickedSheetOpen(true)}
-            className="pressable flex w-full items-center gap-3 rounded-[var(--radius-control)] bg-failed-soft px-4 py-3 text-left text-amber-950"
+            className="group anim-rise-in pressable flex w-full items-center gap-3 rounded-[var(--radius-control)] bg-failed-soft px-4 py-3 text-left text-failed-ink"
           >
-            <Clock className="h-5 w-5 shrink-0 text-amber-700" />
+            <Clock className="h-5 w-5 shrink-0 text-failed" />
             <span className="min-w-0 flex-1 text-[14px] font-bold tabular-nums">
               {unpickedOverdueCount} printed {unpickedOverdueCount === 1 ? "parcel" : "parcels"} not picked up yet (3h+)
             </span>
-            <ChevronRight className="h-5 w-5 shrink-0 text-amber-800" />
+            <ChevronRight className="chevron-nudge h-5 w-5 shrink-0 text-failed-ink" />
           </button>
         )}
 
@@ -911,8 +911,8 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
             role="status"
             className={`anim-rise-in flex items-center gap-3 rounded-[var(--radius-card)] px-4 py-3.5 text-white ${
               saved.restocked
-                ? "bg-arrived shadow-[0_8px_24px_-10px_rgb(4_120_87/0.6)]"
-                : "bg-missing shadow-[0_8px_24px_-10px_rgb(220_38_38/0.6)]"
+                ? "bg-arrived-solid shadow-[0_8px_24px_-10px_rgb(4_120_87/0.6)] dark:shadow-[var(--shadow-card)]"
+                : "bg-missing-solid shadow-[0_8px_24px_-10px_rgb(220_38_38/0.6)] dark:shadow-[var(--shadow-card)]"
             }`}
           >
             <CheckDraw />
@@ -927,317 +927,319 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
           </div>
         )}
 
-        {/* ── TAB 1: PICK LIST + MULTI-ITEM CHECK ────────────────────────── */}
-        {tab === "pick" && (
-          <PickListSection
-            waveData={waveData}
-            waveLoading={waveLoading}
-            waveError={waveError}
-            checkedPickKeys={checkedPickKeys}
-            reprintingSn={reprintingSn}
-            onToggleChecked={togglePickChecked}
-            onRefresh={() => void loadWave()}
-            onOpenCheckSheet={openCheckSheet}
-            onReprintLabel={handleReprintLabel}
-          />
-        )}
+        <div key={tab} className="anim-fade-in">
+          {/* ── TAB 1: PICK LIST + MULTI-ITEM CHECK ────────────────────────── */}
+          {tab === "pick" && (
+            <PickListSection
+              waveData={waveData}
+              waveLoading={waveLoading}
+              waveError={waveError}
+              checkedPickKeys={checkedPickKeys}
+              reprintingSn={reprintingSn}
+              onToggleChecked={togglePickChecked}
+              onRefresh={() => void loadWave()}
+              onOpenCheckSheet={openCheckSheet}
+              onReprintLabel={handleReprintLabel}
+            />
+          )}
 
-        {/* ── TAB 2: INBOUND RETURN SCANNER ──────────────────────────────── */}
-        {tab === "returns" && !matchedParcel && (
-          <section className="space-y-4">
-            {cameraOpen ? (
-              <div className="anim-fade-in relative overflow-hidden rounded-[var(--radius-sheet)] bg-slate-950">
-                {nativeCamera ? (
-                  <video ref={videoRef} playsInline muted className="h-64 w-full object-cover" />
-                ) : (
-                  <div id="kyna-barcode-reader" className="min-h-64 w-full" />
-                )}
+          {/* ── TAB 2: INBOUND RETURN SCANNER ──────────────────────────────── */}
+          {tab === "returns" && !matchedParcel && (
+            <section className="space-y-4">
+              {cameraOpen ? (
+                <div className="anim-fade-in relative overflow-hidden rounded-[var(--radius-sheet)] bg-slate-950">
+                  {nativeCamera ? (
+                    <video ref={videoRef} playsInline muted className="h-64 w-full object-cover" />
+                  ) : (
+                    <div id="kyna-barcode-reader" className="min-h-64 w-full" />
+                  )}
+                  <button
+                    type="button"
+                    onClick={stopCamera}
+                    aria-label="Close camera"
+                    className="pressable absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              ) : (
                 <button
                   type="button"
-                  onClick={stopCamera}
-                  aria-label="Close camera"
-                  className="pressable absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur"
+                  onClick={startCamera}
+                  className="pressable flex min-h-48 w-full flex-col items-center justify-center gap-3 rounded-[var(--radius-sheet)] bg-brand-solid text-on-brand shadow-[0_12px_30px_-12px_rgb(219_112_155/0.55)] hover:bg-brand-solid-hover dark:shadow-[var(--shadow-card)]"
                 >
-                  <X className="h-5 w-5" />
+                  <ScanBarcode className="h-12 w-12" strokeWidth={1.6} />
+                  <span className="text-[20px] font-bold">Scan return waybill</span>
+                </button>
+              )}
+
+              {cameraError && (
+                <p className="anim-fade-in px-1 text-[15px] font-semibold text-failed-ink">{cameraError}</p>
+              )}
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void lookupReturnBarcode(manualCode);
+                }}
+                className="flex gap-2"
+              >
+                <label className="min-w-0 flex-1">
+                  <span className="sr-only">Tracking number</span>
+                  <input
+                    type="text"
+                    inputMode="text"
+                    autoCapitalize="characters"
+                    autoComplete="off"
+                    enterKeyHint="search"
+                    value={manualCode}
+                    onChange={(e) => setManualCode(e.target.value)}
+                    placeholder="Or type return tracking number"
+                    className="h-12 w-full rounded-[var(--radius-control)] bg-surface px-4 text-[16px] text-ink shadow-[var(--shadow-card)] focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
+                  />
+                </label>
+                <Button
+                  type="submit"
+                  variant="secondary"
+                  disabled={lookingUp || manualCode.trim().length < 4}
+                  className="shrink-0 bg-ink text-ink-inverse hover:bg-ink/90 disabled:bg-surface-track disabled:text-ink-3"
+                >
+                  {lookingUp ? "…" : "Find"}
+                </Button>
+              </form>
+
+              {lookupError && (
+                <p role="alert" className="anim-fade-in px-1 text-[15px] font-semibold text-missing-ink">
+                  {lookupError}
+                </p>
+              )}
+
+              {choices.length > 0 && (
+                <div className="anim-rise-in space-y-2" role="group" aria-label="Pick the parcel in your hand">
+                  <p className="px-1 text-[15px] font-semibold text-ink-2">
+                    {choices.length} parcels match {lastScannedCode}. Tap the one in your hand.
+                  </p>
+                  <ul className="divide-y divide-hairline overflow-hidden rounded-[var(--radius-card)] bg-surface shadow-[var(--shadow-card)]">
+                    {choices.map((c) => (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          onClick={() => openParcel(c)}
+                          className="pressable-row flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-subtle active:bg-surface-muted"
+                        >
+                          <ItemThumb src={c.itemImageUrl} alt={c.itemSummary} size="md" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[16px] font-semibold text-ink">
+                              {c.quantity}× {c.itemSummary}
+                            </span>
+                            <span className="block truncate text-[14px] text-ink-3">
+                              {[categoryLabel(c.category), c.variationName, shortCourier(c.courier)]
+                                .filter(Boolean)
+                                .join(" · ")}
+                              {c.alreadyScanned ? " · already scanned" : ""}
+                            </span>
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <Group className="divide-y divide-hairline">
+                <button
+                  type="button"
+                  onClick={() => setRecentOpen(true)}
+                  className="group pressable-row flex min-h-[54px] w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-surface-subtle active:bg-surface-muted"
+                >
+                  <span className="text-[16px] font-semibold text-ink">Your returns today</span>
+                  <span className="flex items-center gap-1.5 text-[15px] font-semibold text-ink-3 tabular-nums">
+                    <span>{todayCount}</span>
+                    <ChevronRight className="chevron-nudge h-5 w-5 text-hairline-strong" />
+                  </span>
+                </button>
+
+                {pendingMissing > 0 && (
+                  <div className="flex min-h-[52px] items-center justify-between gap-3 px-4 py-3">
+                    <span className="text-[16px] font-semibold text-ink">Returned to seller, waiting to scan</span>
+                    <span className="text-[15px] font-bold text-missing-ink tabular-nums">
+                      {pendingMissing}
+                    </span>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={openCheckSheet}
+                  className="group pressable-row flex min-h-[54px] w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-surface-subtle active:bg-surface-muted"
+                >
+                  <span className="flex items-center gap-2.5 text-[16px] font-semibold text-ink">
+                    <Printer className="h-5 w-5 text-brand" />
+                    <span>Find or reprint a label</span>
+                  </span>
+                  <ChevronRight className="chevron-nudge h-5 w-5 text-hairline-strong" />
+                </button>
+              </Group>
+            </section>
+          )}
+
+          {tab === "returns" && matchedParcel && (
+            <section className="anim-rise-in space-y-6">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[15px] font-semibold text-ink-2">
+                  {categoryLabel(matchedParcel.category)} · {shortCourier(matchedParcel.courier)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMatchedParcel(null)}
+                  aria-label="Cancel this scan"
+                  className="pressable -mr-2 flex h-11 w-11 items-center justify-center rounded-full text-ink-3 hover:bg-ink/[0.05]"
+                >
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-track/80">
+                    <X className="h-4 w-4" strokeWidth={2.6} />
+                  </span>
                 </button>
               </div>
-            ) : (
-              <button
-                type="button"
-                onClick={startCamera}
-                className="pressable flex min-h-48 w-full flex-col items-center justify-center gap-3 rounded-[var(--radius-sheet)] bg-brand text-white shadow-[0_12px_30px_-12px_rgb(15_118_110/0.7)] hover:bg-brand-hover"
-              >
-                <ScanBarcode className="h-12 w-12" strokeWidth={1.6} />
-                <span className="text-[20px] font-bold">Scan return waybill</span>
-              </button>
-            )}
 
-            {cameraError && (
-              <p className="anim-fade-in px-1 text-[15px] font-semibold text-amber-800">{cameraError}</p>
-            )}
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void lookupReturnBarcode(manualCode);
-              }}
-              className="flex gap-2"
-            >
-              <label className="min-w-0 flex-1">
-                <span className="sr-only">Tracking number</span>
-                <input
-                  type="text"
-                  inputMode="text"
-                  autoCapitalize="characters"
-                  autoComplete="off"
-                  enterKeyHint="search"
-                  value={manualCode}
-                  onChange={(e) => setManualCode(e.target.value)}
-                  placeholder="Or type return tracking number"
-                  className="h-12 w-full rounded-[var(--radius-control)] bg-white px-4 text-[16px] text-ink shadow-[var(--shadow-card)] focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
-                />
-              </label>
-              <Button
-                type="submit"
-                variant="secondary"
-                disabled={lookingUp || manualCode.trim().length < 4}
-                className="shrink-0 bg-ink text-white hover:bg-ink/90 disabled:bg-slate-200"
-              >
-                {lookingUp ? "…" : "Find"}
-              </Button>
-            </form>
-
-            {lookupError && (
-              <p role="alert" className="anim-fade-in px-1 text-[15px] font-semibold text-missing-ink">
-                {lookupError}
-              </p>
-            )}
-
-            {choices.length > 0 && (
-              <div className="anim-rise-in space-y-2" role="group" aria-label="Pick the parcel in your hand">
-                <p className="px-1 text-[15px] font-semibold text-ink-2">
-                  {choices.length} parcels match {lastScannedCode}. Tap the one in your hand.
+              {matchedParcel.alreadyScanned && (
+                <p className="flex items-center gap-2 text-[15px] font-semibold text-failed-ink">
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                  Scanned before. Saving logs a re-check.
                 </p>
-                <ul className="divide-y divide-hairline overflow-hidden rounded-[var(--radius-card)] bg-white shadow-[var(--shadow-card)]">
-                  {choices.map((c) => (
-                    <li key={c.id}>
-                      <button
-                        type="button"
-                        onClick={() => openParcel(c)}
-                        className="pressable flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left hover:bg-black/[0.02]"
-                      >
-                        <ItemThumb src={c.itemImageUrl} alt={c.itemSummary} size="md" />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[16px] font-semibold text-ink">
-                            {c.quantity}× {c.itemSummary}
-                          </span>
-                          <span className="block truncate text-[14px] text-ink-3">
-                            {[categoryLabel(c.category), c.variationName, shortCourier(c.courier)]
-                              .filter(Boolean)
-                              .join(" · ")}
-                            {c.alreadyScanned ? " · already scanned" : ""}
-                          </span>
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+              )}
 
-            <Group className="divide-y divide-hairline">
-              <button
-                type="button"
-                onClick={() => setRecentOpen(true)}
-                className="pressable flex min-h-[54px] w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-black/[0.015]"
-              >
-                <span className="text-[16px] font-semibold text-ink">Your returns today</span>
-                <span className="flex items-center gap-1.5 text-[15px] font-semibold text-ink-3 tabular-nums">
-                  <span>{todayCount}</span>
-                  <ChevronRight className="h-5 w-5 text-hairline-strong" />
-                </span>
-              </button>
-
-              {pendingMissing > 0 && (
-                <div className="flex min-h-[52px] items-center justify-between gap-3 px-4 py-3">
-                  <span className="text-[16px] font-semibold text-ink">Returned to seller, waiting to scan</span>
-                  <span className="text-[15px] font-bold text-missing-ink tabular-nums">
-                    {pendingMissing}
-                  </span>
+              {matchedParcel.lines.length > 1 ? (
+                <Group>
+                  <ul className="divide-y divide-hairline px-4">
+                    {matchedParcel.lines.map((line, idx) => (
+                      <li key={`${line.name}-${idx}`} className="flex items-center gap-3.5 py-3">
+                        <ItemThumb src={line.imageUrl} alt={line.name} size="lg" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[17px] font-bold leading-snug text-ink">
+                            <span className="tabular-nums">{line.quantity}× </span>
+                            {line.name}
+                          </p>
+                          {line.variationName && (
+                            <p className="mt-1 text-[15px] font-semibold text-ink-2">
+                              {line.variationName}
+                            </p>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </Group>
+              ) : (
+                <div className="flex items-center gap-4">
+                  <ItemThumb src={matchedParcel.itemImageUrl} alt={matchedParcel.itemSummary} size="xl" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[20px] font-bold leading-snug text-ink">
+                      <span className="tabular-nums">{matchedParcel.quantity}× </span>
+                      {matchedParcel.itemSummary}
+                    </p>
+                    {matchedParcel.variationName && (
+                      <p className="mt-1.5 inline-block rounded-lg bg-surface-track/80 px-2.5 py-1 text-[15px] font-bold text-ink">
+                        {matchedParcel.variationName}
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
 
-              <button
-                type="button"
-                onClick={openCheckSheet}
-                className="pressable flex min-h-[54px] w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-black/[0.015]"
-              >
-                <span className="flex items-center gap-2.5 text-[16px] font-semibold text-ink">
-                  <Printer className="h-5 w-5 text-brand" />
-                  <span>Find or reprint a label</span>
-                </span>
-                <ChevronRight className="h-5 w-5 text-hairline-strong" />
-              </button>
-            </Group>
-          </section>
-        )}
-
-        {tab === "returns" && matchedParcel && (
-          <section className="anim-rise-in space-y-6">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[15px] font-semibold text-ink-2">
-                {categoryLabel(matchedParcel.category)} · {shortCourier(matchedParcel.courier)}
-              </span>
-              <button
-                type="button"
-                onClick={() => setMatchedParcel(null)}
-                aria-label="Cancel this scan"
-                className="pressable -mr-2 flex h-11 w-11 items-center justify-center rounded-full text-ink-3 hover:bg-black/[0.04]"
-              >
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-200/70">
-                  <X className="h-4 w-4" strokeWidth={2.6} />
-                </span>
-              </button>
-            </div>
-
-            {matchedParcel.alreadyScanned && (
-              <p className="flex items-center gap-2 text-[15px] font-semibold text-amber-800">
-                <AlertTriangle className="h-4 w-4 shrink-0" />
-                Scanned before. Saving logs a re-check.
-              </p>
-            )}
-
-            {matchedParcel.lines.length > 1 ? (
               <Group>
-                <ul className="divide-y divide-hairline px-4">
-                  {matchedParcel.lines.map((line, idx) => (
-                    <li key={`${line.name}-${idx}`} className="flex items-center gap-3.5 py-3">
-                      <ItemThumb src={line.imageUrl} alt={line.name} size="lg" />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[17px] font-bold leading-snug text-ink">
-                          <span className="tabular-nums">{line.quantity}× </span>
-                          {line.name}
-                        </p>
-                        {line.variationName && (
-                          <p className="mt-1 text-[15px] font-semibold text-ink-2">
-                            {line.variationName}
-                          </p>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </Group>
-            ) : (
-              <div className="flex items-center gap-4">
-                <ItemThumb src={matchedParcel.itemImageUrl} alt={matchedParcel.itemSummary} size="xl" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-[20px] font-bold leading-snug text-ink">
-                    <span className="tabular-nums">{matchedParcel.quantity}× </span>
-                    {matchedParcel.itemSummary}
-                  </p>
-                  {matchedParcel.variationName && (
-                    <p className="mt-1.5 inline-block rounded-lg bg-slate-200/80 px-2.5 py-1 text-[15px] font-bold text-ink">
-                      {matchedParcel.variationName}
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <Group>
-              <div role="radiogroup" aria-label="Condition" className="divide-y divide-hairline">
-                {CONDITIONS.map((c) => {
-                  const active = selectedCondition === c.id;
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={active}
-                      onClick={() => setSelectedCondition(c.id)}
-                      className={`pressable flex min-h-14 w-full items-center gap-3.5 px-4 text-left transition-colors ${
-                        active ? TONE_SELECTED_ROW[c.tone] : "bg-white hover:bg-black/[0.015]"
-                      }`}
-                    >
-                      <span
-                        aria-hidden="true"
-                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors duration-150 ${
-                          active ? TONE_DOT[c.tone] : "border-hairline-strong bg-white"
+                <div role="radiogroup" aria-label="Condition" className="divide-y divide-hairline">
+                  {CONDITIONS.map((c) => {
+                    const active = selectedCondition === c.id;
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        onClick={() => setSelectedCondition(c.id)}
+                        className={`pressable flex min-h-14 w-full items-center gap-3.5 px-4 text-left transition-colors ${
+                          active ? TONE_SELECTED_ROW[c.tone] : "bg-surface hover:bg-surface-subtle"
                         }`}
                       >
-                        {active && <span className="anim-pop h-2 w-2 rounded-full bg-white" />}
-                      </span>
-                      <span className="flex-1 text-[17px] font-semibold text-ink">{c.label}</span>
-                      {c.needsPhoto && (
-                        <Camera className="h-5 w-5 text-ink-3" aria-label="Photo needed" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </Group>
+                        <span
+                          aria-hidden="true"
+                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors duration-150 ${
+                            active ? TONE_DOT[c.tone] : "border-hairline-strong bg-surface"
+                          }`}
+                        >
+                          {active && <span className="anim-pop h-2 w-2 rounded-full bg-white" />}
+                        </span>
+                        <span className="flex-1 text-[17px] font-semibold text-ink">{c.label}</span>
+                        {c.needsPhoto && (
+                          <Camera className="h-5 w-5 text-ink-3" aria-label="Photo needed" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Group>
 
-            <div className="space-y-2">
-              <label
-                className={`pressable flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-control)] text-[16px] font-bold ${
-                  photos.length > 0
-                    ? "bg-arrived-soft text-arrived"
+              <div className="space-y-2">
+                <label
+                  className={`pressable flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-control)] text-[16px] font-bold ${
+                    photos.length > 0
+                      ? "bg-arrived-soft text-arrived"
+                      : condition?.needsPhoto
+                        ? "bg-ink text-ink-inverse"
+                        : "bg-surface-muted text-ink"
+                  }`}
+                >
+                  <Camera className="h-5 w-5" />
+                  {photos.length > 0
+                    ? `${photos.length} photo${photos.length > 1 ? "s" : ""} added`
                     : condition?.needsPhoto
-                      ? "bg-ink text-white"
-                      : "bg-slate-200/70 text-ink"
-                }`}
-              >
-                <Camera className="h-5 w-5" />
-                {photos.length > 0
-                  ? `${photos.length} photo${photos.length > 1 ? "s" : ""} added`
-                  : condition?.needsPhoto
-                    ? "Take photo (required for dispute)"
-                    : "Add photo"}
+                      ? "Take photo (required for dispute)"
+                      : "Add photo"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    multiple
+                    className="sr-only"
+                    onChange={(e) => setPhotos(Array.from(e.target.files ?? []).slice(0, 3))}
+                  />
+                </label>
+                {needsPhotoMissing && (
+                  <p className="px-1 text-[14px] font-semibold text-missing-ink">
+                    Photo of the waybill &amp; item is required before saving an issue return.
+                  </p>
+                )}
                 <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  multiple
-                  className="sr-only"
-                  onChange={(e) => setPhotos(Array.from(e.target.files ?? []).slice(0, 3))}
+                  type="text"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Note (optional)"
+                  aria-label="Note"
+                  className="h-12 w-full rounded-[var(--radius-control)] bg-surface px-4 text-[16px] text-ink shadow-[var(--shadow-card)] focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
                 />
-              </label>
-              {needsPhotoMissing && (
-                <p className="px-1 text-[14px] font-semibold text-missing-ink">
-                  Photo of the waybill &amp; item is required before saving an issue return.
+              </div>
+
+              {lookupError && (
+                <p role="alert" className="anim-fade-in px-1 text-[15px] font-semibold text-missing-ink">
+                  {lookupError}
                 </p>
               )}
-              <input
-                type="text"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Note (optional)"
-                aria-label="Note"
-                className="h-12 w-full rounded-[var(--radius-control)] bg-white px-4 text-[16px] text-ink shadow-[var(--shadow-card)] focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
-              />
-            </div>
 
-            {lookupError && (
-              <p role="alert" className="px-1 text-[15px] font-semibold text-missing-ink">
-                {lookupError}
-              </p>
-            )}
-
-            <Button
-              size="lg"
-              full
-              onClick={handleConfirmScan}
-              disabled={savingScan || needsPhotoMissing}
-            >
-              {savingScan
-                ? "Saving…"
-                : needsPhotoMissing
-                  ? "Take photo to continue"
-                  : "Confirm arrived"}
-            </Button>
-          </section>
-        )}
+              <Button
+                size="lg"
+                full
+                onClick={handleConfirmScan}
+                disabled={savingScan || needsPhotoMissing}
+              >
+                {savingScan
+                  ? "Saving…"
+                  : needsPhotoMissing
+                    ? "Take photo to continue"
+                    : "Confirm arrived"}
+              </Button>
+            </section>
+          )}
+        </div>
       </main>
 
       {/* Sheet 1: End-of-shift return list */}
@@ -1281,7 +1283,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                 setTimeout(() => setCopiedList(false), 1800);
               };
               return (
-                <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] bg-slate-100/80 px-3.5 py-2.5">
+                <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] bg-surface-muted px-3.5 py-2.5">
                   <span className="text-[14px] font-semibold text-ink-2 tabular-nums">
                     {recentScans.length} {recentScans.length === 1 ? "parcel" : "parcels"} · {goodCount} shelf
                     {issueCount > 0 ? ` · ${issueCount} dispute` : ""}
@@ -1289,11 +1291,11 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                   <button
                     type="button"
                     onClick={handleCopyList}
-                    className="pressable inline-flex h-9 items-center gap-1.5 rounded-full bg-white px-3 text-[13px] font-bold text-brand shadow-[var(--shadow-card)]"
+                    className="pressable inline-flex h-9 items-center gap-1.5 rounded-full bg-surface px-3 text-[13px] font-bold text-brand shadow-[var(--shadow-card)]"
                   >
                     {copiedList ? (
                       <>
-                        <Check className="h-3.5 w-3.5" strokeWidth={2.8} />
+                        <Check className="anim-pop h-3.5 w-3.5" strokeWidth={2.8} />
                         Copied
                       </>
                     ) : (
@@ -1339,7 +1341,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
         title="Pull cancelled labels"
       >
         {waveLoading ? (
-          <div className="h-32 animate-pulse rounded-[var(--radius-card)] bg-slate-100" />
+          <div className="h-32 animate-pulse rounded-[var(--radius-card)] bg-surface-muted" />
         ) : cancelledToPull.length === 0 ? (
           <p className="py-6 text-[16px] text-ink-3">All clear — no cancelled labels to pull.</p>
         ) : (
@@ -1350,7 +1352,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
               return (
                 <li key={p.packageId} className="space-y-3 py-4 first:pt-1">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="rounded-lg bg-missing px-2.5 py-1 text-[18px] font-extrabold tracking-wide text-white tabular-nums">
+                    <span className="rounded-lg bg-missing-solid px-2.5 py-1 text-[18px] font-extrabold tracking-wide text-white tabular-nums">
                       ···{code6}
                     </span>
                     <span className="text-[14px] font-bold text-ink-2">
@@ -1394,7 +1396,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
         title="Not picked up yet (3h+)"
       >
         {waveLoading ? (
-          <div className="h-32 animate-pulse rounded-[var(--radius-card)] bg-slate-100" />
+          <div className="h-32 animate-pulse rounded-[var(--radius-card)] bg-surface-muted" />
         ) : unpickedParcels.length === 0 ? (
           <p className="py-6 text-[16px] text-ink-3">All printed parcels have been picked up!</p>
         ) : (
@@ -1458,7 +1460,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                 value={checkQuery}
                 onChange={(e) => setCheckQuery(e.target.value)}
                 placeholder="Last 6 digits, order no. or item"
-                className="h-12 w-full rounded-[var(--radius-control)] bg-slate-100 pl-9 pr-3 text-[16px] text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
+                className="h-12 w-full rounded-[var(--radius-control)] bg-surface-muted pl-9 pr-3 text-[16px] text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
               />
             </label>
             <Button
@@ -1470,10 +1472,10 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
             </Button>
           </form>
 
-          {checkError && <p className="text-[14px] font-semibold text-missing-ink">{checkError}</p>}
+          {checkError && <p className="anim-fade-in text-[14px] font-semibold text-missing-ink">{checkError}</p>}
 
           {checkResults.length > 0 && (
-            <ul className="divide-y divide-hairline">
+            <ul className="anim-rise-in divide-y divide-hairline">
               {checkResults.map((p) => (
                 <li key={p.packageId} className="space-y-3 py-3.5">
                   <div className="flex items-center justify-between gap-2 text-[13px] font-bold text-ink-2 tabular-nums">
@@ -1481,7 +1483,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                       ···{last6(p.trackingNumber, p.orderSn)} · {shortCourier(p.courier)}
                     </span>
                     {p.isCancelled && (
-                      <span className="rounded-full bg-missing px-2 py-0.5 text-[12px] text-white">
+                      <span className="rounded-full bg-missing-solid px-2 py-0.5 text-[12px] text-white">
                         CANCELLED
                       </span>
                     )}
@@ -1495,7 +1497,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                             {line.quantity}× {line.shortName}
                           </p>
                           {line.variationName && (
-                            <p className="mt-0.5 inline-block rounded bg-ink px-2 py-0.5 text-[12px] font-bold text-white">
+                            <p className="mt-0.5 inline-block rounded bg-ink px-2 py-0.5 text-[12px] font-bold text-ink-inverse">
                               {line.variationName}
                             </p>
                           )}

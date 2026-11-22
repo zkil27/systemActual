@@ -90,10 +90,14 @@ export default function ImportsPage() {
             className={`pressable flex min-h-40 cursor-pointer flex-col items-center justify-center gap-3 rounded-[var(--radius-card)] px-6 py-8 text-center transition-colors ${
               file
                 ? "bg-brand-soft shadow-[inset_0_0_0_1.5px_var(--color-brand)]"
-                : "bg-white shadow-[var(--shadow-card)] hover:bg-slate-50"
+                : "bg-surface shadow-[var(--shadow-card)] hover:bg-surface-subtle"
             }`}
           >
-            <FileUp className={`h-8 w-8 ${file ? "text-brand" : "text-ink-3"}`} strokeWidth={1.8} />
+            <FileUp
+              key={file ? file.name : "empty"}
+              className={`anim-pop h-8 w-8 ${file ? "text-brand" : "text-ink-3"}`}
+              strokeWidth={1.8}
+            />
             <span className="max-w-full truncate text-[17px] font-semibold text-ink">
               {file ? file.name : "Choose a CSV or Excel file"}
             </span>
@@ -124,8 +128,12 @@ export default function ImportsPage() {
           <section>
             <SectionHeader title="Recent" />
             <Group className="divide-y divide-hairline">
-              {jobs.map((j) => (
-                <div key={j.id} className="flex min-h-14 items-center justify-between gap-4 px-4 py-3">
+              {jobs.map((j, i) => (
+                <div
+                  key={j.id}
+                  className={`flex min-h-14 items-center justify-between gap-4 px-4 py-3 ${i < 10 ? "anim-rise-in" : ""}`}
+                  style={i < 10 ? { animationDelay: `${i * 25}ms` } : undefined}
+                >
                   <div className="min-w-0">
                     <p className="truncate text-[16px] font-semibold text-ink">{j.fileName}</p>
                     <p className="text-[14px] text-ink-3">{manilaDateTime(j.createdAt)}</p>
@@ -144,7 +152,7 @@ export default function ImportsPage() {
             type="button"
             onClick={handleSimulate}
             disabled={simulating}
-            className="flex min-h-[52px] w-full items-center justify-between gap-4 px-4 text-left transition-colors duration-150 hover:bg-slate-50 active:bg-slate-100"
+            className="pressable-row flex min-h-[52px] w-full items-center justify-between gap-4 px-4 text-left hover:bg-surface-subtle active:bg-surface-muted"
           >
             <span className="text-[17px] text-ink">Refresh sample data</span>
             <RefreshCw className={`h-5 w-5 text-brand ${simulating ? "anim-spin" : ""}`} />

@@ -3,13 +3,28 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Monitor, Moon, Sun } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Button, Group } from "@/components/ui/Button";
 import { Disclosure } from "@/components/ui/Disclosure";
+import { SegmentedControl } from "@/components/ui/SegmentedControl";
+import { Switch } from "@/components/ui/Switch";
 import { toast } from "@/components/ui/Toast";
 import { formatManilaDateTime } from "@/lib/time";
+import { useTheme, type ThemePreference } from "@/lib/ui/theme";
 import { PrinterSettings } from "@/components/PrinterSettings";
+
+const THEME_OPTIONS: readonly { id: ThemePreference; label: string }[] = [
+  { id: "light", label: "Light" },
+  { id: "dark", label: "Dark" },
+  { id: "system", label: "Auto" },
+];
+
+const THEME_HINT: Record<ThemePreference, string> = {
+  light: "Always light",
+  dark: "Easier on the eyes at night",
+  system: "Matches your phone",
+};
 
 interface SettingsPayload {
   settings: {
@@ -49,7 +64,7 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
 }
 
 const rowClass = "flex min-h-[52px] items-center justify-between gap-4 px-4";
-const rowLinkClass = `${rowClass} transition-colors duration-150 hover:bg-slate-50 active:bg-slate-100`;
+const rowLinkClass = `${rowClass} group pressable-row hover:bg-surface-subtle active:bg-surface-muted`;
 
 function NumberRow({
   label,
@@ -85,37 +100,6 @@ function NumberRow({
   );
 }
 
-/** iOS-style switch. */
-function Switch({
-  checked,
-  onChange,
-  label,
-}: {
-  checked: boolean;
-  onChange: (next: boolean) => void;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
-      className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 ${
-        checked ? "bg-brand" : "bg-slate-300"
-      }`}
-    >
-      <span
-        data-motion="slide"
-        className={`absolute left-0.5 top-0.5 h-[27px] w-[27px] rounded-full bg-white shadow-[0_2px_4px_rgb(15_23_42/0.2)] transition-transform duration-200 ease-[var(--ease-ios)] ${
-          checked ? "translate-x-5" : "translate-x-0"
-        }`}
-      />
-    </button>
-  );
-}
-
 type ShopRow = SettingsPayload["shops"][number];
 
 function storeStatus(shop: ShopRow | undefined, keysReady: boolean): string {
@@ -131,6 +115,8 @@ function storeDetail(shop: ShopRow | undefined): string | null {
 
 export default function SettingsPage() {
   const router = useRouter();
+  const { preference, setPreference } = useTheme();
+  const ThemeIcon = preference === "dark" ? Moon : preference === "system" ? Monitor : Sun;
   const [data, setData] = useState<SettingsPayload | null>(null);
   const [unitCost, setUnitCost] = useState("82");
   const [sellingPrice, setSellingPrice] = useState("199");
@@ -367,7 +353,7 @@ export default function SettingsPage() {
                       }`}
                     >
                       {storeStatus(row.shop, Boolean(row.keys))}
-                      <ChevronRight className="h-5 w-5" />
+                      <ChevronRight className="chevron-nudge h-5 w-5" />
                     </span>
                   </a>
                 );
@@ -394,16 +380,37 @@ export default function SettingsPage() {
             <Group className="mt-4 divide-y divide-hairline lg:hidden">
               <Link href="/items" className={rowLinkClass}>
                 <span className="text-[17px] text-ink">Items &amp; stock</span>
-                <ChevronRight className="h-5 w-5 text-ink-3" />
+                <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
               </Link>
               <Link href="/waves" className={rowLinkClass}>
                 <span className="text-[17px] text-ink">Waves &amp; pick lists</span>
-                <ChevronRight className="h-5 w-5 text-ink-3" />
+                <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
               </Link>
               <Link href="/imports" className={rowLinkClass}>
                 <span className="text-[17px] text-ink">Upload a file</span>
-                <ChevronRight className="h-5 w-5 text-ink-3" />
+                <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
               </Link>
+            </Group>
+          </section>
+
+          <section>
+            <GroupLabel>Appearance</GroupLabel>
+            <Group className="space-y-3.5 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex flex-col">
+                  <span className="text-[17px] text-ink">Dark mode</span>
+                  <span className="text-[13px] text-ink-3">{THEME_HINT[preference]}</span>
+                </span>
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface-muted text-brand">
+                  <ThemeIcon key={preference} className="anim-pop h-[18px] w-[18px]" strokeWidth={2.2} />
+                </span>
+              </div>
+              <SegmentedControl
+                label="Theme"
+                options={THEME_OPTIONS}
+                value={preference}
+                onChange={setPreference}
+              />
             </Group>
           </section>
 
@@ -459,7 +466,7 @@ export default function SettingsPage() {
                     aria-label="Track returns from"
                     value={missingSinceDate}
                     onChange={(e) => setMissingSinceDate(e.target.value)}
-                    className="tabular-nums h-9 rounded-lg bg-slate-100 px-2.5 text-[15px] font-semibold text-ink focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
+                    className="tabular-nums h-9 rounded-lg bg-surface-muted px-2.5 text-[15px] font-semibold text-ink focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
                   />
                 </label>
                 <button
@@ -545,7 +552,7 @@ export default function SettingsPage() {
                   onChange={(e) => setNewStaffPin(e.target.value.replace(/\D/g, ""))}
                   placeholder="PIN"
                   aria-label="4-digit PIN"
-                  className="tabular-nums h-11 w-16 rounded-[10px] bg-slate-100 text-center text-[17px] font-semibold tracking-widest text-ink focus:outline-none focus:ring-2 focus:ring-brand"
+                  className="tabular-nums h-11 w-16 rounded-[10px] bg-surface-muted text-center text-[17px] font-semibold tracking-widest text-ink focus:outline-none focus:ring-2 focus:ring-brand"
                 />
                 <Button type="submit" variant="plain" disabled={addingStaff} className="h-11 px-3">
                   Add

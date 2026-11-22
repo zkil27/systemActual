@@ -96,7 +96,7 @@ export function CategorySheet({
               <Row
                 label="Arrived with an issue"
                 value={shown.stats.arrivedIssueCount}
-                tone="text-amber-800"
+                tone="text-failed-ink"
               />
             )}
           </RowGroup>

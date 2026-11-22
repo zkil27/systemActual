@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, Link2, Search, Sparkles, Star } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Button, Group } from "@/components/ui/Button";
 import { ItemThumb } from "@/components/ui/ItemThumb";
 import { ScrollChips } from "@/components/ui/ScrollChips";
 import { Sheet } from "@/components/ui/Sheet";
+import { Switch } from "@/components/ui/Switch";
 import { toast } from "@/components/ui/Toast";
 import { useLiveRefresh } from "@/lib/ui/use-live-refresh";
 import type { CatalogGarment, CatalogVariant } from "@/lib/catalog/garments";
@@ -68,13 +69,75 @@ function ShopTags({ platforms }: { platforms: Platform[] }) {
         <span
           key={p}
           className={`rounded-md px-1.5 py-0.5 text-[12px] font-bold ${
-            platforms.includes(p) ? "bg-slate-100 text-ink-2" : "bg-transparent text-slate-300 line-through"
+            platforms.includes(p) ? "bg-surface-muted text-ink-2" : "bg-transparent text-ink-3/45 line-through"
           }`}
         >
           {SHOP_LABEL[p]}
         </span>
       ))}
     </span>
+  );
+}
+
+function ItemFilterChips({
+  value,
+  needsCheck,
+  onChange,
+}: {
+  value: ItemFilter;
+  needsCheck: number;
+  onChange: (f: ItemFilter) => void;
+}) {
+  const refs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [box, setBox] = useState<{ x: number; w: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const el = refs.current[value];
+    if (!el) return;
+    setBox({ x: el.offsetLeft, w: el.offsetWidth });
+    el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  }, [value, needsCheck]);
+
+  const options = [
+    { id: "all", label: "All" },
+    { id: "low", label: "Low stock (≤5)" },
+    { id: "unlinked", label: "One shop only" },
+    { id: "check", label: `To check${needsCheck ? ` (${needsCheck})` : ""}` },
+  ] as const;
+
+  return (
+    <ScrollChips role="tablist" label="Filters" rowClassName="gap-1.5 px-5 py-0.5">
+      {box && (
+        <span
+          aria-hidden="true"
+          data-motion="slide"
+          className="absolute top-0.5 left-0 h-9 rounded-full bg-ink transition-[transform,width] duration-200 ease-[var(--ease-ios)]"
+          style={{ width: box.w, transform: `translateX(${box.x}px)` }}
+        />
+      )}
+      {options.map((f) => {
+        const active = value === f.id;
+        return (
+          <button
+            key={f.id}
+            ref={(el) => {
+              refs.current[f.id] = el;
+            }}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(f.id)}
+            className={`pressable relative z-10 h-9 shrink-0 rounded-full px-3.5 text-[13px] font-semibold transition-colors ${
+              active
+                ? "text-ink-inverse"
+                : "bg-surface text-ink-2 shadow-[var(--shadow-card)] hover:text-ink"
+            }`}
+          >
+            {f.label}
+          </button>
+        );
+      })}
+    </ScrollChips>
   );
 }
 
@@ -146,7 +209,7 @@ function StockRow({
             </span>
           )}
           {variant.stock.conflict && variant.startingStock === null && (
-            <span className="block text-[13px] font-semibold text-amber-800">Shops disagree. Count and check.</span>
+            <span className="block text-[13px] font-semibold text-failed-ink">Shops disagree. Count and check.</span>
           )}
         </span>
         <span className="flex shrink-0 items-center gap-2">
@@ -159,7 +222,7 @@ function StockRow({
             value={value}
             placeholder={variant.stock.suggested !== null ? String(variant.stock.suggested) : "0"}
             onChange={(e) => setValue(e.target.value.replace(/[^0-9]/g, ""))}
-            className="h-11 w-20 rounded-[var(--radius-control)] bg-slate-100 px-3 text-right text-[16px] font-semibold tabular-nums text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
+            className="h-11 w-20 rounded-[var(--radius-control)] bg-surface-muted px-3 text-right text-[16px] font-semibold tabular-nums text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
           />
           <Button variant="secondary" onClick={save} disabled={saving || value === ""} className="h-11 px-3">
             Save
@@ -172,7 +235,7 @@ function StockRow({
           <select
             defaultValue=""
             onChange={(e) => e.target.value && mergeInto(e.target.value)}
-            className="h-10 min-w-0 flex-1 rounded-[var(--radius-control)] bg-slate-100 px-2 text-[15px] text-ink"
+            className="h-10 min-w-0 flex-1 rounded-[var(--radius-control)] bg-surface-muted px-2 text-[15px] text-ink"
           >
             <option value="">Pick the other shop&apos;s colour/size</option>
             {partners.map((p) => (
@@ -197,6 +260,15 @@ export default function ItemsPage() {
   const [linkFrom, setLinkFrom] = useState<CatalogGarment | null>(null);
   const [linkTo, setLinkTo] = useState<CatalogGarment | null>(null);
   const [busy, setBusy] = useState(false);
+  const [lastToggledPinId, setLastToggledPinId] = useState<string | null>(null);
+  const firstLoad = useRef(true);
+
+  useEffect(() => {
+    if (garments !== null) {
+      const t = setTimeout(() => (firstLoad.current = false), 600);
+      return () => clearTimeout(t);
+    }
+  }, [garments]);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/catalog");
@@ -322,28 +394,16 @@ export default function ItemsPage() {
                   {bump.boosted.length}/{bump.slotsTotal} slots active · rotates every 4 hours
                 </p>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={bump.enabled}
-                aria-label="Shopee Auto-Bump"
+              <Switch
+                checked={bump.enabled}
                 disabled={busy}
-                onClick={() => run({ action: "toggle_bump", enabled: !bump.enabled }, bump.enabled ? "Auto-bump off" : "Auto-bump on")}
-                className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 ${
-                  bump.enabled ? "bg-brand" : "bg-slate-300"
-                }`}
-              >
-                <span
-                  data-motion="slide"
-                  className={`absolute left-0.5 top-0.5 h-[27px] w-[27px] rounded-full bg-white shadow-[0_2px_4px_rgb(15_23_42/0.2)] transition-transform duration-200 ease-[var(--ease-ios)] ${
-                    bump.enabled ? "translate-x-5" : "translate-x-0"
-                  }`}
-                />
-              </button>
+                onChange={() => run({ action: "toggle_bump", enabled: !bump.enabled }, bump.enabled ? "Auto-bump off" : "Auto-bump on")}
+                label="Shopee Auto-Bump"
+              />
             </div>
 
             {bump.boosted.length > 0 && (
-              <ul className="divide-y divide-hairline rounded-[var(--radius-control)] bg-slate-50 px-3">
+              <ul className="divide-y divide-hairline rounded-[var(--radius-control)] bg-surface-subtle px-3">
                 {bump.boosted.map((b) => (
                   <li key={b.itemId} className="flex items-center justify-between gap-3 py-2">
                     <span className="min-w-0 truncate text-[14px] font-medium text-ink">{b.name}</span>
@@ -374,7 +434,7 @@ export default function ItemsPage() {
         )}
 
         {linkFrom && (
-          <div className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] bg-brand-soft px-4 py-3">
+          <div className="anim-rise-in flex items-center justify-between gap-3 rounded-[var(--radius-card)] bg-brand-soft px-4 py-3">
             <span className="text-[15px] font-semibold text-ink">
               Tap the {SHOP_LABEL[otherPlatform(linkFrom) ?? "TIKTOK"]} listing for &ldquo;{linkFrom.name}&rdquo;
             </span>
@@ -385,31 +445,7 @@ export default function ItemsPage() {
         )}
 
         <div className="space-y-2.5">
-          <ScrollChips label="Filters" rowClassName="gap-1.5 px-5 py-0.5">
-            {(
-              [
-                { id: "all", label: "All" },
-                { id: "low", label: "Low stock (≤5)" },
-                { id: "unlinked", label: "One shop only" },
-                { id: "check", label: `To check${needsCheck ? ` (${needsCheck})` : ""}` },
-              ] as const
-            ).map((f) => {
-              const active = filter === f.id;
-              return (
-                <button
-                  key={f.id}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => setFilter(f.id)}
-                  className={`h-9 shrink-0 rounded-full px-3.5 text-[13px] font-semibold transition-colors ${
-                    active ? "bg-ink text-white" : "bg-white text-ink-2 shadow-[var(--shadow-card)]"
-                  }`}
-                >
-                  {f.label}
-                </button>
-              );
-            })}
-          </ScrollChips>
+          <ItemFilterChips value={filter} needsCheck={needsCheck} onChange={setFilter} />
 
           <label className="relative block">
             <span className="sr-only">Search items</span>
@@ -418,13 +454,13 @@ export default function ItemsPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search items"
-              className="h-12 w-full rounded-[var(--radius-control)] bg-white pl-11 pr-4 text-[16px] text-ink shadow-[var(--shadow-card)] focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
+              className="h-12 w-full rounded-[var(--radius-control)] bg-surface pl-11 pr-4 text-[16px] text-ink shadow-[var(--shadow-card)] focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
             />
           </label>
         </div>
 
         {garments === null ? (
-          <div className="h-40 animate-pulse rounded-[var(--radius-card)] bg-slate-200/60" aria-busy="true" />
+          <div className="h-40 animate-pulse rounded-[var(--radius-card)] bg-surface-track/60" aria-busy="true" />
         ) : shown.length === 0 ? (
           <p className="px-1 text-[16px] text-ink-3">
             {garments.length === 0 ? "No items yet. Get stock from your shops to list them." : "No items match."}
@@ -432,20 +468,22 @@ export default function ItemsPage() {
         ) : (
           <Group>
             <ul className="divide-y divide-hairline">
-              {shown.map((g) => {
+              {shown.map((g, idx) => {
                 const linkTarget = linkFrom && linkFrom.id !== g.id && otherPlatform(linkFrom) === g.platforms[0] && g.platforms.length === 1;
                 const checks = g.variants.filter(variantNeedsCheck).length;
                 const shopeeItemId = shopeeListingIdFor(g);
                 const isPinned = shopeeItemId ? pinnedSet.has(shopeeItemId) : false;
+                const stagger = firstLoad.current && idx < 12;
                 return (
                   <li
                     key={g.id}
-                    className="flex items-center gap-2 px-4 py-3 [content-visibility:auto] [contain-intrinsic-size:auto_76px]"
+                    className={`flex items-center gap-2 px-4 py-3 [content-visibility:auto] [contain-intrinsic-size:auto_76px]${stagger ? " anim-rise-in" : ""}`}
+                    style={stagger ? { animationDelay: `${idx * 25}ms` } : undefined}
                   >
                     <button
                       type="button"
                       onClick={() => (linkTarget ? setLinkTo(g) : setOpenId(g.id))}
-                      className="pressable flex min-w-0 flex-1 items-center gap-3 text-left"
+                      className="group pressable flex min-w-0 flex-1 items-center gap-3 text-left"
                     >
                       <ItemThumb src={g.imageUrl} alt={g.name} size="md" />
                       <span className="min-w-0 flex-1">
@@ -453,26 +491,36 @@ export default function ItemsPage() {
                         <span className="mt-1 flex items-center gap-2 text-[13px] text-ink-3">
                           <ShopTags platforms={g.platforms} />
                           {g.variants.length} sizes/colours
-                          {checks > 0 && <span className="font-semibold text-amber-800">· {checks} to check</span>}
+                          {checks > 0 && <span className="font-semibold text-failed-ink">· {checks} to check</span>}
                         </span>
                       </span>
                       {linkTarget ? (
-                        <span className="rounded-full bg-brand px-3 py-1.5 text-[14px] font-bold text-white">Link here</span>
+                        <span className="rounded-full bg-brand-solid px-3 py-1.5 text-[14px] font-bold text-on-brand">Link here</span>
                       ) : (
-                        <ChevronRight className="h-5 w-5 shrink-0 text-ink-3" />
+                        <ChevronRight className="chevron-nudge h-5 w-5 shrink-0 text-ink-3" />
                       )}
                     </button>
                     {!linkFrom && shopeeItemId && bump?.connected && (
                       <button
                         type="button"
                         disabled={busy}
-                        onClick={() => run({ action: "pin_bump", itemId: shopeeItemId }, isPinned ? "Unpinned from bump" : "Pinned for auto-bump")}
+                        onClick={() => {
+                          setLastToggledPinId(shopeeItemId);
+                          void run(
+                            { action: "pin_bump", itemId: shopeeItemId },
+                            isPinned ? "Unpinned from bump" : "Pinned for auto-bump"
+                          );
+                        }}
                         aria-label={isPinned ? `Unpin ${g.name} from auto-bump` : `Pin ${g.name} for auto-bump`}
-                        className={`pressable flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-amber-50 ${
-                          isPinned ? "text-amber-500" : "text-slate-300 hover:text-amber-500"
+                        className={`pressable flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-failed-soft ${
+                          isPinned ? "text-amber-500" : "text-ink-3/45 hover:text-amber-500"
                         }`}
                       >
-                        <Star className="h-5 w-5" fill={isPinned ? "currentColor" : "none"} />
+                        <Star
+                          key={isPinned ? "on" : "off"}
+                          className={`h-5 w-5 ${lastToggledPinId === shopeeItemId ? "anim-pop" : ""}`}
+                          fill={isPinned ? "currentColor" : "none"}
+                        />
                       </button>
                     )}
                     {!linkFrom && otherPlatform(g) && bothConnected && (
@@ -493,9 +541,9 @@ export default function ItemsPage() {
         )}
 
         {unconfirmed.length > 0 && (
-          <div className="space-y-2">
+          <div className="anim-rise-in space-y-2">
             {needsCheck > 0 && (
-              <p className="px-1 text-[14px] text-amber-800">
+              <p className="px-1 text-[14px] text-failed-ink">
                 {needsCheck} sizes/colours have shops that disagree or no stock. Their lower number will be used.
               </p>
             )}

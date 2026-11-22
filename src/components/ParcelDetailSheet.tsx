@@ -74,8 +74,8 @@ function Stage({
               ? "border-arrived bg-arrived"
               : "border-brand bg-brand"
             : alert
-              ? "border-missing bg-white"
-              : "border-hairline-strong bg-white"
+              ? "border-missing bg-surface"
+              : "border-hairline-strong bg-surface"
         }`}
       />
       <div className="flex min-w-0 flex-1 items-baseline justify-between gap-3">
@@ -168,19 +168,19 @@ function ParcelDetailBody({ parcelId }: { parcelId: string | null }) {
     return (
       <div className="space-y-4 pt-2" aria-busy="true">
         <div className="flex gap-4">
-          <div className="h-28 w-28 animate-pulse rounded-[var(--radius-card)] bg-slate-100" />
+          <div className="h-28 w-28 animate-pulse rounded-[var(--radius-card)] bg-surface-muted" />
           <div className="flex-1 space-y-2 pt-2">
-            <div className="h-5 w-3/4 animate-pulse rounded bg-slate-100" />
-            <div className="h-5 w-1/3 animate-pulse rounded bg-slate-100" />
+            <div className="h-5 w-3/4 animate-pulse rounded bg-surface-muted" />
+            <div className="h-5 w-1/3 animate-pulse rounded bg-surface-muted" />
           </div>
         </div>
-        <div className="h-32 animate-pulse rounded-[var(--radius-card)] bg-slate-100" />
+        <div className="h-32 animate-pulse rounded-[var(--radius-card)] bg-surface-muted" />
       </div>
     );
   }
 
   return (
-    <div className="anim-fade-in space-y-7 pt-2">
+    <div key={parcel.id} className="anim-fade-in space-y-7 pt-2">
       {/* What it is */}
       <div className="flex items-start gap-4">
         <ItemThumb src={parcel.itemImageUrl} alt={parcel.itemSummary} size="xl" />
@@ -190,7 +190,7 @@ function ParcelDetailBody({ parcelId }: { parcelId: string | null }) {
             {parcel.itemSummary}
           </p>
           {parcel.variationName && (
-            <p className="mt-2 inline-block rounded-lg bg-ink px-2.5 py-1 text-[14px] font-bold text-white">
+            <p className="mt-2 inline-block rounded-lg bg-ink px-2.5 py-1 text-[14px] font-bold text-ink-inverse">
               {parcel.variationName}
             </p>
           )}
@@ -251,7 +251,7 @@ function ParcelDetailBody({ parcelId }: { parcelId: string | null }) {
             <span key={copied ? "c" : "n"} className="anim-fade-in inline-flex items-center gap-2">
               {copied ? (
                 <>
-                  <Check className="h-5 w-5" strokeWidth={3} />
+                  <Check className="anim-pop h-5 w-5" strokeWidth={3} />
                   Copied
                 </>
               ) : (
@@ -330,15 +330,15 @@ export function ParcelDetailPanel({
 }) {
   return (
     <div>
-      <div className="sticky top-0 z-10 flex items-center justify-between gap-3 bg-white px-5 pb-2 pt-4">
+      <div className="sticky top-0 z-10 flex items-center justify-between gap-3 bg-surface px-5 pb-2 pt-4">
         <h2 className="text-[20px] font-extrabold tracking-[-0.01em] text-ink">Parcel</h2>
         <button
           type="button"
           onClick={onClose}
           aria-label="Close details"
-          className="pressable -mr-1.5 flex h-11 w-11 items-center justify-center rounded-full text-ink-3 hover:bg-slate-100"
+          className="pressable -mr-1.5 flex h-11 w-11 items-center justify-center rounded-full text-ink-3 hover:bg-surface-muted"
         >
-          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-muted">
             <X className="h-4 w-4" strokeWidth={2.6} />
           </span>
         </button>

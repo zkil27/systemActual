@@ -131,7 +131,7 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
         <Link
           href="/scan"
           aria-label="Back to Scan"
-          className="pressable flex h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-black/[0.04]"
+          className="pressable flex h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05]"
         >
           <ArrowLeft className="h-6 w-6" />
         </Link>
@@ -169,18 +169,18 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Item name, colour or size"
-              className="h-12 w-full rounded-[var(--radius-control)] bg-white pl-11 pr-4 text-[16px] text-ink shadow-[var(--shadow-card)] focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
+              className="h-12 w-full rounded-[var(--radius-control)] bg-surface pl-11 pr-4 text-[16px] text-ink shadow-[var(--shadow-card)] focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
             />
           </label>
           {results.length > 0 && (
-            <Group>
+            <Group className="anim-rise-in">
               <ul className="divide-y divide-hairline">
                 {results.map((v) => (
                   <li key={v.id}>
                     <button
                       type="button"
                       onClick={() => setPicked(v)}
-                      className="pressable flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left hover:bg-black/[0.02]"
+                      className="pressable-row flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-subtle active:bg-surface-muted"
                     >
                       <ItemThumb src={v.imageUrl} alt={v.name} size="md" />
                       <span className="min-w-0 flex-1">
@@ -204,12 +204,12 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
       )}
 
       {unlocked && picked && (
-        <Group className="space-y-5 p-5">
+        <Group className="anim-rise-in space-y-5 p-5">
           <div className="flex items-center gap-4">
             <ItemThumb src={picked.imageUrl} alt={picked.name} size="xl" />
             <span className="min-w-0 flex-1">
               <span className="block text-[20px] font-bold leading-snug text-ink">{picked.name}</span>
-              <span className="mt-2 inline-block rounded-lg bg-ink px-2.5 py-1 text-[15px] font-bold text-white">
+              <span className="mt-2 inline-block rounded-lg bg-ink px-2.5 py-1 text-[15px] font-bold text-ink-inverse">
                 {picked.label}
               </span>
               {picked.onShelf !== null && (
@@ -221,7 +221,7 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
           </div>
 
           {mode === "EMPTY_SHELF" ? (
-            <div className="flex items-start gap-3 rounded-[var(--radius-control)] bg-missing-soft p-3.5 text-[14px] font-semibold text-missing-ink">
+            <div className="anim-fade-in flex items-start gap-3 rounded-[var(--radius-control)] bg-missing-soft p-3.5 text-[14px] font-semibold text-missing-ink">
               <PackageX className="mt-0.5 h-5 w-5 shrink-0" />
               <span>
                 This sets shelf stock to 0, updates Shopee &amp; TikTok right away to stop overselling, and alerts the
@@ -231,7 +231,7 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
           ) : (
             <>
               {mode === "DEFECTIVE" && (
-                <div className="flex items-start gap-3 rounded-[var(--radius-control)] bg-failed-soft p-3.5 text-[14px] font-semibold text-amber-900">
+                <div className="anim-fade-in flex items-start gap-3 rounded-[var(--radius-control)] bg-failed-soft p-3.5 text-[14px] font-semibold text-failed-ink">
                   <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
                   <span>Deducts damaged/stained pieces from the shelf and updates shops right away.</span>
                 </div>
@@ -241,7 +241,7 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
                   type="button"
                   aria-label="One less"
                   onClick={() => setQty((n) => Math.max(1, n - 1))}
-                  className="pressable flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-ink"
+                  className="pressable flex h-14 w-14 items-center justify-center rounded-full bg-surface-muted text-ink"
                 >
                   <Minus className="h-6 w-6" />
                 </button>
@@ -250,13 +250,13 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
                   inputMode="numeric"
                   value={qty}
                   onChange={(e) => setQty(Math.max(1, Math.min(10_000, Number(e.target.value.replace(/\D/g, "")) || 1)))}
-                  className="h-14 w-24 rounded-[var(--radius-control)] bg-slate-100 text-center text-[28px] font-extrabold tabular-nums text-ink focus:outline-none"
+                  className="h-14 w-24 rounded-[var(--radius-control)] bg-surface-muted text-center text-[28px] font-extrabold tabular-nums text-ink focus:outline-none"
                 />
                 <button
                   type="button"
                   aria-label="One more"
                   onClick={() => setQty((n) => Math.min(10_000, n + 1))}
-                  className="pressable flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-ink"
+                  className="pressable flex h-14 w-14 items-center justify-center rounded-full bg-surface-muted text-ink"
                 >
                   <Plus className="h-6 w-6" />
                 </button>
@@ -271,7 +271,7 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
               onChange={(e) => setNote(e.target.value)}
               placeholder="Note (optional, e.g. torn seam)"
               aria-label="Note"
-              className="h-12 w-full rounded-[var(--radius-control)] bg-slate-100 px-4 text-[16px] text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
+              className="h-12 w-full rounded-[var(--radius-control)] bg-surface-muted px-4 text-[16px] text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
             />
           )}
 

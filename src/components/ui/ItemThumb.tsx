@@ -31,7 +31,7 @@ export function ItemThumb({
   if (!src) {
     return (
       <div
-        className={`${SIZES[size]} flex shrink-0 items-center justify-center bg-slate-100 text-slate-400`}
+        className={`${SIZES[size]} flex shrink-0 items-center justify-center bg-surface-muted text-ink-3/60`}
         aria-label={alt}
         role="img"
       >
@@ -46,7 +46,7 @@ export function ItemThumb({
       alt={alt}
       loading="lazy"
       decoding="async"
-      className={`${SIZES[size]} shrink-0 bg-slate-100 object-cover outline outline-1 -outline-offset-1 outline-black/5`}
+      className={`${SIZES[size]} shrink-0 bg-surface-muted object-cover outline outline-1 -outline-offset-1 outline-ink/10`}
     />
   );
 }

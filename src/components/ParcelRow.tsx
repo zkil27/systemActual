@@ -49,8 +49,8 @@ export function ParcelRow({
       data-parcel-id={parcel.id}
       aria-current={selected ? "true" : undefined}
       onClick={() => onOpen(parcel.id)}
-      className={`flex w-full items-center gap-3.5 pl-4 text-left transition-colors duration-150 active:bg-slate-100 lg:scroll-mt-60 lg:scroll-mb-6 ${
-        selected ? "bg-brand-soft" : "hover:bg-slate-50"
+      className={`group pressable-row flex w-full items-center gap-3.5 pl-4 text-left active:bg-surface-muted lg:scroll-mt-60 lg:scroll-mb-6 ${
+        selected ? "bg-brand-soft" : "hover:bg-surface-subtle"
       }`}
     >
       <ItemThumb src={parcel.itemImageUrl} alt={parcel.itemSummary} />
@@ -69,7 +69,7 @@ export function ParcelRow({
             <span className="truncate">· {meta}</span>
           </span>
         </span>
-        <ChevronRight className="h-5 w-5 shrink-0 text-ink-3" />
+        <ChevronRight className="chevron-nudge h-5 w-5 shrink-0 text-ink-3" />
       </span>
     </button>
   );

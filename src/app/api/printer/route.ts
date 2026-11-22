@@ -4,7 +4,7 @@ import { PrintJobKind, PrintJobStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getOwnerSession } from "@/lib/auth";
 import { isOnline, newDeviceToken } from "@/lib/print/device";
-import { enqueueTestPrint } from "@/lib/print/jobs";
+import { clearPrintQueue, enqueueTestPrint } from "@/lib/print/jobs";
 
 /** Owner's printer status and controls (phone). */
 export async function GET() {
@@ -36,7 +36,7 @@ export async function GET() {
   });
 }
 
-const actionSchema = z.object({ action: z.enum(["setup", "test_print", "pause", "resume"]) });
+const actionSchema = z.object({ action: z.enum(["setup", "test_print", "pause", "resume", "clear_queue"]) });
 
 export async function POST(req: NextRequest) {
   if (!(await getOwnerSession())) return NextResponse.json({ error: "Sign in" }, { status: 401 });
@@ -65,5 +65,9 @@ export async function POST(req: NextRequest) {
     case "resume":
       await prisma.printDevice.updateMany({ data: { paused: parsed.data.action === "pause" } });
       return NextResponse.json({ ok: true });
+    case "clear_queue": {
+      const cleared = await clearPrintQueue();
+      return NextResponse.json({ ok: true, cleared });
+    }
   }
 }

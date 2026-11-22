@@ -4,10 +4,10 @@ type Variant = "primary" | "secondary" | "plain" | "danger";
 type Size = "md" | "lg";
 
 const VARIANTS: Record<Variant, string> = {
-  primary: "bg-brand text-white hover:bg-brand-hover disabled:bg-brand/50",
-  secondary: "bg-slate-100 text-ink hover:bg-slate-200/80 disabled:text-ink-3",
+  primary: "bg-brand-solid text-on-brand hover:bg-brand-solid-hover disabled:bg-brand-solid/50",
+  secondary: "bg-surface-muted text-ink hover:bg-surface-track disabled:text-ink-3",
   plain: "text-brand hover:bg-brand-soft disabled:text-ink-3",
-  danger: "bg-missing-soft text-missing-ink hover:bg-red-100",
+  danger: "bg-missing-soft text-missing-ink hover:bg-missing/15",
 };
 
 const SIZES: Record<Size, string> = {
@@ -61,7 +61,7 @@ export function ButtonLink({
   );
 }
 
-/** White grouped container, iOS "inset grouped" style. */
+/** Grouped container, iOS "inset grouped" style. */
 export function Group({
   children,
   className = "",
@@ -71,7 +71,7 @@ export function Group({
 }) {
   return (
     <div
-      className={`overflow-hidden rounded-[var(--radius-card)] bg-white shadow-[var(--shadow-card)] ${className}`}
+      className={`overflow-hidden rounded-[var(--radius-card)] bg-surface shadow-[var(--shadow-card)] ${className}`}
     >
       {children}
     </div>

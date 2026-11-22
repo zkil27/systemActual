@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Public_Sans } from "next/font/google";
+import { ThemeSync } from "@/components/ThemeSync";
+import { THEME_INIT_SCRIPT } from "@/lib/ui/theme";
 import "./globals.css";
 
 const publicSans = Public_Sans({
@@ -29,7 +31,10 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 5,
   viewportFit: "cover",
-  themeColor: "#ffffff",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#09090b" },
+  ],
 };
 
 export default function RootLayout({
@@ -38,8 +43,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={publicSans.variable}>
-      <body className="antialiased">{children}</body>
+    <html lang="en" className={publicSans.variable} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
+      <body className="antialiased">
+        <ThemeSync />
+        {children}
+      </body>
     </html>
   );
 }

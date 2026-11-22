@@ -15,6 +15,8 @@ export function findAppIcon(file: string): AppIconSpec | undefined {
   return APP_ICONS.find((icon) => icon.file === file);
 }
 
-export const BRAND_TEAL = "#0f766e";
+export const BRAND_PINK = "#f4a7c1";
+export const BRAND_INK = "#4a1228";
+export const BRAND_TEAL = BRAND_PINK;
 export const GROUND = "#f4f7f8";
 export const SURFACE = "#ffffff";

@@ -42,7 +42,7 @@ export function Disclosure({
           }`}
         />
       </button>
-      {open && <div className="anim-fade-in">{children}</div>}
+      {open && <div className="anim-disclosure-in">{children}</div>}
     </div>
   );
 }

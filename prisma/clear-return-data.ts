@@ -1,9 +1,10 @@
 /**
  * Deletes demo and imported return data so real API data starts clean.
- * Removes: every ReturnParcel (with its ReturnEvents and PhysicalScans),
- * every ImportJob, and demo ShopConnections. Keeps owner, staff and settings.
+ * Removes: demo ReturnParcels (with their ReturnEvents and PhysicalScans),
+ * every ImportJob, and demo ShopConnections. Keeps real shop data, owner, staff and settings.
  *
  * Usage: npm run db:clear-returns -- --yes
+ * Pass --all to also delete real-shop ReturnParcels.
  * Back up the database first if it is not a local one.
  */
 import { PrismaClient } from "@prisma/client";
@@ -22,8 +23,11 @@ async function main() {
   // Construct first: Prisma Client loads .env, which describeTarget() reads.
   const prisma = new PrismaClient();
   const target = describeTarget();
+  const clearAll = process.argv.includes("--all");
   if (!process.argv.includes("--yes")) {
-    console.log(`This will delete ALL return parcels, imports and demo shops in: ${target}`);
+    console.log(
+      `This will delete ${clearAll ? "ALL" : "demo"} return parcels, imports and demo shops in: ${target}`
+    );
     console.log("Re-run with --yes to confirm:  npm run db:clear-returns -- --yes");
     await prisma.$disconnect();
     process.exit(1);
@@ -31,7 +35,9 @@ async function main() {
 
   try {
     const result = await prisma.$transaction([
-      prisma.returnParcel.deleteMany({}),
+      prisma.returnParcel.deleteMany(
+        clearAll ? {} : { where: { shopConnection: { isDemo: true } } }
+      ),
       prisma.importJob.deleteMany({}),
       prisma.shopConnection.deleteMany({ where: { isDemo: true } }),
     ]);

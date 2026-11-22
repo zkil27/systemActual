@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { AlertCircle, Check } from "lucide-react";
 
 type Tone = "success" | "error";
@@ -36,18 +36,25 @@ export function Toaster({ className = "" }: { className?: string }) {
     () => current,
     () => null
   );
+  const [exitingId, setExitingId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!state) return;
     const id = state.id;
-    const t = setTimeout(() => {
+    const exitTimer = setTimeout(() => setExitingId(id), 2420);
+    const clearTimer = setTimeout(() => {
       if (current?.id === id) {
         current = null;
         emit();
       }
     }, 2600);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(exitTimer);
+      clearTimeout(clearTimer);
+    };
   }, [state]);
+
+  const isExiting = state !== null && exitingId === state.id;
 
   return (
     <div
@@ -59,12 +66,12 @@ export function Toaster({ className = "" }: { className?: string }) {
         <div
           key={state.id}
           role="status"
-          className="anim-rise-in flex max-w-sm items-center gap-2 rounded-full bg-ink px-4 py-2.5 text-sm font-semibold text-white shadow-[var(--shadow-float)]"
+          className={`${isExiting ? "anim-toast-out" : "anim-rise-in"} flex max-w-sm items-center gap-2 rounded-full bg-[#0f172a] px-4 py-2.5 text-sm font-semibold text-white shadow-[var(--shadow-float)] dark:bg-[#1f1f24] dark:ring-1 dark:ring-white/12`}
         >
           {state.tone === "success" ? (
-            <Check className="h-4 w-4 shrink-0 text-emerald-300" strokeWidth={3} />
+            <Check className="anim-pop h-4 w-4 shrink-0 text-emerald-300" strokeWidth={3} />
           ) : (
-            <AlertCircle className="h-4 w-4 shrink-0 text-red-300" />
+            <AlertCircle className="anim-pop h-4 w-4 shrink-0 text-red-300" />
           )}
           <span>{state.message}</span>
         </div>

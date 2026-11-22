@@ -37,13 +37,23 @@ export function useAnimatedNumber(value: number, durationMs: number = DURATION.s
   return shown;
 }
 
-export function AnimatedNumber({ value, className }: { value: number; className?: string }) {
+const defaultFormat = (n: number) => n.toLocaleString("en-PH");
+
+export function AnimatedNumber({
+  value,
+  className,
+  format = defaultFormat,
+}: {
+  value: number;
+  className?: string;
+  format?: (value: number) => string;
+}) {
   const shown = useAnimatedNumber(value);
   return (
     <span className={`tabular-nums ${className ?? ""}`}>
       {/* Screen readers get the real value, not the in-between frames. */}
-      <span aria-hidden="true">{shown.toLocaleString("en-PH")}</span>
-      <span className="sr-only">{value.toLocaleString("en-PH")}</span>
+      <span aria-hidden="true">{format(shown)}</span>
+      <span className="sr-only">{format(value)}</span>
     </span>
   );
 }

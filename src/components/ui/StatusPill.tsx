@@ -2,16 +2,16 @@ import type { StatusTone } from "@/lib/ui/parcel-status";
 
 const TONES: Record<StatusTone, { pill: string; dot: string }> = {
   missing: { pill: "bg-missing-soft text-missing-ink", dot: "bg-missing" },
-  issue: { pill: "bg-failed-soft text-amber-900", dot: "bg-amber-500" },
-  overdue: { pill: "bg-failed-soft text-amber-900", dot: "bg-amber-500" },
-  arrived: { pill: "bg-arrived-soft text-arrived", dot: "bg-emerald-500" },
-  neutral: { pill: "bg-slate-100 text-ink-2", dot: "bg-slate-400" },
+  issue: { pill: "bg-failed-soft text-failed-ink", dot: "bg-failed" },
+  overdue: { pill: "bg-failed-soft text-failed-ink", dot: "bg-failed" },
+  arrived: { pill: "bg-arrived-soft text-arrived", dot: "bg-arrived" },
+  neutral: { pill: "bg-surface-muted text-ink-2", dot: "bg-ink-3/60" },
 };
 
 const TEXT: Record<StatusTone, string> = {
   missing: "text-missing",
-  issue: "text-amber-700",
-  overdue: "text-amber-700",
+  issue: "text-failed",
+  overdue: "text-failed",
   arrived: "text-arrived",
   neutral: "text-ink-3",
 };

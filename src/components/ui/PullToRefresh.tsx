@@ -30,7 +30,7 @@ export function PullIndicator({ phase, dy, sidebar = true }: PullToRefreshState 
       <div
         role="status"
         aria-live="polite"
-        className={`flex h-10 items-center gap-2 rounded-full bg-white pl-3 pr-4 text-[14px] font-semibold shadow-[var(--shadow-float)] ring-1 ring-black/[0.05] motion-reduce:transition-none ${
+        className={`flex h-10 items-center gap-2 rounded-full bg-surface pl-3 pr-4 text-[14px] font-semibold shadow-[var(--shadow-float)] ring-1 ring-ink/[0.08] motion-reduce:transition-none ${
           following ? "" : "transition-[transform,opacity] duration-300 ease-[var(--ease-ios)]"
         } ${phase === "armed" || phase === "syncing" ? "text-brand" : phase === "done" ? "text-arrived" : "text-ink-2"}`}
         style={{

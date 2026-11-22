@@ -55,14 +55,14 @@ function CategoryCard({
       type="button"
       onClick={onOpen}
       aria-label={`${meta.title}: ${stages.map((s) => `${s.value} ${s.label}`).join(", ")}. Show details`}
-      className="pressable block w-full rounded-[var(--radius-card)] bg-white p-5 text-left shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-float)]"
+      className="group pressable hover-lift block w-full rounded-[var(--radius-card)] bg-surface p-5 text-left shadow-[var(--shadow-card)]"
     >
       <span className="flex items-center justify-between">
         <span className="flex items-center gap-2 text-[17px] font-bold text-ink">
           <span aria-hidden="true" className={`h-2.5 w-2.5 rounded-full ${meta.dot}`} />
           {meta.title}
         </span>
-        <ChevronRight className="h-5 w-5 text-ink-3" />
+        <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
       </span>
       <span className="mt-5 grid grid-cols-3 gap-2">
         {stages.map((s) => (
@@ -91,7 +91,7 @@ function MoneyCard({ money }: { money: MoneySummary }) {
   return (
     <section
       aria-label={`Money credited ${formatPeso(money.creditedPhp)}`}
-      className="rounded-[var(--radius-card)] bg-white p-5 shadow-[var(--shadow-card)] lg:h-full"
+      className="rounded-[var(--radius-card)] bg-surface p-5 shadow-[var(--shadow-card)] lg:h-full"
     >
       <span className="flex items-baseline justify-between gap-3">
         <span className="text-[17px] font-bold text-ink">Money credited</span>
@@ -99,9 +99,11 @@ function MoneyCard({ money }: { money: MoneySummary }) {
           <span className="text-[13px] text-ink-3">as of {manilaTime(money.updatedAt)}</span>
         )}
       </span>
-      <span className="mt-3 block text-[40px] font-extrabold leading-none tracking-[-0.03em] text-ink tabular-nums">
-        {formatPeso(money.creditedPhp)}
-      </span>
+      <AnimatedNumber
+        value={Math.round(money.creditedPhp)}
+        format={formatPeso}
+        className="mt-3 block text-[40px] font-extrabold leading-none tracking-[-0.03em] text-ink"
+      />
       <span className="mt-2 block text-[15px] text-ink-2 tabular-nums">
         Shopee {formatPeso(money.creditedShopeePhp)} · TikTok {formatPeso(money.creditedTikTokPhp)}
       </span>
@@ -132,11 +134,11 @@ function ReturnTruthCards({
     <div className="grid grid-cols-2 gap-3">
       <Link
         href={returnedHref}
-        className="pressable block rounded-[var(--radius-card)] bg-white p-4 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-float)] sm:p-5"
+        className="group pressable hover-lift block rounded-[var(--radius-card)] bg-surface p-4 shadow-[var(--shadow-card)] sm:p-5"
       >
         <span className="flex items-center justify-between gap-1.5">
           <span className="truncate text-[15px] font-bold text-ink sm:text-[17px]">Returned to seller</span>
-          <ChevronRight className="h-4 w-4 shrink-0 text-ink-3 sm:h-5 sm:w-5" />
+          <ChevronRight className="chevron-nudge h-4 w-4 shrink-0 text-ink-3 sm:h-5 sm:w-5" />
         </span>
         <span className="mt-3 block">
           <AnimatedNumber
@@ -151,11 +153,11 @@ function ReturnTruthCards({
 
       <Link
         href={arrivedHref}
-        className="pressable block rounded-[var(--radius-card)] bg-white p-4 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-float)] sm:p-5"
+        className="group pressable hover-lift block rounded-[var(--radius-card)] bg-surface p-4 shadow-[var(--shadow-card)] sm:p-5"
       >
         <span className="flex items-center justify-between gap-1.5">
           <span className="truncate text-[15px] font-bold text-ink sm:text-[17px]">Arrived</span>
-          <ChevronRight className="h-4 w-4 shrink-0 text-ink-3 sm:h-5 sm:w-5" />
+          <ChevronRight className="chevron-nudge h-4 w-4 shrink-0 text-ink-3 sm:h-5 sm:w-5" />
         </span>
         <span className="mt-3 block">
           <AnimatedNumber
@@ -189,7 +191,7 @@ function MissingStatus({
         <Link
           key="missing"
           href="/returns?filter=missing"
-          className="anim-fade-in pressable flex items-center gap-4 rounded-[var(--radius-card)] bg-missing px-5 py-4 text-white shadow-[0_8px_24px_-10px_rgb(220_38_38/0.6)] lg:flex-1 lg:px-6"
+          className="group anim-fade-in pressable hover-lift flex items-center gap-4 rounded-[var(--radius-card)] bg-missing-solid px-5 py-4 text-white shadow-[0_8px_24px_-10px_rgb(220_38_38/0.6)] dark:shadow-[var(--shadow-card)] lg:flex-1 lg:px-6"
         >
           <AnimatedNumber
             value={missing}
@@ -199,12 +201,12 @@ function MissingStatus({
             <span className="block text-[18px] font-bold leading-tight">Missing</span>
             <span className="block text-[15px] font-medium text-white">Returned to seller, not scanned</span>
           </span>
-          <ChevronRight className="h-6 w-6 text-white/80" />
+          <ChevronRight className="chevron-nudge h-6 w-6 text-white/80" />
         </Link>
       ) : (
         <div
           key="clear"
-          className="anim-fade-in flex items-center gap-2.5 px-1 py-1 lg:rounded-[var(--radius-card)] lg:bg-white lg:px-6 lg:py-4 lg:shadow-[var(--shadow-card)]"
+          className="anim-fade-in flex items-center gap-2.5 px-1 py-1 lg:rounded-[var(--radius-card)] lg:bg-surface lg:px-6 lg:py-4 lg:shadow-[var(--shadow-card)]"
         >
           <CheckCircle2 className="h-6 w-6 text-arrived" />
           <span className="text-[17px] font-bold text-ink">All clear</span>
@@ -219,20 +221,20 @@ function MissingStatus({
           {overdueRtsCount > 0 && (
             <Link
               href="/returns?filter=overdue"
-              className="pressable inline-flex h-10 items-center gap-1.5 rounded-full bg-failed-soft px-3.5 text-[14px] font-bold text-amber-900"
+              className="group pressable inline-flex h-10 items-center gap-1.5 rounded-full bg-failed-soft px-3.5 text-[14px] font-bold text-failed-ink"
             >
               <span className="tabular-nums">{overdueRtsCount}</span> overdue
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="chevron-nudge h-4 w-4" />
             </Link>
           )}
           {urgentDeadlineCount > 0 && (
             <Link
               href="/returns?filter=refund"
-              className="pressable inline-flex h-10 items-center gap-1.5 rounded-full bg-missing-soft px-3.5 text-[14px] font-bold text-missing-ink"
+              className="group pressable inline-flex h-10 items-center gap-1.5 rounded-full bg-missing-soft px-3.5 text-[14px] font-bold text-missing-ink"
             >
               <span className="tabular-nums">{urgentDeadlineCount}</span> dispute
               {urgentDeadlineCount > 1 ? "s" : ""} due today
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="chevron-nudge h-4 w-4" />
             </Link>
           )}
         </div>
@@ -258,75 +260,74 @@ function OperationsStrip({ ops }: { ops: DailyTruthReport["operations"] }) {
     .filter(Boolean)
     .join(" · ");
 
-  const shipSub = [
-    `Shopee ${ops.readyShopeeCount} · TikTok ${ops.readyTikTokCount}`,
-    ops.coolingOffCount > 0 ? `${ops.coolingOffCount} <1h` : null,
-    `${ops.printedTodayCount} printed`,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:col-span-12 lg:gap-6">
       <Link
         href="/waves"
-        className="pressable block rounded-[var(--radius-card)] bg-white p-5 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-float)]"
+        className="group pressable hover-lift flex flex-col justify-between rounded-[var(--radius-card)] bg-surface p-5 shadow-[var(--shadow-card)]"
       >
-        <span className="flex items-center justify-between gap-3">
-          <span className="text-[17px] font-bold text-ink">Ship orders</span>
-          <span className="flex items-center gap-2">
-            <span
-              className={`rounded-full px-2.5 py-0.5 text-[12px] font-bold ${
-                ops.printerOnline ? "bg-arrived-soft text-arrived" : "bg-slate-100 text-ink-3"
-              }`}
-            >
-              {ops.printerOnline ? "Printer on" : "Printer off"}
-            </span>
-            <ChevronRight className="h-5 w-5 text-ink-3" />
-          </span>
-        </span>
-        <span className="mt-3 flex items-baseline gap-2.5">
-          <AnimatedNumber
-            value={ops.readyToShipCount}
-            className="text-[34px] font-extrabold leading-none tracking-[-0.02em] text-ink"
-          />
-          <span className="text-[15px] font-medium text-ink-3">ready to ship</span>
-        </span>
-        <span className="mt-2 block text-[14px] text-ink-3 tabular-nums">{shipSub}</span>
-        {(ops.waveNeedAttentionCount > 0 || ops.runningWaveCount > 0 || ops.wavesAutoEnabled) && (
-          <span className="mt-2.5 flex flex-wrap gap-2 text-[13px] font-semibold">
-            {ops.runningWaveCount > 0 && <span className="text-brand">Shipping wave now</span>}
-            {ops.waveNeedAttentionCount > 0 && (
-              <span className="text-missing-ink">{ops.waveNeedAttentionCount} need attention</span>
-            )}
-            {ops.wavesAutoEnabled && (
-              <span className="text-arrived">
-                {ops.continuousAutoShip ? "Auto-ship every 15m" : "Auto wave times on"}
+        <div>
+          <span className="flex items-center justify-between gap-3">
+            <span className="text-[17px] font-bold text-ink">Ship orders</span>
+            <span className="flex items-center gap-2">
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-[12px] font-bold ${
+                  ops.printerOnline ? "bg-arrived-soft text-arrived" : "bg-surface-muted text-ink-3"
+                }`}
+              >
+                {ops.printerOnline ? "Printer on" : "Printer off"}
               </span>
-            )}
+              <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
+            </span>
           </span>
-        )}
+
+          <span className="mt-3.5 flex items-baseline gap-2.5">
+            <AnimatedNumber
+              value={ops.readyToShipCount}
+              className="text-[34px] font-extrabold leading-none tracking-[-0.02em] text-ink"
+            />
+            <span className="text-[15px] font-medium text-ink-3">ready to ship</span>
+          </span>
+
+          <span className="mt-2 block text-[15px] text-ink-3 tabular-nums">
+            Shopee {ops.readyShopeeCount} · TikTok {ops.readyTikTokCount}
+          </span>
+        </div>
+
+        <span className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-hairline pt-3 text-[15px] tabular-nums">
+          <span className="text-ink-3">{ops.printedTodayCount} printed today</span>
+          {ops.coolingOffCount > 0 && <span className="text-ink-3">{ops.coolingOffCount} waiting 1h</span>}
+          {ops.runningWaveCount > 0 && <span className="font-semibold text-brand">Shipping wave now</span>}
+          {ops.waveNeedAttentionCount > 0 && (
+            <span className="font-semibold text-missing-ink">{ops.waveNeedAttentionCount} need attention</span>
+          )}
+          {ops.wavesAutoEnabled && (
+            <span className="font-semibold text-arrived">
+              {ops.continuousAutoShip ? "Auto-ship every 15m" : "Auto wave times on"}
+            </span>
+          )}
+        </span>
       </Link>
 
       <Link
         href="/items"
-        className="pressable block rounded-[var(--radius-card)] bg-white p-5 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-float)]"
+        className="group pressable hover-lift block rounded-[var(--radius-card)] bg-surface p-5 shadow-[var(--shadow-card)]"
       >
         <span className="flex items-center justify-between gap-3">
           <span className="text-[17px] font-bold text-ink">Stock &amp; Shopee bump</span>
-          <ChevronRight className="h-5 w-5 text-ink-3" />
+          <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
         </span>
         <span className="mt-3 flex items-baseline justify-between gap-3">
           <span
             className={`text-[28px] font-extrabold leading-none tracking-[-0.02em] tabular-nums ${
-              ops.outOfStockCount > 0 ? "text-missing-ink" : ops.lowStockCount > 0 ? "text-amber-800" : "text-arrived"
+              ops.outOfStockCount > 0 ? "text-missing-ink" : ops.lowStockCount > 0 ? "text-failed-ink" : "text-arrived"
             }`}
           >
             {stockHeadline}
           </span>
           <span
             className={`rounded-full px-2.5 py-1 text-[13px] font-bold tabular-nums ${
-              ops.shopeeBumpEnabled ? "bg-brand-soft text-brand" : "bg-slate-100 text-ink-3"
+              ops.shopeeBumpEnabled ? "bg-brand-soft text-brand" : "bg-surface-muted text-ink-3"
             }`}
           >
             Bump {ops.shopeeBoostedCount}/5
@@ -341,15 +342,19 @@ function OperationsStrip({ ops }: { ops: DailyTruthReport["operations"] }) {
 function TopItemRow({
   item,
   compact = false,
+  className = "",
+  style,
 }: {
   item: DailyTruthReport["topItems"][number];
   compact?: boolean;
+  className?: string;
+  style?: React.CSSProperties;
 }) {
   const detail = [item.variationName, `${item.failedCount} failed · ${item.returnCount} returned`]
     .filter(Boolean)
     .join(" · ");
   return (
-    <li className={`flex items-center gap-3.5 ${compact ? "px-4 py-3" : "py-3"}`}>
+    <li className={`flex items-center gap-3.5 ${compact ? "px-4 py-3" : "py-3"} ${className}`} style={style}>
       <ItemThumb src={item.itemImageUrl} alt={item.itemSummary} />
       <span className="min-w-0 flex-1">
         <span className={`block truncate font-semibold text-ink ${compact ? "text-[15px]" : "text-[16px]"}`}>
@@ -369,10 +374,10 @@ function TopItemRow({
 function HomeSkeleton() {
   return (
     <div className="space-y-4 lg:grid lg:grid-cols-12 lg:gap-6 lg:space-y-0" aria-busy="true" aria-label="Loading">
-      <div className="h-[76px] animate-pulse rounded-[var(--radius-card)] bg-slate-200/60 lg:col-span-5 lg:h-[148px]" />
-      <div className="h-[148px] animate-pulse rounded-[var(--radius-card)] bg-slate-200/60 lg:col-span-7" />
-      <div className="h-[148px] animate-pulse rounded-[var(--radius-card)] bg-slate-200/60 lg:col-span-6" />
-      <div className="hidden h-[148px] animate-pulse rounded-[var(--radius-card)] bg-slate-200/60 lg:col-span-6 lg:block" />
+      <div className="h-[76px] animate-pulse rounded-[var(--radius-card)] bg-surface-track/60 lg:col-span-5 lg:h-[148px]" />
+      <div className="h-[148px] animate-pulse rounded-[var(--radius-card)] bg-surface-track/60 lg:col-span-7" />
+      <div className="h-[148px] animate-pulse rounded-[var(--radius-card)] bg-surface-track/60 lg:col-span-6" />
+      <div className="hidden h-[148px] animate-pulse rounded-[var(--radius-card)] bg-surface-track/60 lg:col-span-6 lg:block" />
     </div>
   );
 }
@@ -419,7 +424,7 @@ function SyncLine({
       onClick={onSync}
       disabled={syncing}
       aria-label={dateLabel ? `Sync ${dateLabel}` : "Sync stores"}
-      className="-mx-1.5 -my-2 inline-flex min-h-11 items-center gap-1.5 rounded-full px-1.5 text-[14px] font-medium text-ink-3 transition-colors active:bg-black/[0.04] lg:hidden"
+      className="pressable -mx-1.5 -my-2 inline-flex min-h-11 items-center gap-1.5 rounded-full px-1.5 text-[14px] font-medium text-ink-3 active:bg-ink/[0.05] lg:hidden"
     >
       {done ? (
         <Check className="anim-pop h-4 w-4 text-arrived" strokeWidth={2.8} />
@@ -553,7 +558,7 @@ export default function DashboardPage() {
         isDemoOnly ? (
           <Link
             href="/imports"
-            className="rounded-full bg-slate-200/70 px-2.5 py-1 text-[13px] font-bold text-ink-2 hover:bg-slate-200"
+            className="pressable rounded-full bg-surface-muted px-2.5 py-1 text-[13px] font-bold text-ink-2 hover:bg-surface-track"
           >
             Sample data
           </Link>
@@ -563,7 +568,7 @@ export default function DashboardPage() {
         <>
           <label
             title="Pick a date"
-            className="pressable relative hidden h-11 w-11 lg:flex cursor-pointer items-center justify-center rounded-full text-brand hover:bg-black/[0.04]"
+            className="pressable relative hidden h-11 w-11 lg:flex cursor-pointer items-center justify-center rounded-full text-brand hover:bg-ink/[0.05]"
           >
             <CalendarDays className="h-[22px] w-[22px]" />
             <input
@@ -611,11 +616,11 @@ export default function DashboardPage() {
             <div
               className={`inline-flex h-10 items-center rounded-full transition-colors ${
                 customDate
-                  ? "bg-brand/12 text-brand shadow-[inset_0_0_0_1px_rgb(13_148_136/0.35)]"
-                  : "bg-white text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] hover:text-ink active:bg-slate-100"
+                  ? "bg-brand/12 text-brand ring-1 ring-inset ring-brand/35"
+                  : "bg-surface text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] hover:text-ink active:bg-surface-muted"
               }`}
             >
-              <label className="relative flex h-full cursor-pointer items-center gap-1.5 px-3.5 text-[14px] font-semibold">
+              <label className="pressable relative flex h-full cursor-pointer items-center gap-1.5 px-3.5 text-[14px] font-semibold">
                 <CalendarDays className="h-4 w-4 shrink-0" />
                 <span>{customDate ? manilaDayLabel(customDate) : "Pick date"}</span>
                 <input
@@ -632,7 +637,7 @@ export default function DashboardPage() {
                   type="button"
                   aria-label="Clear selected date"
                   onClick={() => setCustomDate("")}
-                  className="relative mr-1.5 flex h-6 w-6 items-center justify-center rounded-full text-brand/80 after:absolute after:-inset-2.5 after:content-[''] hover:bg-brand/15 hover:text-brand"
+                  className="pressable relative mr-1.5 flex h-6 w-6 items-center justify-center rounded-full text-brand/80 after:absolute after:-inset-2.5 after:content-[''] hover:bg-brand/15 hover:text-brand"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -665,9 +670,9 @@ export default function DashboardPage() {
                 title="To check"
                 action={
                   toCheck.length > 0 ? (
-                    <Link href="/returns" className="-my-2.5 -mr-2 inline-flex min-h-11 items-center gap-0.5 rounded-full pl-3 pr-1.5 text-[16px] font-semibold text-brand hover:bg-brand/5 active:bg-brand/10">
+                    <Link href="/returns" className="group pressable -my-2.5 -mr-2 inline-flex min-h-11 items-center gap-0.5 rounded-full pl-3 pr-1.5 text-[16px] font-semibold text-brand hover:bg-brand/10 active:bg-brand/15">
                       See all
-                      <ChevronRight className="h-[18px] w-[18px]" strokeWidth={2.4} />
+                      <ChevronRight className="chevron-nudge h-[18px] w-[18px]" strokeWidth={2.4} />
                     </Link>
                   ) : undefined
                 }
@@ -678,7 +683,11 @@ export default function DashboardPage() {
                 ) : (
                   <ul>
                     {toCheck.map((p, i) => (
-                      <li key={p.id} className={i >= 3 ? "hidden lg:block" : undefined}>
+                      <li
+                        key={p.id}
+                        className={`anim-rise-in ${i >= 3 ? "hidden lg:block" : ""}`}
+                        style={{ animationDelay: `${i * 30}ms` }}
+                      >
                         <ParcelRow parcel={p} first={i === 0} onOpen={setSelectedParcelId} />
                       </li>
                     ))}
@@ -693,14 +702,14 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={() => setTopOpen(true)}
-                    className="flex min-h-14 w-full items-center justify-between gap-3 px-5 py-3 text-left transition-colors duration-150 hover:bg-slate-50 active:bg-slate-100"
+                    className="group pressable-row flex min-h-14 w-full items-center justify-between gap-3 px-5 py-3 text-left hover:bg-surface-subtle active:bg-surface-muted"
                   >
                     <span className="shrink-0 whitespace-nowrap text-[17px] font-semibold text-ink">
                       Most returned
                     </span>
                     <span className="flex min-w-0 items-center gap-1 text-[16px] text-ink-3">
                       <span className="truncate">{report.topItems[0].itemSummary}</span>
-                      <ChevronRight className="h-5 w-5 shrink-0" />
+                      <ChevronRight className="chevron-nudge h-5 w-5 shrink-0" />
                     </span>
                   </button>
                 </Group>
@@ -713,21 +722,23 @@ export default function DashboardPage() {
                         <button
                           type="button"
                           onClick={() => setTopOpen(true)}
-                          className="-my-2.5 -mr-2 inline-flex min-h-11 items-center gap-0.5 rounded-full pl-3 pr-1.5 text-[16px] font-semibold text-brand hover:bg-brand/5 active:bg-brand/10"
+                          className="group pressable -my-2.5 -mr-2 inline-flex min-h-11 items-center gap-0.5 rounded-full pl-3 pr-1.5 text-[16px] font-semibold text-brand hover:bg-brand/10 active:bg-brand/15"
                         >
                           See all
-                          <ChevronRight className="h-[18px] w-[18px]" strokeWidth={2.4} />
+                          <ChevronRight className="chevron-nudge h-[18px] w-[18px]" strokeWidth={2.4} />
                         </button>
                       ) : undefined
                     }
                   />
                   <Group>
                     <ul className="divide-y divide-hairline">
-                      {report.topItems.slice(0, 5).map((item) => (
+                      {report.topItems.slice(0, 5).map((item, i) => (
                         <TopItemRow
                           key={`${item.itemSummary}-${item.variationName}`}
                           item={item}
                           compact
+                          className="anim-rise-in"
+                          style={{ animationDelay: `${i * 30}ms` }}
                         />
                       ))}
                     </ul>

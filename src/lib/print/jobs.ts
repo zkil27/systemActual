@@ -132,3 +132,11 @@ export async function enqueueTestPrint() {
     select: { id: true },
   });
 }
+
+/** Cancels all queued or currently printing jobs so they won't print. */
+export async function clearPrintQueue() {
+  const res = await prisma.printJob.deleteMany({
+    where: { status: { in: [PrintJobStatus.QUEUED, PrintJobStatus.PRINTING] } },
+  });
+  return res.count;
+}

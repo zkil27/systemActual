@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, CheckCircle2, MoreHorizontal, Printer, RefreshCw } from "lucide-react";
 import { Button, Group } from "@/components/ui/Button";
 import { ItemThumb } from "@/components/ui/ItemThumb";
@@ -86,6 +86,62 @@ function buildCourierChipLabels(groups: StaffPickGroup[]): Map<string, string> {
   return labels;
 }
 
+function PickFilterStrip({
+  options,
+  value,
+  onChange,
+}: {
+  options: Array<{ id: string; label: string }>;
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const refs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [box, setBox] = useState<{ x: number; w: number } | null>(null);
+  const optionsKey = options.map((o) => `${o.id}:${o.label}`).join("|");
+
+  useLayoutEffect(() => {
+    const el = refs.current[value];
+    if (!el) return;
+    setBox({ x: el.offsetLeft, w: el.offsetWidth });
+    el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  }, [value, optionsKey]);
+
+  return (
+    <ScrollChips role="tablist" label="Filters">
+      {box && (
+        <span
+          aria-hidden="true"
+          data-motion="slide"
+          className="absolute top-0.5 left-0 h-10 rounded-full bg-ink transition-[transform,width] duration-200 ease-[var(--ease-ios)]"
+          style={{ width: box.w, transform: `translateX(${box.x}px)` }}
+        />
+      )}
+      {options.map((opt) => {
+        const active = opt.id === value;
+        return (
+          <button
+            key={opt.id}
+            ref={(el) => {
+              refs.current[opt.id] = el;
+            }}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(opt.id)}
+            className={`pressable relative z-10 h-10 shrink-0 rounded-full px-4 text-[15px] font-semibold tabular-nums transition-colors ${
+              active
+                ? "text-ink-inverse"
+                : "bg-surface text-ink-2 shadow-[var(--shadow-card)] hover:text-ink"
+            }`}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </ScrollChips>
+  );
+}
+
 export function PickListSection({
   waveData,
   waveLoading,
@@ -163,6 +219,23 @@ export function PickListSection({
       : manilaDateTime(waveData.createdAt)
     : "";
 
+  const filterOptions = useMemo(() => {
+    if (!waveData) return [];
+    const opts: Array<{ id: string; label: string }> = [{ id: "all", label: "All items" }];
+    if (waveData.multiParcels.length > 0) {
+      opts.push({ id: "multis", label: `Multi-item (${waveData.multiParcels.length})` });
+    }
+    if (waveData.groups.length > 1) {
+      for (const g of waveData.groups) {
+        opts.push({
+          id: g.key,
+          label: `${courierChipLabels.get(g.key) ?? g.title} (${g.count})`,
+        });
+      }
+    }
+    return opts;
+  }, [waveData, courierChipLabels]);
+
   const showFilterStrip =
     waveData !== null && (waveData.multiParcels.length > 0 || waveData.groups.length > 1);
   const progressPct = progress.total > 0 ? Math.round((progress.picked / progress.total) * 100) : 0;
@@ -183,7 +256,7 @@ export function PickListSection({
             <button
               type="button"
               onClick={onOpenCheckSheet}
-              className="pressable flex h-10 items-center gap-1.5 rounded-full bg-white px-3 text-[15px] font-semibold text-ink shadow-[var(--shadow-card)] hover:bg-slate-50"
+              className="pressable flex h-10 items-center gap-1.5 rounded-full bg-surface px-3 text-[15px] font-semibold text-ink shadow-[var(--shadow-card)] hover:bg-surface-subtle"
             >
               <Printer className="h-4 w-4 text-brand" />
               <span>Reprint</span>
@@ -193,7 +266,7 @@ export function PickListSection({
               onClick={onRefresh}
               disabled={waveLoading}
               aria-label="Refresh pick list"
-              className="pressable flex h-10 w-10 items-center justify-center rounded-full bg-white text-ink-2 shadow-[var(--shadow-card)] hover:bg-slate-50 disabled:opacity-50"
+              className="pressable flex h-10 w-10 items-center justify-center rounded-full bg-surface text-ink-2 shadow-[var(--shadow-card)] hover:bg-surface-subtle disabled:opacity-50"
             >
               <RefreshCw className={`h-4 w-4 ${waveLoading ? "anim-spin" : ""}`} />
             </button>
@@ -234,11 +307,12 @@ export function PickListSection({
             aria-valuemin={0}
             aria-valuemax={progress.total}
             aria-label="Picking progress"
-            className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200/80"
+            className="h-1.5 w-full overflow-hidden rounded-full bg-surface-track/80"
           >
             <div
-              className="h-full rounded-full bg-arrived transition-[width] duration-300 ease-[var(--ease-ios)]"
-              style={{ width: `${progressPct}%` }}
+              data-motion="slide"
+              className="h-full w-full origin-left rounded-full bg-arrived-solid transition-transform duration-300 ease-[var(--ease-ios)]"
+              style={{ transform: `scaleX(${progressPct / 100})` }}
             />
           </div>
         </div>
@@ -246,62 +320,15 @@ export function PickListSection({
 
       {/* Single unified Apple filter strip */}
       {showFilterStrip && waveData && (
-        <ScrollChips role="tablist" label="Filters">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={resolvedFilter === "all"}
-            onClick={() => setActiveFilter("all")}
-            className={`pressable h-10 shrink-0 rounded-full px-4 text-[15px] font-semibold transition-colors ${
-              resolvedFilter === "all"
-                ? "bg-ink text-white"
-                : "bg-white text-ink-2 shadow-[var(--shadow-card)] hover:text-ink"
-            }`}
-          >
-            All items
-          </button>
-
-          {waveData.multiParcels.length > 0 && (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={resolvedFilter === "multis"}
-              onClick={() => setActiveFilter("multis")}
-              className={`pressable h-10 shrink-0 rounded-full px-4 text-[15px] font-semibold tabular-nums transition-colors ${
-                resolvedFilter === "multis"
-                  ? "bg-ink text-white"
-                  : "bg-white text-ink-2 shadow-[var(--shadow-card)] hover:text-ink"
-              }`}
-            >
-              Multi-item ({waveData.multiParcels.length})
-            </button>
-          )}
-
-          {waveData.groups.length > 1 &&
-            waveData.groups.map((g) => {
-              const active = resolvedFilter === g.key;
-              return (
-                <button
-                  key={g.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => setActiveFilter(g.key)}
-                  className={`pressable h-10 shrink-0 rounded-full px-4 text-[15px] font-semibold tabular-nums transition-colors ${
-                    active
-                      ? "bg-ink text-white"
-                      : "bg-white text-ink-2 shadow-[var(--shadow-card)] hover:text-ink"
-                  }`}
-                >
-                  {courierChipLabels.get(g.key) ?? g.title} ({g.count})
-                </button>
-              );
-            })}
-        </ScrollChips>
+        <PickFilterStrip
+          options={filterOptions}
+          value={resolvedFilter}
+          onChange={setActiveFilter}
+        />
       )}
 
       {waveError && (
-        <p role="alert" className="px-1 text-[15px] font-semibold text-missing-ink">
+        <p role="alert" className="anim-fade-in px-1 text-[15px] font-semibold text-missing-ink">
           {waveError}
         </p>
       )}
@@ -312,15 +339,15 @@ export function PickListSection({
           {[0, 1, 2].map((i) => (
             <Group key={i} className="p-4">
               <div className="flex items-center gap-3.5">
-                <div className="h-14 w-14 animate-pulse rounded-[var(--radius-control)] bg-slate-200/80" />
+                <div className="h-14 w-14 animate-pulse rounded-[var(--radius-control)] bg-surface-track/80" />
                 <div className="flex-1 space-y-2">
-                  <div className="h-4 w-3/4 animate-pulse rounded bg-slate-200/80" />
-                  <div className="h-3.5 w-1/3 animate-pulse rounded bg-slate-100" />
+                  <div className="h-4 w-3/4 animate-pulse rounded bg-surface-track/80" />
+                  <div className="h-3.5 w-1/3 animate-pulse rounded bg-surface-muted" />
                 </div>
               </div>
               <div className="mt-4 space-y-3 border-t border-hairline pt-3">
-                <div className="h-5 w-2/3 animate-pulse rounded bg-slate-100" />
-                <div className="h-5 w-1/2 animate-pulse rounded bg-slate-100" />
+                <div className="h-5 w-2/3 animate-pulse rounded bg-surface-muted" />
+                <div className="h-5 w-1/2 animate-pulse rounded bg-surface-muted" />
               </div>
             </Group>
           ))}
@@ -339,8 +366,8 @@ export function PickListSection({
 
       {/* All items hidden because everything is picked */}
       {allHiddenDone && (
-        <Group className="flex flex-col items-center px-5 py-8 text-center">
-          <CheckCircle2 className="h-10 w-10 text-arrived" strokeWidth={1.8} />
+        <Group className="anim-rise-in flex flex-col items-center px-5 py-8 text-center">
+          <CheckCircle2 className="anim-pop h-10 w-10 text-arrived" strokeWidth={1.8} />
           <p className="mt-3 text-[20px] font-extrabold tracking-[-0.01em] text-ink">
             All {resolvedFilter === "multis" ? "multi-item parcels packed" : "items picked"}
           </p>
@@ -422,7 +449,7 @@ export function PickListSection({
                               <li
                                 key={`${checkKey}-${idx}`}
                                 className={`flex items-center transition-colors ${
-                                  checked ? "bg-arrived-soft/45" : "bg-white"
+                                  checked ? "bg-arrived-soft/45" : "bg-surface"
                                 }`}
                               >
                                 <button
@@ -430,17 +457,17 @@ export function PickListSection({
                                   role="checkbox"
                                   aria-checked={checked}
                                   onClick={() => onToggleChecked(checkKey)}
-                                  className="pressable flex min-h-[60px] min-w-0 flex-1 items-center gap-3 py-3 pl-4 pr-2 text-left hover:bg-black/[0.015] active:bg-black/[0.03]"
+                                  className="pressable flex min-h-[60px] min-w-0 flex-1 items-center gap-3 py-3 pl-4 pr-2 text-left hover:bg-surface-subtle active:bg-surface-muted"
                                 >
                                   <span
                                     aria-hidden="true"
                                     className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
                                       checked
-                                        ? "border-arrived bg-arrived text-white"
-                                        : "border-hairline-strong bg-white"
+                                        ? "border-arrived-solid bg-arrived-solid text-white"
+                                        : "border-hairline-strong bg-surface"
                                     }`}
                                   >
-                                    {checked && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+                                    {checked && <Check className="anim-pop h-3.5 w-3.5" strokeWidth={3} />}
                                   </span>
 
                                   <span className="flex w-10 shrink-0 justify-center">
@@ -449,7 +476,7 @@ export function PickListSection({
                                         className={`inline-flex min-w-8 items-center justify-center rounded-lg px-2 py-0.5 text-[15px] font-extrabold tabular-nums ${
                                           checked
                                             ? "bg-arrived/15 text-arrived"
-                                            : "bg-brand text-white"
+                                            : "bg-brand-solid text-on-brand"
                                         }`}
                                       >
                                         {v.qty}×
@@ -500,7 +527,7 @@ export function PickListSection({
                                       checked,
                                     })
                                   }
-                                  className="pressable flex h-12 w-11 shrink-0 items-center justify-center rounded-full text-ink-3 hover:bg-black/[0.04] hover:text-ink"
+                                  className="pressable flex h-12 w-11 shrink-0 items-center justify-center rounded-full text-ink-3 hover:bg-ink/[0.05] hover:text-ink"
                                 >
                                   <MoreHorizontal className="h-5 w-5" />
                                 </button>
@@ -538,7 +565,7 @@ export function PickListSection({
               >
                 <div
                   className={`flex min-h-[56px] items-center border-b border-hairline ${
-                    checked ? "bg-arrived-soft/45" : "bg-white"
+                    checked ? "bg-arrived-soft/45" : "bg-surface"
                   }`}
                 >
                   <button
@@ -552,11 +579,11 @@ export function PickListSection({
                       aria-hidden="true"
                       className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
                         checked
-                          ? "border-arrived bg-arrived text-white"
-                          : "border-hairline-strong bg-white"
+                          ? "border-arrived-solid bg-arrived-solid text-white"
+                          : "border-hairline-strong bg-surface"
                       }`}
                     >
-                      {checked && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+                      {checked && <Check className="anim-pop h-3.5 w-3.5" strokeWidth={3} />}
                     </span>
                     <span
                       className={`text-[20px] font-extrabold tracking-[-0.01em] tabular-nums ${
@@ -581,7 +608,7 @@ export function PickListSection({
                         checked,
                       })
                     }
-                    className="pressable flex h-12 w-11 shrink-0 items-center justify-center rounded-full text-ink-3 hover:bg-black/[0.04] hover:text-ink"
+                    className="pressable flex h-12 w-11 shrink-0 items-center justify-center rounded-full text-ink-3 hover:bg-ink/[0.05] hover:text-ink"
                   >
                     <MoreHorizontal className="h-5 w-5" />
                   </button>
@@ -594,7 +621,7 @@ export function PickListSection({
                       <div className="min-w-0 flex-1">
                         <p className="text-[16px] font-semibold leading-snug text-ink">
                           {line.quantity > 1 ? (
-                            <span className="mr-1.5 inline-flex items-center rounded-lg bg-brand px-2 py-0.5 text-[15px] font-extrabold text-white tabular-nums">
+                            <span className="mr-1.5 inline-flex items-center rounded-lg bg-brand-solid px-2 py-0.5 text-[15px] font-extrabold text-on-brand tabular-nums">
                               {line.quantity}×
                             </span>
                           ) : (

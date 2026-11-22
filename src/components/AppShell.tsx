@@ -85,11 +85,15 @@ function SidebarList({
   items,
   pathname,
   badge,
+  badgeChanged,
+  missing,
   className = "",
 }: {
   items: Tab[];
   pathname: string;
   badge: string | null;
+  badgeChanged: boolean;
+  missing: number;
   className?: string;
 }) {
   return (
@@ -104,17 +108,24 @@ function SidebarList({
               aria-current={active ? "page" : undefined}
               className={`pressable flex h-11 items-center gap-3 rounded-[var(--radius-control)] px-3 text-[15px] font-semibold ${
                 active
-                  ? "bg-white text-ink shadow-[var(--shadow-card)]"
-                  : "text-ink-2 hover:bg-black/[0.04] hover:text-ink"
+                  ? "bg-surface text-ink shadow-[var(--shadow-card)]"
+                  : "text-ink-2 hover:bg-ink/[0.05] hover:text-ink"
               }`}
             >
               <Icon
-                className={`h-5 w-5 shrink-0 ${active ? "text-brand" : "text-ink-3"}`}
+                className={`h-5 w-5 shrink-0 transition-transform duration-200 ease-[var(--ease-ios)] ${
+                  active ? "scale-[1.06] text-brand" : "text-ink-3"
+                }`}
                 strokeWidth={active ? 2.3 : 1.9}
               />
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
               {item.badge && badge && (
-                <span className="tabular-nums rounded-full bg-missing px-1.5 py-0.5 text-[11px] font-bold leading-none text-white">
+                <span
+                  key={badgeChanged ? `sb-${missing}` : "sb"}
+                  className={`tabular-nums rounded-full bg-missing-solid px-1.5 py-0.5 text-[11px] font-bold leading-none text-white ${
+                    badgeChanged ? "anim-pop" : ""
+                  }`}
+                >
                   {badge}
                 </span>
               )}
@@ -186,17 +197,36 @@ export function AppShell({
           Kyna Ops
         </Link>
         <nav aria-label="Primary" className="flex min-h-0 flex-1 flex-col">
-          <SidebarList items={SIDEBAR_PRIMARY} pathname={pathname} badge={badge} />
+          <SidebarList
+            items={SIDEBAR_PRIMARY}
+            pathname={pathname}
+            badge={badge}
+            badgeChanged={badgeChanged}
+            missing={missing}
+          />
           <hr className="mx-3 my-3 border-hairline" />
-          <SidebarList items={SIDEBAR_OPS} pathname={pathname} badge={badge} />
-          <SidebarList items={SIDEBAR_FOOTER} pathname={pathname} badge={badge} className="mt-auto" />
+          <SidebarList
+            items={SIDEBAR_OPS}
+            pathname={pathname}
+            badge={badge}
+            badgeChanged={badgeChanged}
+            missing={missing}
+          />
+          <SidebarList
+            items={SIDEBAR_FOOTER}
+            pathname={pathname}
+            badge={badge}
+            badgeChanged={badgeChanged}
+            missing={missing}
+            className="mt-auto"
+          />
         </nav>
       </aside>
 
       <header
         className={`safe-top sticky top-0 z-30 transition-[background-color,border-color,backdrop-filter] duration-200 ${
           collapsed
-            ? "border-b border-hairline bg-white/80 backdrop-blur-xl backdrop-saturate-150"
+            ? "border-b border-hairline bg-surface/80 backdrop-blur-xl backdrop-saturate-150"
             : "border-b border-transparent bg-ground"
         }`}
       >
@@ -218,7 +248,7 @@ export function AppShell({
                 href="/settings"
                 aria-label="Settings"
                 title="Settings"
-                className="pressable flex h-11 w-11 items-center justify-center rounded-full text-ink-2 hover:bg-black/[0.04] lg:hidden"
+                className="pressable flex h-11 w-11 items-center justify-center rounded-full text-ink-2 hover:bg-ink/[0.05] lg:hidden"
               >
                 <Settings2 className="h-[22px] w-[22px]" />
               </Link>
@@ -246,12 +276,12 @@ export function AppShell({
         aria-label="Tabs"
         className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-3 pb-[max(12px,env(safe-area-inset-bottom))] lg:hidden"
       >
-        <div className="pointer-events-auto relative mx-auto grid h-16 max-w-md grid-cols-5 rounded-full bg-white/80 p-1.5 shadow-[0_10px_30px_-8px_rgb(15_23_42/0.25),0_0_0_1px_rgb(15_23_42/0.06)] backdrop-blur-xl backdrop-saturate-150">
+        <div className="pointer-events-auto relative mx-auto grid h-16 max-w-md grid-cols-5 rounded-full bg-surface/85 p-1.5 shadow-[var(--shadow-tab-bar)] backdrop-blur-xl backdrop-saturate-150">
           {indicatorIndex >= 0 && (
             <span
               aria-hidden="true"
               data-motion="slide"
-              className="absolute inset-y-1.5 left-1.5 rounded-full bg-brand/10 transition-transform duration-300 ease-[var(--ease-ios)]"
+              className="absolute inset-y-1.5 left-1.5 rounded-full bg-brand/12 transition-transform duration-300 ease-[var(--ease-ios)]"
               style={{
                 width: "calc((100% - 12px) / 5)",
                 transform: `translateX(${indicatorIndex * 100}%)`,
@@ -271,11 +301,16 @@ export function AppShell({
                 }`}
               >
                 <span className="relative flex h-6 items-center">
-                  <Icon className="h-[22px] w-[22px]" strokeWidth={active ? 2.3 : 1.9} />
+                  <Icon
+                    className={`h-[22px] w-[22px] transition-transform duration-200 ease-[var(--ease-ios)] ${
+                      active ? "scale-[1.06]" : ""
+                    }`}
+                    strokeWidth={active ? 2.3 : 1.9}
+                  />
                   {tab.badge && badge && (
                     <span
                       key={badgeChanged ? `b-${missing}` : "b"}
-                      className={`tabular-nums absolute -right-3.5 -top-1 min-w-[18px] rounded-full bg-missing px-1 py-[3px] text-center text-[10px] font-bold leading-none text-white ring-2 ring-white ${
+                      className={`tabular-nums absolute -right-3.5 -top-1 min-w-[18px] rounded-full bg-missing-solid px-1 py-[3px] text-center text-[10px] font-bold leading-none text-white ring-2 ring-surface ${
                         badgeChanged ? "anim-pop" : ""
                       }`}
                     >
@@ -319,7 +354,7 @@ export function BarButton({
       title={label}
       onClick={onClick}
       disabled={disabled}
-      className={`pressable ${className} h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-black/[0.04] disabled:text-ink-3`}
+      className={`pressable ${className} h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05] disabled:text-ink-3`}
     >
       {children}
     </button>

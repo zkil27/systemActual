@@ -134,7 +134,7 @@ export function Sheet({
       <div
         aria-hidden="true"
         onClick={onClose}
-        className={`absolute inset-0 bg-slate-950/40 transition-opacity duration-300 ${
+        className={`absolute inset-0 bg-slate-950/45 transition-opacity duration-300 dark:bg-black/65 ${
           shown ? "opacity-100" : "opacity-0"
         }`}
       />
@@ -145,7 +145,7 @@ export function Sheet({
         aria-label={title}
         tabIndex={-1}
         data-motion="slide"
-        className={`relative flex max-h-[92dvh] w-full max-w-lg flex-col rounded-t-[var(--radius-sheet)] bg-white shadow-[var(--shadow-sheet)] outline-none md:rounded-[var(--radius-sheet)] ${
+        className={`relative flex max-h-[92dvh] w-full max-w-lg flex-col rounded-t-[var(--radius-sheet)] bg-surface shadow-[var(--shadow-sheet)] outline-none md:rounded-[var(--radius-sheet)] ${
           dragging
             ? ""
             : `transition-[translate,transform,opacity] ease-[var(--ease-ios)] ${
@@ -167,7 +167,7 @@ export function Sheet({
           onPointerCancel={onPointerUp}
           className="shrink-0 cursor-grab touch-none select-none px-5 pb-2 pt-2.5 active:cursor-grabbing"
         >
-          <div aria-hidden="true" className="mx-auto h-[5px] w-9 rounded-full bg-slate-300 md:hidden" />
+          <div aria-hidden="true" className="mx-auto h-[5px] w-9 rounded-full bg-hairline-strong md:hidden" />
           <div className="mt-2 flex items-center justify-between gap-3 md:mt-1">
             <h2 className="text-[20px] font-extrabold tracking-[-0.01em] text-ink">{title}</h2>
             <button
@@ -175,9 +175,9 @@ export function Sheet({
               onClick={onClose}
               onPointerDown={(e) => e.stopPropagation()}
               aria-label="Close"
-              className="pressable -mr-1.5 flex h-11 w-11 items-center justify-center rounded-full text-ink-3 hover:bg-slate-100"
+              className="pressable -mr-1.5 flex h-11 w-11 items-center justify-center rounded-full text-ink-3 hover:bg-surface-muted"
             >
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-muted">
                 <X className="h-4 w-4" strokeWidth={2.6} />
               </span>
             </button>

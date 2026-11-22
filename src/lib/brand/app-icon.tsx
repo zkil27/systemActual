@@ -1,8 +1,8 @@
 import { ImageResponse } from "next/og";
-import { BRAND_TEAL } from "./icons";
+import { BRAND_INK, BRAND_PINK } from "./icons";
 
 /**
- * Draws the Kyna Ops mark: a rounded-stroke "K" on a full-bleed teal square.
+ * Draws the Kyna Ops mark: a rounded-stroke "K" on a full-bleed pastel pink square.
  * The phone applies its own corner mask, so the square stays square unless
  * `rounded` is set (browser tab favicon).
  *
@@ -23,14 +23,14 @@ export function renderAppIcon(
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: BRAND_TEAL,
+          background: BRAND_PINK,
           borderRadius: rounded ? size * 0.22 : 0,
         }}
       >
         <svg width={glyph} height={glyph} viewBox="0 0 100 100">
           <g
             fill="none"
-            stroke="#ffffff"
+            stroke={BRAND_INK}
             strokeWidth={13}
             strokeLinecap="round"
             strokeLinejoin="round"
