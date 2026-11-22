@@ -35,9 +35,11 @@ async function main() {
 
   try {
     const result = await prisma.$transaction([
-      prisma.returnParcel.deleteMany(
-        clearAll ? {} : { where: { shopConnection: { isDemo: true } } }
-      ),
+      clearAll
+        ? prisma.returnParcel.deleteMany()
+        : prisma.returnParcel.deleteMany({
+            where: { shopConnection: { isDemo: true } },
+          }),
       prisma.importJob.deleteMany({}),
       prisma.shopConnection.deleteMany({ where: { isDemo: true } }),
     ]);
