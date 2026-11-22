@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { CalendarDays, Check, CheckCircle2, ChevronRight, RefreshCw } from "lucide-react";
+import { CalendarDays, Check, CheckCircle2, ChevronRight, RefreshCw, X } from "lucide-react";
 import { AppShell, BarButton } from "@/components/AppShell";
 import { CATEGORY_META, CategorySheet, type CategoryKey } from "@/components/CategorySheet";
 import { ParcelDetailSheet } from "@/components/ParcelDetailSheet";
@@ -388,6 +388,7 @@ export default function DashboardPage() {
   const [openCategory, setOpenCategory] = useState<CategoryKey | null>(null);
   const [topOpen, setTopOpen] = useState(false);
   const cacheRef = useRef<Map<string, { report: DailyTruthReport; fetchedAt: number }>>(new Map());
+  const dateInputRef = useRef<HTMLInputElement>(null);
 
   const loadReport = useCallback(
     async (opts?: { force?: boolean; silent?: boolean }) => {
@@ -433,7 +434,13 @@ export default function DashboardPage() {
     if (syncState === "syncing") return;
     setSyncState("syncing");
     try {
-      const res = await fetch("/api/sync", { method: "POST" });
+      const res = customDate
+        ? await fetch("/api/sync/date", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ date: customDate }),
+          })
+        : await fetch("/api/sync", { method: "POST" });
       const data = await res.json();
       if (!res.ok) {
         setSyncState("idle");
@@ -449,6 +456,14 @@ export default function DashboardPage() {
     } catch {
       setSyncState("idle");
       toast("No connection", "error");
+    }
+  }
+
+  function triggerDateInput(input: HTMLInputElement) {
+    try {
+      input.showPicker?.();
+    } catch {
+      // Fallback for browsers where showPicker throws; native click still handles it.
     }
   }
 
@@ -479,14 +494,20 @@ export default function DashboardPage() {
           >
             <CalendarDays className="h-[22px] w-[22px]" />
             <input
+              ref={dateInputRef}
               type="date"
               aria-label="Pick a date"
               value={customDate}
+              onClick={(e) => triggerDateInput(e.currentTarget)}
               onChange={(e) => setCustomDate(e.target.value)}
-              className="absolute inset-0 cursor-pointer opacity-0"
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
             />
           </label>
-          <BarButton label="Sync stores" onClick={handleSync} disabled={syncState === "syncing"}>
+          <BarButton
+            label={customDate ? `Sync ${manilaDayLabel(customDate)}` : "Sync stores"}
+            onClick={handleSync}
+            disabled={syncState === "syncing"}
+          >
             {syncState === "done" ? (
               <Check key="done" className="anim-pop h-[22px] w-[22px] text-arrived" strokeWidth={2.8} />
             ) : (
@@ -500,16 +521,67 @@ export default function DashboardPage() {
       }
     >
       <div className="space-y-8">
-        <SegmentedControl
-          label="Date range"
-          options={RANGES}
-          value={customDate ? null : range}
-          onChange={(id) => {
-            setCustomDate("");
-            setRange(id);
-          }}
-          className="lg:max-w-md"
-        />
+        <div className="flex flex-wrap items-center gap-2.5">
+          <SegmentedControl
+            label="Date range"
+            options={RANGES}
+            value={customDate ? null : range}
+            onChange={(id) => {
+              setCustomDate("");
+              setRange(id);
+            }}
+            className="w-full sm:w-auto sm:min-w-[300px] lg:max-w-md"
+          />
+
+          <div className="flex items-center gap-2">
+            <div
+              className={`inline-flex h-10 items-center rounded-full transition-colors ${
+                customDate
+                  ? "bg-brand/12 text-brand shadow-[inset_0_0_0_1px_rgb(13_148_136/0.35)]"
+                  : "bg-white/80 text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline)] hover:bg-white"
+              }`}
+            >
+              <label className="relative flex h-full cursor-pointer items-center gap-1.5 px-3.5 text-[14px] font-semibold">
+                <CalendarDays className="h-4 w-4 shrink-0" />
+                <span>{customDate ? manilaDayLabel(customDate) : "Pick date"}</span>
+                <input
+                  type="date"
+                  aria-label="Choose specific date"
+                  value={customDate}
+                  onClick={(e) => triggerDateInput(e.currentTarget)}
+                  onChange={(e) => setCustomDate(e.target.value)}
+                  className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                />
+              </label>
+              {customDate && (
+                <button
+                  type="button"
+                  aria-label="Clear selected date"
+                  onClick={() => setCustomDate("")}
+                  className="mr-1.5 flex h-6 w-6 items-center justify-center rounded-full text-brand/80 hover:bg-brand/15 hover:text-brand"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            {customDate && (
+              <button
+                type="button"
+                onClick={handleSync}
+                disabled={syncState === "syncing"}
+                className="pressable inline-flex h-10 items-center gap-1.5 rounded-full bg-white px-3.5 text-[14px] font-semibold text-brand shadow-[inset_0_0_0_1px_rgb(13_148_136/0.3)] hover:bg-brand/5 disabled:opacity-60"
+              >
+                {syncState === "done" ? (
+                  <Check className="h-4 w-4 text-arrived" strokeWidth={2.5} />
+                ) : (
+                  <RefreshCw className={`h-4 w-4 ${syncState === "syncing" ? "anim-spin" : ""}`} />
+                )}
+                <span>{syncState === "syncing" ? "Syncing..." : `Sync ${manilaDayLabel(customDate)}`}</span>
+              </button>
+            )}
+          </div>
+        </div>
 
         {loading || !report ? (
           <HomeSkeleton />

@@ -223,10 +223,30 @@ describe("tracking text", () => {
   it("requires actual courier pickup/transit events for courier custody", () => {
     expect(hasCourierCustody([])).toBe(false);
     expect(hasCourierCustody([ev("Order created", 1), ev("Waiting for pickup", 2)])).toBe(false);
+    expect(
+      hasCourierCustody([
+        ev("The seller is preparing your package, and will hand it over to our carrier for shipping.", 1, "20101"),
+        ev("The shipping carrier is on the way to pick up your package. Driver phone number: 639922733219", 2, "20201"),
+        ev("Your package was not collected by our carrier for the following reason: Seller is preparing package.", 3, "20301"),
+        ev("Your package delivery was canceled.", 4, "110101"),
+      ])
+    ).toBe(false);
+    expect(hasCourierCustody([ev("Your package has been collected by our carrier in Rizal.", 2, "30901")])).toBe(true);
     expect(hasCourierCustody([ev("Order created", 1), ev("Picked up by courier", 2)])).toBe(true);
     expect(hasCourierCustody([ev("Arrived at sorting facility", 2)])).toBe(true);
     expect(hasCourierCustody([ev("Delivery attempt failed", 2)])).toBe(true);
     expect(hasCourierCustody([ev("Parcel has been returned to you", 2)])).toBe(true);
+  });
+  it("distinguishes TikTok 70201 'is being returned to the seller' from 80101 'has been returned to the seller'", () => {
+    const timeline = [
+      ev("Sorry, this package can no longer be delivered for the following reason: Package rejected by customer.", 10, "40601"),
+      ev("Your package is being returned to the seller in Laguna.", 20, "70201"),
+      ev("Return package out for delivery.", 30, "70207"),
+      ev("Your package has been returned to the seller in Rizal.", 40, "80101"),
+    ];
+    expect(findDeliveryFailed(timeline)?.getTime()).toBe(10);
+    expect(findReturnedToSeller(timeline)?.getTime()).toBe(40);
+    expect(findReturnedToSeller(timeline.slice(0, 3))).toBeNull();
   });
 });
 

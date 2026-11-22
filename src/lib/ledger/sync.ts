@@ -154,6 +154,35 @@ export async function syncOrders(conn: ShopConnection, deadline: number): Promis
 }
 
 /**
+ * Pulls orders updated within `[from, to)` into the ledger without moving the
+ * shop's incremental `ordersSyncedTo` cursor (used for on-demand historical date sync).
+ */
+export async function syncOrdersWindow(
+  conn: ShopConnection,
+  accessToken: string,
+  from: Date,
+  to: Date,
+  deadline: number
+): Promise<{ saved: number }> {
+  const pages = conn.platform === Platform.SHOPEE ? shopeeWindowOrders : tiktokWindowOrders;
+  const seenListings = new Set<string>();
+  let saved = 0;
+  try {
+    for await (const batch of pages(conn, accessToken, { from, to, last: true }, deadline)) {
+      if (!batch.length) continue;
+      const res = await saveOrderBatch(conn.id, conn.platform, batch, {
+        seenListings,
+        beforeChunk: () => checkDeadline(deadline),
+      });
+      saved += res.saved;
+    }
+  } catch (err) {
+    if (!(err instanceof OutOfTime)) throw err;
+  }
+  return { saved };
+}
+
+/**
  * Fetches and saves one specific order immediately (used by webhooks so new
  * orders and status changes show up in <1s without waiting for cursor backfill).
  */

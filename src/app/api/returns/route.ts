@@ -23,16 +23,28 @@ export async function GET(req: NextRequest) {
     const missingSinceAt = settings?.missingSinceAt ?? null;
     const now = new Date();
 
+    const dateBounds = getManilaDateRangeBounds({
+      range: sp.get("range"),
+      date: sp.get("date"),
+      from: sp.get("from"),
+      to: sp.get("to"),
+    });
+    const hasDateFilter = Boolean(dateBounds && (dateBounds.start || dateBounds.end));
+
     const conditions: Prisma.ReturnParcelWhereInput[] = [];
-    const activeFilter = activeSinceWhere(missingSinceAt);
-    if (activeFilter) {
-      conditions.push(activeFilter);
+    // Apply the go-live cutoff only when viewing the unfiltered active queue;
+    // explicit date/range filters (Yesterday, 7 Days, custom date) inspect history.
+    if (!hasDateFilter) {
+      const activeFilter = activeSinceWhere(missingSinceAt);
+      if (activeFilter) {
+        conditions.push(activeFilter);
+      }
     }
 
     if (filter === "returned") {
       conditions.push(returnedToSellerWhere);
     } else if (filter === "arrived") {
-      conditions.push(arrivedWhere(missingSinceAt));
+      conditions.push(arrivedWhere(hasDateFilter ? null : missingSinceAt));
     } else if (filter === "failed") {
       conditions.push({ category: ReturnCategory.FAILED_DELIVERY });
     } else if (filter === "refund") {
@@ -53,13 +65,7 @@ export async function GET(req: NextRequest) {
       conditions.push(overdueWhere(overdueDays, now, missingSinceAt));
     }
 
-    const dateBounds = getManilaDateRangeBounds({
-      range: sp.get("range"),
-      date: sp.get("date"),
-      from: sp.get("from"),
-      to: sp.get("to"),
-    });
-    if (dateBounds && (dateBounds.start || dateBounds.end)) {
+    if (hasDateFilter && dateBounds) {
       const dtFilter: Prisma.DateTimeFilter = {
         ...(dateBounds.start ? { gte: dateBounds.start } : {}),
         ...(dateBounds.end ? { lt: dateBounds.end } : {}),

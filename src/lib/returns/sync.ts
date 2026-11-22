@@ -115,6 +115,34 @@ export async function syncReturnRequests(conn: ShopConnection, token: string, de
   }
 }
 
+/**
+ * Pulls return/refund requests updated within `[from, to)` without moving
+ * `returnsSyncedTo` (used for on-demand historical date sync).
+ */
+export async function syncReturnsWindow(
+  conn: ShopConnection,
+  token: string,
+  from: Date,
+  to: Date,
+  deadline: number
+): Promise<{ saved: number }> {
+  const settings = await prisma.appSettings.findUnique({
+    where: { id: "default" },
+    select: { defaultUnitCostPhp: true },
+  });
+  const defaultUnitCostPhp = Number(settings?.defaultUnitCostPhp ?? 82);
+  try {
+    const saved =
+      conn.platform === Platform.SHOPEE
+        ? await shopeeReturnsWindow(conn, token, from, to, deadline, defaultUnitCostPhp)
+        : await tiktokReturnsWindow(conn, token, from, to, deadline, defaultUnitCostPhp);
+    return { saved };
+  } catch (err) {
+    if (err instanceof OutOfTime) return { saved: 0 };
+    throw err;
+  }
+}
+
 async function shopeeReturnsWindow(
   conn: ShopConnection,
   token: string,

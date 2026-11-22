@@ -16,9 +16,7 @@ import { isOnline } from "@/lib/print/device";
 import { getReadyCounts } from "@/lib/waves/build";
 import { isContinuousWave } from "@/lib/waves/schedule";
 import {
-  activeSinceWhere,
   costAtRiskPhp,
-  isActiveSince,
   isMissingDiscrepancy as isMissing,
   isOverdueRts as isOverdue,
   missingWhere,
@@ -159,9 +157,6 @@ export async function getDailyTruthReport(options?: {
   const returnShippingEstimatePhp = Number(settings?.returnShippingEstimatePhp ?? 40);
   const stockSafetyBuffer = settings?.stockSafetyBuffer ?? 0;
   const missingSinceAt = settings?.missingSinceAt ?? null;
-  const activeFilter = activeSinceWhere(missingSinceAt);
-  const effectiveStart =
-    missingSinceAt && missingSinceAt.getTime() > start.getTime() ? missingSinceAt : start;
   const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   const connectedPlatforms = new Set(
     shops.filter((s) => !s.isDemo && s.accessToken).map((s) => s.platform)
@@ -185,18 +180,13 @@ export async function getDailyTruthReport(options?: {
     withSpan("dashboard.returnParcels", () =>
       prisma.returnParcel.findMany({
         where: {
-          AND: [
-            ...(activeFilter ? [activeFilter] : []),
-            {
-              OR: [
-                { digitalReturnTaggedAt: { gte: effectiveStart, lt: end } },
-                { courierReturnedToSellerAt: { gte: effectiveStart, lt: end } },
-                { physicallyReceivedAt: { gte: effectiveStart, lt: end } },
-                missingWhere(missingSinceAt),
-                overdueWhere(overdueRtsDays, now, missingSinceAt),
-                { disputeDeadlineAt: { gt: new Date(now.getTime() - 2 * 3600_000), lte: in24h } },
-              ],
-            },
+          OR: [
+            { digitalReturnTaggedAt: { gte: start, lt: end } },
+            { courierReturnedToSellerAt: { gte: start, lt: end } },
+            { physicallyReceivedAt: { gte: start, lt: end } },
+            missingWhere(missingSinceAt),
+            overdueWhere(overdueRtsDays, now, missingSinceAt),
+            { disputeDeadlineAt: { gt: new Date(now.getTime() - 2 * 3600_000), lte: in24h } },
           ],
         },
         select: {
@@ -279,7 +269,6 @@ export async function getDailyTruthReport(options?: {
   const attentionCandidates: DailyTruthReport["attentionParcels"] = [];
 
   for (const p of parcels) {
-    if (!isActiveSince(p, missingSinceAt)) continue;
     const bucket =
       p.category === ReturnCategory.FAILED_DELIVERY ? failedDelivery : returnRefund;
     const cMap = courierMaps[p.category];
@@ -288,9 +277,9 @@ export async function getDailyTruthReport(options?: {
       returnShippingEstimatePhp
     );
 
-    const taggedInRange = isWithinBounds(p.digitalReturnTaggedAt, effectiveStart, end);
-    const courierReturnedInRange = isWithinBounds(p.courierReturnedToSellerAt, effectiveStart, end);
-    const arrivedInRange = isWithinBounds(p.physicallyReceivedAt, effectiveStart, end);
+    const taggedInRange = isWithinBounds(p.digitalReturnTaggedAt, start, end);
+    const courierReturnedInRange = isWithinBounds(p.courierReturnedToSellerAt, start, end);
+    const arrivedInRange = isWithinBounds(p.physicallyReceivedAt, start, end);
 
     const isMissingDiscrepancy = isMissing(p, missingSinceAt);
     const isOverdueRts = isOverdue(p, overdueRtsDays, now, missingSinceAt);

@@ -158,7 +158,7 @@ export function isFailedDeliveryCandidate(order: {
 
 /** Tracking event wording/statuses meaning "delivered back to the seller". Confirm with live data. */
 const RETURNED_TO_SELLER_PATTERNS = [
-  /returned to (the )?seller/i,
+  /(?<!being\s)(?<!be\s)returned to (the )?seller/i,
   /(has been|was|is)\s+returned to you/i,
   /return(ed)? delivered/i,
   /delivered back/i,
@@ -168,22 +168,27 @@ const RETURNED_TO_SELLER_PATTERNS = [
   /naibalik/i, // Tagalog: "returned"
   /^LOGISTICS_RETURN_DONE$/i,
   /^RETURNED$/i,
+  /^80101$/,
 ];
 
 /** Wording meaning delivery failed / heading back, used for the tagged time. */
 const DELIVERY_FAILED_PATTERNS = [
   /delivery (attempt )?.*(failed|unsuccessful)/i,
+  /attempt to deliver.*(failed|unsuccessful)/i,
+  /can no longer be delivered/i,
   /failed delivery/i,
   /will be returned to (you|the seller|seller)/i,
-  /returning to (the )?(seller|you)/i,
+  /(is being|returning) (returned )?to (the )?(seller|you)/i,
   /return to sender/i,
   /refused/i,
   /^LOGISTICS_DELIVERY_FAILED$/i,
+  /^70201$/,
+  /^70202$/,
 ];
 
 const COURIER_CUSTODY_PATTERNS = [
   /picked\s*up/i,
-  /collected\s+by/i,
+  /(?<!not\s)collected\s+by/i,
   /in\s+transit/i,
   /departed/i,
   /arrived\s+at/i,
@@ -193,6 +198,7 @@ const COURIER_CUSTODY_PATTERNS = [
   /shipping\s+hub/i,
   /^IN_TRANSIT$/i,
   /^DELIVERED$/i,
+  /^30901$/,
 ];
 
 export interface TrackingEvent {
