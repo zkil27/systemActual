@@ -1,6 +1,8 @@
 /** Filters on the Returns page. Ids match the /api/returns `filter` param. */
 export const RETURN_FILTERS = [
   { id: "all", label: "All" },
+  { id: "returned", label: "Returned to seller" },
+  { id: "arrived", label: "Arrived" },
   { id: "missing", label: "Missing" },
   { id: "failed", label: "Failed delivery" },
   { id: "refund", label: "Buyer return" },

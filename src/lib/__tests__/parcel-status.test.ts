@@ -65,6 +65,17 @@ describe("getParcelStatus", () => {
         .label
     ).toBe("Arrived");
   });
+
+  it("shows pre-baseline returned parcels as Returned to seller rather than On the way", () => {
+    expect(
+      getParcelStatus({
+        ...base,
+        isMissingDiscrepancy: false,
+        physicallyReceivedAt: null,
+        courierReturnedToSellerAt: "2026-11-19T07:37:00Z",
+      })
+    ).toEqual({ label: "Returned to seller", tone: "neutral" });
+  });
 });
 
 describe("categoryLabel", () => {

@@ -9,43 +9,49 @@ export async function GET(
 ) {
   try {
     const { id } = await context.params;
-    const parcel = await prisma.returnParcel.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        platform: true,
-        orderSn: true,
-        forwardTrackingNumber: true,
-        rtsTrackingNumber: true,
-        courier: true,
-        category: true,
-        digitalStatus: true,
-        expectsPhysicalReturn: true,
-        returnReason: true,
-        itemSummary: true,
-        variationName: true,
-        quantity: true,
-        itemImageUrl: true,
-        orderTotalPhp: true,
-        estimatedUnitCostPhp: true,
-        digitalReturnTaggedAt: true,
-        courierReturnedToSellerAt: true,
-        physicallyReceivedAt: true,
-        physicalCondition: true,
-        disputeDraft: true,
-        scans: {
-          orderBy: { scannedAt: "desc" },
-          select: {
-            id: true,
-            condition: true,
-            notes: true,
-            photoUrls: true,
-            scannedAt: true,
-            staffMember: { select: { name: true } },
+    const [parcel, settings] = await Promise.all([
+      prisma.returnParcel.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          platform: true,
+          orderSn: true,
+          forwardTrackingNumber: true,
+          rtsTrackingNumber: true,
+          courier: true,
+          category: true,
+          digitalStatus: true,
+          expectsPhysicalReturn: true,
+          returnReason: true,
+          itemSummary: true,
+          variationName: true,
+          quantity: true,
+          itemImageUrl: true,
+          orderTotalPhp: true,
+          estimatedUnitCostPhp: true,
+          digitalReturnTaggedAt: true,
+          courierReturnedToSellerAt: true,
+          physicallyReceivedAt: true,
+          physicalCondition: true,
+          disputeDraft: true,
+          scans: {
+            orderBy: { scannedAt: "desc" },
+            select: {
+              id: true,
+              condition: true,
+              notes: true,
+              photoUrls: true,
+              scannedAt: true,
+              staffMember: { select: { name: true } },
+            },
           },
         },
-      },
-    });
+      }),
+      prisma.appSettings.findUnique({
+        where: { id: "default" },
+        select: { missingSinceAt: true },
+      }),
+    ]);
     if (!parcel) {
       return NextResponse.json({ error: "Parcel not found." }, { status: 404 });
     }
@@ -55,7 +61,7 @@ export async function GET(
         ...parcel,
         orderTotalPhp: Number(parcel.orderTotalPhp),
         estimatedUnitCostPhp: Number(parcel.estimatedUnitCostPhp),
-        isMissingDiscrepancy: isMissingDiscrepancy(parcel),
+        isMissingDiscrepancy: isMissingDiscrepancy(parcel, settings?.missingSinceAt ?? null),
       },
     });
   } catch (err) {

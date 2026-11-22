@@ -32,6 +32,7 @@ interface ReturnRow {
   variationName: string | null;
   quantity: number;
   itemImageUrl: string | null;
+  courierReturnedToSellerAt: string | null;
   physicallyReceivedAt: string | null;
   physicalCondition: string | null;
   isMissingDiscrepancy: boolean;
@@ -69,7 +70,13 @@ function FilterChips({
           aria-hidden="true"
           data-motion="slide"
           className={`absolute top-0.5 left-0 h-10 rounded-full transition-[transform,width,background-color] duration-200 ease-[var(--ease-ios)] ${
-            value === "missing" ? "bg-missing" : "bg-ink"
+            value === "missing"
+              ? "bg-missing"
+              : value === "returned"
+                ? "bg-brand"
+                : value === "arrived"
+                  ? "bg-arrived"
+                  : "bg-ink"
           }`}
           style={{ width: box.w, transform: `translateX(${box.x}px)` }}
         />
@@ -421,6 +428,11 @@ function ReturnsExplorerInner() {
                 ? `Showing ${parcels.length} of ${totalCount} parcels`
                 : `${totalCount} ${totalCount === 1 ? "parcel" : "parcels"}`}
               {customLabel ? ` · ${customLabel}` : ""}
+              {dateActive && (filter === "returned" || filter === "missing")
+                ? " · by returned-to-seller date"
+                : dateActive && filter === "arrived"
+                  ? " · by scan date"
+                  : ""}
             </p>
           )}
 

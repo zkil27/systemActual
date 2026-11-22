@@ -4,7 +4,7 @@ import { shopeeGet } from "@/lib/connectors/shopee";
 import { tiktokRequest } from "@/lib/connectors/tiktok";
 import { upsertNormalizedReturn } from "@/lib/connectors/normalizer";
 import { nextSyncWindow } from "@/lib/ledger/window";
-import { findReturnedToSeller, isFailedDeliveryCandidate, type TrackingEvent } from "./classify";
+import { findReturnedToSeller, hasCourierCustody, isFailedDeliveryCandidate, type TrackingEvent } from "./classify";
 import {
   mapFailedDelivery,
   mapShopeeReturn,
@@ -86,10 +86,17 @@ async function tiktokForwardEvents(conn: ShopConnection, token: string, orderSn:
 export async function syncReturnRequests(conn: ShopConnection, token: string, deadline: number) {
   const settings = await prisma.appSettings.findUnique({
     where: { id: "default" },
-    select: { defaultUnitCostPhp: true },
+    select: { defaultUnitCostPhp: true, missingSinceAt: true },
   });
   const defaultUnitCostPhp = Number(settings?.defaultUnitCostPhp ?? 82);
-  let cursor = conn.returnsSyncedTo;
+  const now = new Date();
+  const minInitialFrom = new Date(now.getTime() - RETURNS_INITIAL_LOOKBACK_MS);
+  // On a newly connected shop, don't backfill closed returns older than the go-live cutoff.
+  let cursor =
+    conn.returnsSyncedTo ??
+    (settings?.missingSinceAt && settings.missingSinceAt.getTime() > minInitialFrom.getTime()
+      ? settings.missingSinceAt
+      : null);
   let saved = 0;
   try {
     for (;;) {
@@ -234,9 +241,9 @@ export async function detectFailedDeliveries(conn: ShopConnection, token: string
         events = await tiktokForwardEvents(conn, token, order.orderSn);
       }
 
-      // TikTok's rts_time is when shipment was arranged. No tracking events
-      // means the courier never took it: it's still on the shelf, not coming back.
-      const pickedUp = conn.platform === Platform.SHOPEE || events.length > 0;
+      // TikTok's rts_time is when shipment was arranged. Only treat as a failed
+      // delivery when tracking proves the courier actually had custody.
+      const pickedUp = conn.platform === Platform.SHOPEE || hasCourierCustody(events);
       if (pickedUp) {
         await upsertNormalizedReturn(
           mapFailedDelivery(

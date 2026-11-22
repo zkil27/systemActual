@@ -1,6 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import { ItemThumb } from "@/components/ui/ItemThumb";
 import { StatusText } from "@/components/ui/StatusPill";
+import { manilaDateTime } from "@/lib/ui/format";
 import { categoryLabel, getParcelStatus } from "@/lib/ui/parcel-status";
 
 export interface ParcelRowData {
@@ -10,6 +11,7 @@ export interface ParcelRowData {
   variationName: string | null;
   quantity: number;
   itemImageUrl: string | null;
+  courierReturnedToSellerAt?: string | null;
   physicallyReceivedAt: string | null;
   physicalCondition: string | null;
   isMissingDiscrepancy: boolean;
@@ -34,6 +36,13 @@ export function ParcelRow({
   onOpen: (id: string) => void;
 }) {
   const status = getParcelStatus(parcel);
+  const meta = [
+    categoryLabel(parcel.category),
+    parcel.variationName,
+    parcel.courierReturnedToSellerAt ? `Returned ${manilaDateTime(parcel.courierReturnedToSellerAt)}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <button
       type="button"
@@ -57,9 +66,7 @@ export function ParcelRow({
           </span>
           <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[15px] text-ink-3">
             <StatusText label={status.label} tone={status.tone} />
-            <span className="truncate">
-              · {[categoryLabel(parcel.category), parcel.variationName].filter(Boolean).join(" · ")}
-            </span>
+            <span className="truncate">· {meta}</span>
           </span>
         </span>
         <ChevronRight className="h-5 w-5 shrink-0 text-hairline-strong" />

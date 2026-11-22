@@ -8,6 +8,7 @@ import { getDailyTruthReport } from "@/lib/analytics/daily-returns";
 import { formatTelegramDailyBrief } from "@/lib/reports/brief";
 import { sendTelegramMessage } from "@/lib/telegram";
 import { formatWaveScheduleSetting, isContinuousWave, parseWaveTimes } from "@/lib/waves/schedule";
+import { getManilaDateString, getManilaDayBounds, getManilaTodayStr } from "@/lib/time";
 
 export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("preview") === "1") {
@@ -37,6 +38,7 @@ export async function GET(req: NextRequest) {
       stockSafetyBuffer: settings.stockSafetyBuffer,
       telegramChatId: settings.telegramChatId || "",
       telegramDailyBriefUtc: settings.telegramDailyBriefUtc,
+      missingSinceDate: settings.missingSinceAt ? getManilaDateString(settings.missingSinceAt) : "",
     },
     integrations: {
       shopeeEnvReady: isShopeeConfigured(),
@@ -62,6 +64,7 @@ export async function GET(req: NextRequest) {
 const updateSettingsSchema = z.object({
   action: z.enum([
     "update_settings",
+    "reset_missing_baseline",
     "add_staff",
     "update_staff_pin",
     "toggle_staff",
@@ -77,6 +80,7 @@ const updateSettingsSchema = z.object({
   overdueRtsDays: z.number().int().min(1).max(60).optional(),
   returnShippingEstimatePhp: z.number().min(0).max(10000).optional(),
   telegramChatId: z.string().max(64).optional(),
+  missingSinceDate: z.string().regex(/^(\d{4}-\d{2}-\d{2})?$/).nullable().optional(),
   staffId: z.string().optional(),
   staffName: z.string().min(1).max(40).optional(),
   pin: z.string().regex(/^\d{4}$/).optional(),
@@ -93,6 +97,12 @@ export async function POST(req: NextRequest) {
     const data = parsed.data;
 
     if (data.action === "update_settings") {
+      const missingSinceAt =
+        data.missingSinceDate !== undefined
+          ? data.missingSinceDate
+            ? getManilaDayBounds(data.missingSinceDate).start
+            : null
+          : undefined;
       await prisma.appSettings.upsert({
         where: { id: "default" },
         create: {
@@ -103,6 +113,7 @@ export async function POST(req: NextRequest) {
           returnShippingEstimatePhp: data.returnShippingEstimatePhp ?? 40,
           stockSafetyBuffer: data.stockSafetyBuffer ?? 0,
           telegramChatId: data.telegramChatId?.trim() || null,
+          ...(missingSinceAt !== undefined ? { missingSinceAt } : {}),
         },
         update: {
           ...(data.defaultUnitCostPhp !== undefined
@@ -130,9 +141,21 @@ export async function POST(req: NextRequest) {
           ...(data.telegramChatId !== undefined
             ? { telegramChatId: data.telegramChatId.trim() || null }
             : {}),
+          ...(missingSinceAt !== undefined ? { missingSinceAt } : {}),
         },
       });
       return NextResponse.json({ ok: true });
+    }
+
+    if (data.action === "reset_missing_baseline") {
+      const todayStr = getManilaTodayStr();
+      const { start } = getManilaDayBounds(todayStr);
+      await prisma.appSettings.upsert({
+        where: { id: "default" },
+        create: { id: "default", missingSinceAt: start },
+        update: { missingSinceAt: start },
+      });
+      return NextResponse.json({ ok: true, missingSinceDate: todayStr });
     }
 
     if (data.action === "add_staff" && data.staffName && data.pin) {

@@ -20,6 +20,7 @@ interface SettingsPayload {
     stockSafetyBuffer: number;
     telegramChatId: string;
     telegramDailyBriefUtc: string;
+    missingSinceDate: string;
   };
   integrations: {
     shopeeEnvReady: boolean;
@@ -136,6 +137,8 @@ export default function SettingsPage() {
   const [returnShipping, setReturnShipping] = useState("40");
   const [stockBuffer, setStockBuffer] = useState("0");
   const [telegramChatId, setTelegramChatId] = useState("");
+  const [missingSinceDate, setMissingSinceDate] = useState("");
+  const [resettingMissing, setResettingMissing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [newStaffName, setNewStaffName] = useState("");
   const [newStaffPin, setNewStaffPin] = useState("");
@@ -168,6 +171,7 @@ export default function SettingsPage() {
       setReturnShipping(String(payload.settings.returnShippingEstimatePhp));
       setStockBuffer(String(payload.settings.stockSafetyBuffer));
       setTelegramChatId(payload.settings.telegramChatId);
+      setMissingSinceDate(payload.settings.missingSinceDate ?? "");
     }
   }
 
@@ -182,7 +186,8 @@ export default function SettingsPage() {
       overdueDays !== String(data.settings.overdueRtsDays) ||
       returnShipping !== String(data.settings.returnShippingEstimatePhp) ||
       stockBuffer !== String(data.settings.stockSafetyBuffer) ||
-      telegramChatId !== data.settings.telegramChatId);
+      telegramChatId !== data.settings.telegramChatId ||
+      missingSinceDate !== (data.settings.missingSinceDate ?? ""));
 
   async function setShopWrites(shopConnectionId: string, label: string, active: boolean) {
     if (
@@ -221,6 +226,7 @@ export default function SettingsPage() {
           returnShippingEstimatePhp: Number(returnShipping),
           stockSafetyBuffer: Number(stockBuffer),
           telegramChatId,
+          missingSinceDate,
         }),
       });
       if (!res.ok) {
@@ -231,6 +237,34 @@ export default function SettingsPage() {
       await loadSettings();
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleResetMissingBaseline() {
+    if (
+      !window.confirm(
+        "Start fresh from today? Older returns stay saved in the database, but Today, 7 Days, Missing, and Overdue will only count from today onward."
+      )
+    ) {
+      return;
+    }
+    setResettingMissing(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reset_missing_baseline" }),
+      });
+      if (!res.ok) {
+        toast("Couldn't update", "error");
+        return;
+      }
+      const out = await res.json();
+      if (typeof out.missingSinceDate === "string") setMissingSinceDate(out.missingSinceDate);
+      toast("Tracking returns from today");
+      await loadSettings();
+    } finally {
+      setResettingMissing(false);
     }
   }
 
@@ -371,6 +405,37 @@ export default function SettingsPage() {
                 <NumberRow label="Shipping back" prefix="₱" value={returnShipping} onChange={setReturnShipping} />
                 <NumberRow label="Overdue after" suffix="days" value={overdueDays} onChange={setOverdueDays} />
                 <NumberRow label="Keep back from shops" suffix="pcs" value={stockBuffer} onChange={setStockBuffer} />
+              </Group>
+            </section>
+
+            <section>
+              <GroupLabel>Return tracking</GroupLabel>
+              <Group className="divide-y divide-hairline">
+                <label className="flex min-h-[64px] items-center justify-between gap-4 px-4 py-2.5">
+                  <span className="flex flex-col">
+                    <span className="text-[17px] text-ink">Track returns from</span>
+                    <span className="text-[13px] text-ink-3">
+                      Older returns stay saved in history, hidden from Today &amp; Missing
+                    </span>
+                  </span>
+                  <input
+                    type="date"
+                    aria-label="Track returns from"
+                    value={missingSinceDate}
+                    onChange={(e) => setMissingSinceDate(e.target.value)}
+                    className="tabular-nums h-9 rounded-lg bg-slate-100 px-2.5 text-[15px] font-semibold text-ink focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={handleResetMissingBaseline}
+                  disabled={resettingMissing}
+                  className={`${rowLinkClass} w-full text-left disabled:opacity-50`}
+                >
+                  <span className="text-[17px] text-brand">
+                    {resettingMissing ? "Updating…" : "Start fresh from today"}
+                  </span>
+                </button>
               </Group>
             </section>
 

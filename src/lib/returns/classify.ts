@@ -31,6 +31,7 @@ const SHOPEE_RETURN_STATUS: Record<string, DigitalStatus> = {
 const SHOPEE_REVERSE_DELIVERED = new Set([
   "LOGISTICS_DELIVERY_DONE",
   "LOGISTICS_DELIVERED",
+  "LOGISTICS_RETURN_DONE",
   "DELIVERED",
   "RETURN_DELIVERED",
 ]);
@@ -158,9 +159,11 @@ export function isFailedDeliveryCandidate(order: {
 /** Tracking event wording/statuses meaning "delivered back to the seller". Confirm with live data. */
 const RETURNED_TO_SELLER_PATTERNS = [
   /returned to (the )?seller/i,
+  /(has been|was|is)\s+returned to you/i,
   /return(ed)? delivered/i,
   /delivered back/i,
   /delivered to (the )?seller/i,
+  /delivered to you/i,
   /successfully returned/i,
   /naibalik/i, // Tagalog: "returned"
   /^LOGISTICS_RETURN_DONE$/i,
@@ -169,12 +172,27 @@ const RETURNED_TO_SELLER_PATTERNS = [
 
 /** Wording meaning delivery failed / heading back, used for the tagged time. */
 const DELIVERY_FAILED_PATTERNS = [
-  /delivery (attempt )?(failed|unsuccessful)/i,
+  /delivery (attempt )?.*(failed|unsuccessful)/i,
   /failed delivery/i,
-  /returning to (the )?seller/i,
+  /will be returned to (you|the seller|seller)/i,
+  /returning to (the )?(seller|you)/i,
   /return to sender/i,
   /refused/i,
   /^LOGISTICS_DELIVERY_FAILED$/i,
+];
+
+const COURIER_CUSTODY_PATTERNS = [
+  /picked\s*up/i,
+  /collected\s+by/i,
+  /in\s+transit/i,
+  /departed/i,
+  /arrived\s+at/i,
+  /out\s+for\s+delivery/i,
+  /sorting\s+(facility|center|hub)/i,
+  /delivery\s+hub/i,
+  /shipping\s+hub/i,
+  /^IN_TRANSIT$/i,
+  /^DELIVERED$/i,
 ];
 
 export interface TrackingEvent {
@@ -185,6 +203,12 @@ export interface TrackingEvent {
 
 function matches(patterns: RegExp[], e: TrackingEvent): boolean {
   return patterns.some((p) => p.test(e.description) || (e.status ? p.test(e.status) : false));
+}
+
+/** True when tracking proves the courier took custody (filters pre-pickup cancellations). */
+export function hasCourierCustody(events: TrackingEvent[]): boolean {
+  if (findReturnedToSeller(events) || findDeliveryFailed(events)) return true;
+  return events.some((e) => matches(COURIER_CUSTODY_PATTERNS, e));
 }
 
 /** Earliest event meaning delivered back to the seller, if any. */

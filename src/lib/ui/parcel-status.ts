@@ -20,6 +20,7 @@ export interface ParcelStatusInput {
   isMissingDiscrepancy: boolean;
   physicalCondition: string | null;
   physicallyReceivedAt: string | null;
+  courierReturnedToSellerAt?: string | null;
   isOverdueRts?: boolean;
   /** False for refund-only returns: nothing is coming back. */
   expectsPhysicalReturn?: boolean;
@@ -34,6 +35,7 @@ export function getParcelStatus(p: ParcelStatusInput): ParcelStatus {
   if (p.physicallyReceivedAt) return { label: "Arrived", tone: "arrived" };
   if (p.digitalStatus === "CANCELLED_RETURN") return { label: "Cancelled", tone: "neutral" };
   if (p.expectsPhysicalReturn === false) return { label: "Refund only", tone: "neutral" };
+  if (p.courierReturnedToSellerAt) return { label: "Returned to seller", tone: "neutral" };
   if (p.isOverdueRts) return { label: "Overdue", tone: "overdue" };
   return { label: "On the way", tone: "neutral" };
 }

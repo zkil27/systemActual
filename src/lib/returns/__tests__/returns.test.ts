@@ -5,11 +5,12 @@ import {
   classifyTikTokReturn,
   findDeliveryFailed,
   findReturnedToSeller,
+  hasCourierCustody,
   isFailedDeliveryCandidate,
 } from "@/lib/returns/classify";
 import { returnDedupeKey } from "@/lib/returns/keys";
 import { mapFailedDelivery, mapShopeeReturn, mapTikTokReturn, tiktokTrackingEvents } from "@/lib/returns/map";
-import { isExpectedAtDoor, isMissingDiscrepancy, isOverdueRts } from "@/lib/returns/rules";
+import { isActiveSince, isExpectedAtDoor, isMissingDiscrepancy, isOverdueRts } from "@/lib/returns/rules";
 import {
   shopeeInTransitReturn,
   shopeeNormalReturn,
@@ -188,13 +189,44 @@ describe("keys", () => {
 });
 
 describe("tracking text", () => {
-  const ev = (description: string, t: number) => ({ time: new Date(t), description });
+  const ev = (description: string, t: number, status?: string) => ({ time: new Date(t), description, status });
   it("finds the earliest delivered-back event", () => {
     expect(findReturnedToSeller([ev("In transit", 1), ev("Successfully returned to seller", 5), ev("Returned to seller", 9)])?.getTime()).toBe(5);
     expect(findReturnedToSeller([ev("Delivered to buyer", 1)])).toBeNull();
   });
-  it("finds the failed-delivery event", () => {
+  it("matches Shopee 'Parcel has been returned to you' without matching future-tense 'will be returned to you'", () => {
+    expect(
+      findReturnedToSeller([
+        ev("Parcel will be returned to you due to unsuccessful delivery attempts to buyer", 10),
+        ev("Parcel has been arrived at the delivery hub : Taytay,TTP_PDC", 20),
+        ev("Parcel has been returned to you", 30),
+      ])?.getTime()
+    ).toBe(30);
+    expect(
+      findReturnedToSeller([
+        ev("Parcel will be returned to you due to unsuccessful delivery attempts to buyer", 10),
+      ])
+    ).toBeNull();
+  });
+  it("finds the failed-delivery event including Shopee Flash Express wording", () => {
     expect(findDeliveryFailed([ev("Delivery unsuccessful: consignee refused", 3)])?.getTime()).toBe(3);
+    expect(
+      findDeliveryFailed([
+        ev("Delivery attempt to buyer was unsuccessful :Recipient Missed Delivery", 5),
+        ev("Parcel will be returned to you due to unsuccessful delivery attempts to buyer", 9),
+      ])?.getTime()
+    ).toBe(5);
+    expect(
+      findDeliveryFailed([ev("Parcel will be returned to you due to unsuccessful delivery attempts to buyer", 9)])?.getTime()
+    ).toBe(9);
+  });
+  it("requires actual courier pickup/transit events for courier custody", () => {
+    expect(hasCourierCustody([])).toBe(false);
+    expect(hasCourierCustody([ev("Order created", 1), ev("Waiting for pickup", 2)])).toBe(false);
+    expect(hasCourierCustody([ev("Order created", 1), ev("Picked up by courier", 2)])).toBe(true);
+    expect(hasCourierCustody([ev("Arrived at sorting facility", 2)])).toBe(true);
+    expect(hasCourierCustody([ev("Delivery attempt failed", 2)])).toBe(true);
+    expect(hasCourierCustody([ev("Parcel has been returned to you", 2)])).toBe(true);
   });
 });
 
@@ -241,6 +273,56 @@ describe("missing / overdue rules", () => {
     expect(isMissingDiscrepancy({ ...delivered, expectsPhysicalReturn: false })).toBe(false);
     expect(isMissingDiscrepancy({ ...delivered, digitalStatus: DigitalStatus.CANCELLED_RETURN })).toBe(false);
     expect(isOverdueRts({ ...base, expectsPhysicalReturn: false }, 10, now)).toBe(false);
+  });
+
+  it("respects missingSinceAt baseline cutoff", () => {
+    const delivered = { ...base, courierReturnedToSellerAt: new Date("2026-11-20T00:00:00Z") };
+    const before = new Date("2026-11-19T00:00:00Z");
+    const exact = new Date("2026-11-20T00:00:00Z");
+    const after = new Date("2026-11-21T00:00:00Z");
+    expect(isMissingDiscrepancy(delivered, null)).toBe(true);
+    expect(isMissingDiscrepancy(delivered, before)).toBe(true);
+    expect(isMissingDiscrepancy(delivered, exact)).toBe(true);
+    expect(isMissingDiscrepancy(delivered, after)).toBe(false);
+  });
+
+  it("applies soft go-live cutoff across active and overdue checks", () => {
+    const startAt = new Date("2026-11-21T16:00:00Z"); // 2026-11-22 00:00 Manila
+    const preTagged = {
+      ...base,
+      digitalReturnTaggedAt: new Date("2026-11-08T00:00:00Z"),
+      courierReturnedToSellerAt: null,
+      physicallyReceivedAt: null,
+    };
+    const preReturned = {
+      ...preTagged,
+      courierReturnedToSellerAt: new Date("2026-11-20T08:00:00Z"),
+    };
+    const returnedAfterStart = {
+      ...preTagged,
+      courierReturnedToSellerAt: new Date("2026-11-22T02:00:00Z"),
+    };
+    const scannedAfterStart = {
+      ...preReturned,
+      physicallyReceivedAt: new Date("2026-11-22T03:00:00Z"),
+    };
+    const taggedAfterStart = {
+      ...base,
+      digitalReturnTaggedAt: new Date("2026-11-22T01:00:00Z"),
+      courierReturnedToSellerAt: null,
+      physicallyReceivedAt: null,
+    };
+
+    expect(isActiveSince(preTagged, null)).toBe(true);
+    expect(isActiveSince(preTagged, startAt)).toBe(false);
+    expect(isActiveSince(preReturned, startAt)).toBe(false);
+    expect(isActiveSince(returnedAfterStart, startAt)).toBe(true);
+    expect(isActiveSince(scannedAfterStart, startAt)).toBe(true);
+    expect(isActiveSince(taggedAfterStart, startAt)).toBe(true);
+
+    // Pre-go-live unreturned parcel is hidden from Overdue; post-go-live one >10d is Overdue
+    expect(isOverdueRts(preTagged, 10, now, startAt)).toBe(false);
+    expect(isOverdueRts(taggedAfterStart, 10, new Date("2026-12-03T00:00:00Z"), startAt)).toBe(true);
   });
 });
 

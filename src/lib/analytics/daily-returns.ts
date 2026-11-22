@@ -16,7 +16,9 @@ import { isOnline } from "@/lib/print/device";
 import { getReadyCounts } from "@/lib/waves/build";
 import { isContinuousWave } from "@/lib/waves/schedule";
 import {
+  activeSinceWhere,
   costAtRiskPhp,
+  isActiveSince,
   isMissingDiscrepancy as isMissing,
   isOverdueRts as isOverdue,
   missingWhere,
@@ -45,6 +47,7 @@ export interface DailyTruthReport {
   money: MoneySummary;
   defaultUnitCostPhp: number;
   overdueRtsDays: number;
+  missingSinceAt: string | null;
   failedDelivery: CategoryDailyTruth;
   returnRefund: CategoryDailyTruth;
   combined: {
@@ -155,6 +158,10 @@ export async function getDailyTruthReport(options?: {
   const overdueRtsDays = settings?.overdueRtsDays ?? 10;
   const returnShippingEstimatePhp = Number(settings?.returnShippingEstimatePhp ?? 40);
   const stockSafetyBuffer = settings?.stockSafetyBuffer ?? 0;
+  const missingSinceAt = settings?.missingSinceAt ?? null;
+  const activeFilter = activeSinceWhere(missingSinceAt);
+  const effectiveStart =
+    missingSinceAt && missingSinceAt.getTime() > start.getTime() ? missingSinceAt : start;
   const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   const connectedPlatforms = new Set(
     shops.filter((s) => !s.isDemo && s.accessToken).map((s) => s.platform)
@@ -178,13 +185,18 @@ export async function getDailyTruthReport(options?: {
     withSpan("dashboard.returnParcels", () =>
       prisma.returnParcel.findMany({
         where: {
-          OR: [
-            { digitalReturnTaggedAt: { gte: start, lt: end } },
-            { courierReturnedToSellerAt: { gte: start, lt: end } },
-            { physicallyReceivedAt: { gte: start, lt: end } },
-            missingWhere,
-            overdueWhere(overdueRtsDays, now),
-            { disputeDeadlineAt: { gt: new Date(now.getTime() - 2 * 3600_000), lte: in24h } },
+          AND: [
+            ...(activeFilter ? [activeFilter] : []),
+            {
+              OR: [
+                { digitalReturnTaggedAt: { gte: effectiveStart, lt: end } },
+                { courierReturnedToSellerAt: { gte: effectiveStart, lt: end } },
+                { physicallyReceivedAt: { gte: effectiveStart, lt: end } },
+                missingWhere(missingSinceAt),
+                overdueWhere(overdueRtsDays, now, missingSinceAt),
+                { disputeDeadlineAt: { gt: new Date(now.getTime() - 2 * 3600_000), lte: in24h } },
+              ],
+            },
           ],
         },
         select: {
@@ -267,6 +279,7 @@ export async function getDailyTruthReport(options?: {
   const attentionCandidates: DailyTruthReport["attentionParcels"] = [];
 
   for (const p of parcels) {
+    if (!isActiveSince(p, missingSinceAt)) continue;
     const bucket =
       p.category === ReturnCategory.FAILED_DELIVERY ? failedDelivery : returnRefund;
     const cMap = courierMaps[p.category];
@@ -275,12 +288,12 @@ export async function getDailyTruthReport(options?: {
       returnShippingEstimatePhp
     );
 
-    const taggedInRange = isWithinBounds(p.digitalReturnTaggedAt, start, end);
-    const courierReturnedInRange = isWithinBounds(p.courierReturnedToSellerAt, start, end);
-    const arrivedInRange = isWithinBounds(p.physicallyReceivedAt, start, end);
+    const taggedInRange = isWithinBounds(p.digitalReturnTaggedAt, effectiveStart, end);
+    const courierReturnedInRange = isWithinBounds(p.courierReturnedToSellerAt, effectiveStart, end);
+    const arrivedInRange = isWithinBounds(p.physicallyReceivedAt, effectiveStart, end);
 
-    const isMissingDiscrepancy = isMissing(p);
-    const isOverdueRts = isOverdue(p, overdueRtsDays, now);
+    const isMissingDiscrepancy = isMissing(p, missingSinceAt);
+    const isOverdueRts = isOverdue(p, overdueRtsDays, now, missingSinceAt);
     const isUrgentDeadline = Boolean(
       p.disputeDeadlineAt &&
         p.disputeDeadlineAt.getTime() > now.getTime() - 2 * 60 * 60 * 1000 &&
@@ -435,6 +448,7 @@ export async function getDailyTruthReport(options?: {
     money,
     defaultUnitCostPhp,
     overdueRtsDays,
+    missingSinceAt: missingSinceAt?.toISOString() ?? null,
     failedDelivery,
     returnRefund,
     combined: {

@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PhysicalCondition, Prisma, ReturnCategory } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isMissingDiscrepancy, isOverdueRts, missingWhere, overdueWhere } from "@/lib/returns/rules";
+import {
+  activeSinceWhere,
+  arrivedWhere,
+  isMissingDiscrepancy,
+  isOverdueRts,
+  missingWhere,
+  overdueWhere,
+  returnedToSellerWhere,
+} from "@/lib/returns/rules";
 import { getManilaDateRangeBounds } from "@/lib/time";
 
 export async function GET(req: NextRequest) {
@@ -12,15 +20,25 @@ export async function GET(req: NextRequest) {
 
     const settings = await prisma.appSettings.findUnique({ where: { id: "default" } });
     const overdueDays = settings?.overdueRtsDays ?? 10;
+    const missingSinceAt = settings?.missingSinceAt ?? null;
+    const now = new Date();
 
     const conditions: Prisma.ReturnParcelWhereInput[] = [];
+    const activeFilter = activeSinceWhere(missingSinceAt);
+    if (activeFilter) {
+      conditions.push(activeFilter);
+    }
 
-    if (filter === "failed") {
+    if (filter === "returned") {
+      conditions.push(returnedToSellerWhere);
+    } else if (filter === "arrived") {
+      conditions.push(arrivedWhere(missingSinceAt));
+    } else if (filter === "failed") {
       conditions.push({ category: ReturnCategory.FAILED_DELIVERY });
     } else if (filter === "refund") {
       conditions.push({ category: ReturnCategory.RETURN_REFUND });
     } else if (filter === "missing") {
-      conditions.push(missingWhere);
+      conditions.push(missingWhere(missingSinceAt));
     } else if (filter === "issues") {
       conditions.push({
         physicalCondition: {
@@ -32,7 +50,7 @@ export async function GET(req: NextRequest) {
         },
       });
     } else if (filter === "overdue") {
-      conditions.push(overdueWhere(overdueDays));
+      conditions.push(overdueWhere(overdueDays, now, missingSinceAt));
     }
 
     const dateBounds = getManilaDateRangeBounds({
@@ -46,12 +64,18 @@ export async function GET(req: NextRequest) {
         ...(dateBounds.start ? { gte: dateBounds.start } : {}),
         ...(dateBounds.end ? { lt: dateBounds.end } : {}),
       };
-      conditions.push({
-        OR: [
-          { digitalReturnTaggedAt: dtFilter },
-          { digitalReturnTaggedAt: null, createdAt: dtFilter },
-        ],
-      });
+      if (filter === "returned" || filter === "missing") {
+        conditions.push({ courierReturnedToSellerAt: dtFilter });
+      } else if (filter === "arrived") {
+        conditions.push({ physicallyReceivedAt: dtFilter });
+      } else {
+        conditions.push({
+          OR: [
+            { digitalReturnTaggedAt: dtFilter },
+            { digitalReturnTaggedAt: null, createdAt: dtFilter },
+          ],
+        });
+      }
     }
 
     if (q) {
@@ -99,8 +123,6 @@ export async function GET(req: NextRequest) {
       }),
     ]);
 
-    const now = new Date();
-
     return NextResponse.json({
       totalCount,
       limit,
@@ -119,8 +141,8 @@ export async function GET(req: NextRequest) {
         courierReturnedToSellerAt: p.courierReturnedToSellerAt?.toISOString() ?? null,
         physicallyReceivedAt: p.physicallyReceivedAt?.toISOString() ?? null,
         physicalCondition: p.physicalCondition,
-        isMissingDiscrepancy: isMissingDiscrepancy(p),
-        isOverdueRts: isOverdueRts(p, overdueDays, now),
+        isMissingDiscrepancy: isMissingDiscrepancy(p, missingSinceAt),
+        isOverdueRts: isOverdueRts(p, overdueDays, now, missingSinceAt),
         expectsPhysicalReturn: p.expectsPhysicalReturn,
       })),
     });

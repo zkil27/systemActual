@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { DigitalStatus, Platform, ReturnCategory } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
   getScannerSession,
   redactOutboundPackageForStaff,
   redactParcelForStaff,
 } from "@/lib/auth";
+import { upsertNormalizedReturn } from "@/lib/connectors/normalizer";
 import { MIN_SUFFIX_LENGTH, resolveScanMatch } from "@/lib/returns/scan-match";
 import {
   evaluateOutboundScan,
@@ -187,7 +189,71 @@ export async function GET(req: NextRequest) {
         },
         { status: 409 }
       );
-    default:
+    default: {
+      // Fallback: if a rider physically returns an order before Shopee/TikTok syncs
+      // the return status, match it from the outbound Package/Order ledger so packers
+      // aren't blocked at the receiving table.
+      const outMatch = await withSpan("scan.lookup.returnFallback", () =>
+        findOutboundPackagesByCode(code)
+      );
+      if (outMatch.kind === "one") {
+        const ord = outMatch.pkg.order;
+        const firstLine = ord.lines[0];
+        const items = ord.lines.map((l) => ({
+          name: l.name,
+          variationName: l.variationName,
+          quantity: l.quantity,
+          imageUrl: l.imageUrl,
+          listingId: l.listingId,
+          variationId: l.variationId,
+        }));
+        const now = new Date();
+        const created = await upsertNormalizedReturn({
+          shopConnectionId: ord.shopConnectionId,
+          platform: ord.platform,
+          orderSn: ord.orderSn,
+          forwardTrackingNumber: outMatch.pkg.trackingNumber ?? null,
+          courier:
+            outMatch.pkg.carrier ??
+            (ord.platform === Platform.SHOPEE ? "SPX Express" : "J&T Express"),
+          category: ReturnCategory.FAILED_DELIVERY,
+          digitalStatus: DigitalStatus.RETURNING_TO_SELLER,
+          returnReason: "Arrived at warehouse (scanned early)",
+          itemSummary: firstLine
+            ? ord.lines.length > 1
+              ? `${firstLine.name} +${ord.lines.length - 1} more`
+              : firstLine.name
+            : "Fashion Item",
+          variationName: firstLine?.variationName ?? null,
+          quantity: Math.max(1, ord.lines.reduce((n, l) => n + l.quantity, 0)),
+          itemImageUrl: firstLine?.imageUrl ?? null,
+          items,
+          orderTotalPhp: Number(ord.totalPhp),
+          orderCreatedAt: ord.platformCreatedAt,
+          digitalReturnTaggedAt: now,
+          courierReturnedToSellerAt: null,
+          expectsPhysicalReturn: true,
+          source: "WAREHOUSE_SCAN",
+          rawStatus: "EARLY_ARRIVAL",
+          eventDescription: "Scanned physically before platform return sync",
+          eventTimestamp: now,
+        });
+        return NextResponse.json({
+          found: true,
+          kind: "return",
+          parcel: redactParcelForStaff(created),
+        });
+      }
+      if (outMatch.kind === "ambiguous") {
+        return NextResponse.json(
+          {
+            found: false,
+            error: `More than one parcel ends in ${code}. Scan the full barcode.`,
+          },
+          { status: 409 }
+        );
+      }
       return NextResponse.json({ found: false, parcel: null }, { status: 404 });
+    }
   }
 }

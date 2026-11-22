@@ -98,12 +98,15 @@ export async function POST(req: NextRequest) {
     );
 
     // Sellable returns go back on the shelf (once per parcel item) in parallel with missing count.
-    const [, pendingMissingCount] = await Promise.all([
+    const [, settings] = await Promise.all([
       recordGoodReturn(parcel.id).catch((err) => {
         console.error("[scan] restock", err);
       }),
-      prisma.returnParcel.count({ where: missingWhere }),
+      prisma.appSettings.findUnique({ where: { id: "default" }, select: { missingSinceAt: true } }),
     ]);
+    const pendingMissingCount = await prisma.returnParcel.count({
+      where: missingWhere(settings?.missingSinceAt ?? null),
+    });
 
     if (
       condition === PhysicalCondition.WRONG_OR_SWAPPED_ITEM ||
@@ -158,6 +161,7 @@ export async function POST(req: NextRequest) {
           category: updatedParcel.category,
           itemSummary: updatedParcel.itemSummary,
           variationName: updatedParcel.variationName,
+          quantity: updatedParcel.quantity,
           itemImageUrl: updatedParcel.itemImageUrl,
         },
       },

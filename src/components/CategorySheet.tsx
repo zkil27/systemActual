@@ -5,12 +5,13 @@ import { ButtonLink } from "@/components/ui/Button";
 import { Sheet } from "@/components/ui/Sheet";
 import type { CategoryDailyTruth } from "@/lib/analytics/daily-returns";
 import { formatPeso, shortCourier } from "@/lib/ui/format";
+import { returnsUrl, type ReturnDateFilter, type ReturnFilter } from "@/lib/ui/returns-filter";
 
 export type CategoryKey = "failed" | "refund";
 
 export const CATEGORY_META: Record<
   CategoryKey,
-  { title: string; firstStage: string; dot: string; filter: string }
+  { title: string; firstStage: string; dot: string; filter: ReturnFilter }
 > = {
   failed: { title: "Failed delivery", firstStage: "Tagged", dot: "bg-amber-500", filter: "failed" },
   refund: { title: "Buyer return", firstStage: "Requested", dot: "bg-blue-600", filter: "refund" },
@@ -41,10 +42,12 @@ function RowGroup({ label, children }: { label?: string; children: React.ReactNo
 export function CategorySheet({
   category,
   stats,
+  dateFilter,
   onClose,
 }: {
   category: CategoryKey | null;
   stats: CategoryDailyTruth | null;
+  dateFilter?: Partial<ReturnDateFilter>;
   onClose: () => void;
 }) {
   // Keep the last content so the sheet isn't blank while it slides away.
@@ -98,7 +101,7 @@ export function CategorySheet({
             )}
           </RowGroup>
 
-          <ButtonLink href={`/returns?filter=${meta.filter}`} full>
+          <ButtonLink href={returnsUrl(meta.filter, dateFilter)} full>
             See parcels
           </ButtonLink>
         </div>

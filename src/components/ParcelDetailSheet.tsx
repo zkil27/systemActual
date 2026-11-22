@@ -216,7 +216,7 @@ function ParcelDetailBody({ parcelId }: { parcelId: string | null }) {
           label={parcel.category === "FAILED_DELIVERY" ? "Tagged" : "Requested"}
           at={parcel.digitalReturnTaggedAt}
         />
-        <Stage label="Sent back" at={parcel.courierReturnedToSellerAt} />
+        <Stage label="Returned to seller" at={parcel.courierReturnedToSellerAt} />
         <Stage
           label="Arrived"
           at={parcel.physicallyReceivedAt}

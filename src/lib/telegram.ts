@@ -44,8 +44,12 @@ export async function buildTelegramReply(rawInput: string): Promise<string> {
   const text = rawInput.trim().toLowerCase();
 
   if (text.startsWith("/missing") || text.includes("missing") || text.includes("kulang") || text.includes("wala pa")) {
+    const settings = await prisma.appSettings.findUnique({
+      where: { id: "default" },
+      select: { missingSinceAt: true },
+    });
     const missing = await prisma.returnParcel.findMany({
-      where: missingWhere,
+      where: missingWhere(settings?.missingSinceAt ?? null),
       orderBy: { courierReturnedToSellerAt: "desc" },
       take: 15,
     });
@@ -71,7 +75,7 @@ export async function buildTelegramReply(rawInput: string): Promise<string> {
     const settings = await prisma.appSettings.findUnique({ where: { id: "default" } });
     const days = settings?.overdueRtsDays ?? 10;
     const overdue = await prisma.returnParcel.findMany({
-      where: overdueWhere(days),
+      where: overdueWhere(days, new Date(), settings?.missingSinceAt ?? null),
       orderBy: { digitalReturnTaggedAt: "asc" },
       take: 15,
     });

@@ -17,6 +17,7 @@ import type { CategoryDailyTruth, DailyTruthReport } from "@/lib/analytics/daily
 import { formatPeso, formatSignedPeso, manilaDayLabel, manilaTime } from "@/lib/ui/format";
 import type { MoneySummary } from "@/lib/money/summary";
 import { haptic } from "@/lib/ui/motion";
+import { returnsUrl } from "@/lib/ui/returns-filter";
 import { useLiveRefresh } from "@/lib/ui/use-live-refresh";
 
 type Range = "today" | "yesterday" | "7days";
@@ -46,7 +47,7 @@ function CategoryCard({
   const meta = CATEGORY_META[kind];
   const stages = [
     { label: meta.firstStage, value: stats.taggedCount, className: "text-ink" },
-    { label: "Sent back", value: stats.courierReturnedCount, className: "text-ink" },
+    { label: "Returned to seller", value: stats.courierReturnedCount, className: "text-ink" },
     { label: "Arrived", value: stats.physicallyArrivedCount, className: "text-arrived" },
   ];
   return (
@@ -70,7 +71,7 @@ function CategoryCard({
               value={s.value}
               className={`block text-[34px] font-extrabold leading-none tracking-[-0.02em] ${s.className}`}
             />
-            <span className="mt-2 block text-[14px] font-medium text-ink-3">{s.label}</span>
+            <span className="mt-2 block text-[13px] font-medium leading-tight text-ink-3">{s.label}</span>
           </span>
         ))}
       </span>
@@ -114,7 +115,71 @@ function MoneyCard({ money }: { money: MoneySummary }) {
   );
 }
 
-function MissingStatus({ report }: { report: DailyTruthReport }) {
+function ReturnTruthCards({
+  report,
+  range,
+  customDate,
+}: {
+  report: DailyTruthReport;
+  range: Range;
+  customDate: string;
+}) {
+  const dateFilter = customDate ? { date: customDate } : { range };
+  const returnedHref = returnsUrl("returned", dateFilter);
+  const arrivedHref = returnsUrl("arrived", dateFilter);
+
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <Link
+        href={returnedHref}
+        className="pressable block rounded-[var(--radius-card)] bg-white p-4 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-float)] sm:p-5"
+      >
+        <span className="flex items-center justify-between gap-1.5">
+          <span className="truncate text-[15px] font-bold text-ink sm:text-[17px]">Returned to seller</span>
+          <ChevronRight className="h-4 w-4 shrink-0 text-ink-3 sm:h-5 sm:w-5" />
+        </span>
+        <span className="mt-3 block">
+          <AnimatedNumber
+            value={report.combined.courierReturnedCount}
+            className="text-[32px] font-extrabold leading-none tracking-[-0.02em] text-ink sm:text-[36px]"
+          />
+        </span>
+        <span className="mt-2 block truncate text-[13px] text-ink-3 tabular-nums sm:text-[14px]">
+          Failed {report.failedDelivery.courierReturnedCount} · Buyer {report.returnRefund.courierReturnedCount}
+        </span>
+      </Link>
+
+      <Link
+        href={arrivedHref}
+        className="pressable block rounded-[var(--radius-card)] bg-white p-4 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-float)] sm:p-5"
+      >
+        <span className="flex items-center justify-between gap-1.5">
+          <span className="truncate text-[15px] font-bold text-ink sm:text-[17px]">Arrived</span>
+          <ChevronRight className="h-4 w-4 shrink-0 text-ink-3 sm:h-5 sm:w-5" />
+        </span>
+        <span className="mt-3 block">
+          <AnimatedNumber
+            value={report.combined.physicallyArrivedCount}
+            className="text-[32px] font-extrabold leading-none tracking-[-0.02em] text-arrived sm:text-[36px]"
+          />
+        </span>
+        <span className="mt-2 block truncate text-[13px] text-ink-3 sm:text-[14px]">
+          Scanned by staff
+        </span>
+      </Link>
+    </div>
+  );
+}
+
+function MissingStatus({
+  report,
+  range,
+  customDate,
+}: {
+  report: DailyTruthReport;
+  range: Range;
+  customDate: string;
+}) {
   const missing = report.combined.missingNowCount;
   const { overdueRtsCount, urgentDeadlineCount } = report.combined;
 
@@ -132,20 +197,22 @@ function MissingStatus({ report }: { report: DailyTruthReport }) {
           />
           <span className="min-w-0 flex-1">
             <span className="block text-[18px] font-bold leading-tight">Missing</span>
-            <span className="block text-[15px] font-medium text-white">Sent back, not scanned</span>
+            <span className="block text-[15px] font-medium text-white">Returned to seller, not scanned</span>
           </span>
           <ChevronRight className="h-6 w-6 text-white/80" />
         </Link>
       ) : (
         <div
           key="clear"
-          className="anim-fade-in flex items-center gap-2.5 px-1 py-1 lg:flex-1 lg:rounded-[var(--radius-card)] lg:bg-white lg:px-6 lg:py-5 lg:shadow-[var(--shadow-card)]"
+          className="anim-fade-in flex items-center gap-2.5 px-1 py-1 lg:rounded-[var(--radius-card)] lg:bg-white lg:px-6 lg:py-4 lg:shadow-[var(--shadow-card)]"
         >
           <CheckCircle2 className="h-6 w-6 text-arrived" />
           <span className="text-[17px] font-bold text-ink">All clear</span>
           <span className="text-[16px] text-ink-3">Nothing missing</span>
         </div>
       )}
+
+      <ReturnTruthCards report={report} range={range} customDate={customDate} />
 
       {(overdueRtsCount > 0 || urgentDeadlineCount > 0) && (
         <div className="flex flex-wrap gap-2">
@@ -453,7 +520,7 @@ export default function DashboardPage() {
             </div>
 
             <div className="lg:col-span-7">
-              <MissingStatus report={report} />
+              <MissingStatus report={report} range={range} customDate={customDate} />
             </div>
 
             {report.operations && <OperationsStrip ops={report.operations} />}
@@ -549,6 +616,7 @@ export default function DashboardPage() {
               ? (report?.failedDelivery ?? null)
               : null
         }
+        dateFilter={customDate ? { date: customDate } : { range }}
         onClose={() => setOpenCategory(null)}
       />
 

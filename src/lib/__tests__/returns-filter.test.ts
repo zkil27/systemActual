@@ -29,9 +29,13 @@ describe("returns filter URL mapping", () => {
   });
 
   it("keeps the filters the Home screen links to", () => {
-    for (const id of ["missing", "failed", "refund", "overdue"]) {
+    for (const id of ["returned", "arrived", "missing", "failed", "refund", "overdue"]) {
       expect(parseReturnFilter(id)).toBe(id);
     }
+    expect(RETURN_FILTERS.some((f) => f.id === "returned")).toBe(true);
+    expect(RETURN_FILTERS.some((f) => f.id === "arrived")).toBe(true);
+    expect(returnsUrl("returned", { range: "today" })).toBe("/returns?filter=returned&range=today");
+    expect(returnsUrl("arrived", { range: "today" })).toBe("/returns?filter=arrived&range=today");
   });
 
   it("round-trips date presets and custom date ranges through the URL", () => {

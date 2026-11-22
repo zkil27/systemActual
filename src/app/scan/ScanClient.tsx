@@ -5,9 +5,11 @@ import Link from "next/link";
 import {
   AlertTriangle,
   Camera,
+  Check,
   ChevronLeft,
   ChevronRight,
   Clock,
+  Copy,
   Delete,
   Lock,
   OctagonAlert,
@@ -48,6 +50,7 @@ export interface RecentScanItem {
     category: string;
     itemSummary: string;
     variationName: string | null;
+    quantity?: number;
     itemImageUrl: string | null;
   };
 }
@@ -164,6 +167,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
   const [pendingMissing, setPendingMissing] = useState(initial.pendingMissing);
   const [recentScans, setRecentScans] = useState<RecentScanItem[]>(initial.recentScans);
   const [recentOpen, setRecentOpen] = useState(false);
+  const [copiedList, setCopiedList] = useState(false);
 
   const [tab, setTab] = useState<PackerTab>("returns");
   const [scrolled, setScrolled] = useState(false);
@@ -641,7 +645,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
         setPendingMissing(data.pendingMissingCount);
       }
       if (data.recentScan) {
-        setRecentScans((prev) => [data.recentScan as RecentScanItem, ...prev].slice(0, 8));
+        setRecentScans((prev) => [data.recentScan as RecentScanItem, ...prev]);
       }
     } catch {
       setLookupError("No connection. Try again.");
@@ -1046,7 +1050,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
 
               {pendingMissing > 0 && (
                 <div className="flex min-h-[52px] items-center justify-between gap-3 px-4 py-3">
-                  <span className="text-[16px] font-semibold text-ink">Sent back, waiting to scan</span>
+                  <span className="text-[16px] font-semibold text-ink">Returned to seller, waiting to scan</span>
                   <span className="text-[15px] font-bold text-missing-ink tabular-nums">
                     {pendingMissing}
                   </span>
@@ -1226,28 +1230,95 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
         )}
       </main>
 
-      {/* Sheet 1: Recent return scans */}
+      {/* Sheet 1: End-of-shift return list */}
       <Sheet open={recentOpen} onClose={() => setRecentOpen(false)} title="Your returns today">
         {recentScans.length === 0 ? (
           <p className="py-6 text-[16px] text-ink-3">Nothing scanned yet</p>
         ) : (
-          <ul className="divide-y divide-hairline">
-            {recentScans.map((s) => {
-              const good = !findCondition(s.condition)?.needsPhoto;
+          <div className="space-y-4">
+            {(() => {
+              const issueCount = recentScans.filter((s) => Boolean(findCondition(s.condition)?.needsPhoto)).length;
+              const goodCount = recentScans.length - issueCount;
+              const handleCopyList = async () => {
+                const courierCounts = new Map<string, number>();
+                for (const s of recentScans) {
+                  const c = shortCourier(s.parcel.courier);
+                  courierCounts.set(c, (courierCounts.get(c) ?? 0) + 1);
+                }
+                const byCourier = Array.from(courierCounts.entries())
+                  .map(([c, n]) => `${c}: ${n}`)
+                  .join(" · ");
+                const day = new Intl.DateTimeFormat("en-PH", {
+                  timeZone: "Asia/Manila",
+                  month: "short",
+                  day: "numeric",
+                }).format(new Date());
+                const lines = [
+                  `RETURNS RECEIVED — ${day} (${actorName})`,
+                  `Total: ${recentScans.length} (${goodCount} shelf, ${issueCount} dispute)`,
+                  ...(byCourier ? [`By courier: ${byCourier}`] : []),
+                  ``,
+                  ...recentScans.map((s, idx) => {
+                    const qty = s.parcel.quantity && s.parcel.quantity > 1 ? `${s.parcel.quantity}x ` : "";
+                    const variant = s.parcel.variationName ? ` (${s.parcel.variationName})` : "";
+                    const tag = findCondition(s.condition)?.needsPhoto ? "Dispute" : "Shelf";
+                    return `${idx + 1}. ${s.scannedBarcode} — ${qty}${s.parcel.itemSummary}${variant} [${tag}]`;
+                  }),
+                ];
+                await navigator.clipboard.writeText(lines.join("\n"));
+                setCopiedList(true);
+                toast("Return list copied");
+                setTimeout(() => setCopiedList(false), 1800);
+              };
               return (
-                <li key={s.id} className="flex items-center gap-3.5 py-3">
-                  <ItemThumb src={s.parcel.itemImageUrl} alt={s.parcel.itemSummary} size="sm" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[16px] font-semibold text-ink">{s.parcel.itemSummary}</span>
-                    <span className="tabular-nums block truncate text-[14px] text-ink-3">{s.scannedBarcode}</span>
+                <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] bg-slate-100/80 px-3.5 py-2.5">
+                  <span className="text-[14px] font-semibold text-ink-2 tabular-nums">
+                    {recentScans.length} {recentScans.length === 1 ? "parcel" : "parcels"} · {goodCount} shelf
+                    {issueCount > 0 ? ` · ${issueCount} dispute` : ""}
                   </span>
-                  <span className={`text-[15px] font-semibold ${good ? "text-arrived" : "text-missing"}`}>
-                    {good ? "Shelf" : "Dispute"}
-                  </span>
-                </li>
+                  <button
+                    type="button"
+                    onClick={handleCopyList}
+                    className="pressable inline-flex h-9 items-center gap-1.5 rounded-full bg-white px-3 text-[13px] font-bold text-brand shadow-[var(--shadow-card)]"
+                  >
+                    {copiedList ? (
+                      <>
+                        <Check className="h-3.5 w-3.5" strokeWidth={2.8} />
+                        Copied
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-3.5 w-3.5" />
+                        Copy list
+                      </>
+                    )}
+                  </button>
+                </div>
               );
-            })}
-          </ul>
+            })()}
+            <ul className="divide-y divide-hairline">
+              {recentScans.map((s) => {
+                const good = !findCondition(s.condition)?.needsPhoto;
+                return (
+                  <li key={s.id} className="flex items-center gap-3.5 py-3">
+                    <ItemThumb src={s.parcel.itemImageUrl} alt={s.parcel.itemSummary} size="sm" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[16px] font-semibold text-ink">
+                        {s.parcel.quantity && s.parcel.quantity > 1 ? `${s.parcel.quantity}× ` : ""}
+                        {s.parcel.itemSummary}
+                      </span>
+                      <span className="tabular-nums block truncate text-[14px] text-ink-3">
+                        {s.scannedBarcode} · {shortCourier(s.parcel.courier)}
+                      </span>
+                    </span>
+                    <span className={`text-[15px] font-semibold ${good ? "text-arrived" : "text-missing"}`}>
+                      {good ? "Shelf" : "Dispute"}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         )}
       </Sheet>
 

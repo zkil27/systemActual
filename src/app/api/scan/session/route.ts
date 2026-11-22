@@ -17,12 +17,12 @@ export async function GET() {
       ? { staffMemberId: session.staffId, scannedAt: { gte: start, lt: end } }
       : { scannedAt: { gte: start, lt: end } };
 
-  const [todayCount, recentScans, pendingMissingCount, packStats] = await Promise.all([
+  const [todayCount, recentScans, settings, packStats] = await Promise.all([
     prisma.physicalScan.count({ where: whereClause }),
     prisma.physicalScan.findMany({
       where: whereClause,
       orderBy: { scannedAt: "desc" },
-      take: 8,
+      take: 200,
       include: {
         parcel: {
           select: {
@@ -32,14 +32,18 @@ export async function GET() {
             category: true,
             itemSummary: true,
             variationName: true,
+            quantity: true,
             itemImageUrl: true,
           },
         },
       },
     }),
-    prisma.returnParcel.count({ where: missingWhere }),
+    prisma.appSettings.findUnique({ where: { id: "default" }, select: { missingSinceAt: true } }),
     getPackerStats(session),
   ]);
+  const pendingMissingCount = await prisma.returnParcel.count({
+    where: missingWhere(settings?.missingSinceAt ?? null),
+  });
 
   return NextResponse.json({
     unlocked: true,
