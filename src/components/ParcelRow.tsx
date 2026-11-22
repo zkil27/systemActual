@@ -69,7 +69,7 @@ export function ParcelRow({
             <span className="truncate">· {meta}</span>
           </span>
         </span>
-        <ChevronRight className="h-5 w-5 shrink-0 text-hairline-strong" />
+        <ChevronRight className="h-5 w-5 shrink-0 text-ink-3" />
       </span>
     </button>
   );

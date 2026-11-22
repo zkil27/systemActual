@@ -21,6 +21,7 @@ import {
 import { Button, Group } from "@/components/ui/Button";
 import { ItemThumb } from "@/components/ui/ItemThumb";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
+import { PullIndicator } from "@/components/ui/PullToRefresh";
 import { Sheet } from "@/components/ui/Sheet";
 import { Toaster, toast } from "@/components/ui/Toast";
 import type { StaffSafeOutboundPackage, StaffSafeParcel } from "@/lib/auth";
@@ -30,6 +31,7 @@ import { shortCourier } from "@/lib/ui/format";
 import { haptic } from "@/lib/ui/motion";
 import { categoryLabel } from "@/lib/ui/parcel-status";
 import { PIN_LENGTH, applyPinKey, keyFromKeyboard } from "@/lib/ui/pin";
+import { usePullToRefresh } from "@/lib/ui/use-pull-to-refresh";
 import { PickListSection, type StaffWaveData } from "./PickListSection";
 
 export interface StaffOption {
@@ -280,6 +282,12 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
       void loadWave();
     }
   }, [unlocked, tab, pullSheetOpen, unpickedSheetOpen, loadWave]);
+
+  // Pull down to refresh the pick list and today's counts. Off while the camera runs.
+  const pull = usePullToRefresh(
+    unlocked ? () => Promise.all([loadSession(), loadWave()]) : undefined,
+    !cameraOpen
+  );
 
   useEffect(() => {
     if (!saved) return;
@@ -851,6 +859,8 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
           </div>
         </div>
       </header>
+
+      <PullIndicator {...pull} sidebar={false} />
 
       <main className="anim-page-in mx-auto max-w-md space-y-5 px-5 pt-2">
         {/* Zero-friction automatic alert banners (only shown when action is needed) */}

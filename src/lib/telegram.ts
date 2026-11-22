@@ -9,6 +9,7 @@ import { formatTelegramDailyBrief } from "@/lib/reports/brief";
 import { formatManilaDateTime, getManilaRangeBounds } from "@/lib/time";
 import { missingWhere, overdueWhere } from "@/lib/returns/rules";
 import { getReadyCounts } from "@/lib/waves/build";
+import { addHeld, HELD_LABELS } from "@/lib/waves/ready";
 
 export async function sendTelegramMessage(chatId: string, text: string): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
@@ -130,7 +131,7 @@ export async function buildTelegramReply(rawInput: string): Promise<string> {
     const { start, end } = getManilaRangeBounds("today");
     const [ready, printedTodayCount, printDevice, printerQueuedCount, waveNeedAttentionCount] =
       await Promise.all([
-        getReadyCounts(now),
+        getReadyCounts(now, { live: true }),
         prisma.printJob.count({
           where: {
             kind: PrintJobKind.LABEL,
@@ -159,6 +160,12 @@ export async function buildTelegramReply(rawInput: string): Promise<string> {
       `SHIPPING STATUS`,
       `• Ready to ship: ${ready.totalReady} (Shopee ${ready.byPlatform.SHOPEE} | TikTok ${ready.byPlatform.TIKTOK})`,
       ...(ready.coolingOff ? [`• Waiting 1h buyer cancel window: ${ready.coolingOff}`] : []),
+      ...(() => {
+        const held = addHeld(ready.held.SHOPEE, ready.held.TIKTOK);
+        const parts = HELD_LABELS.filter(([k]) => held[k] > 0).map(([k, label]) => `${held[k]} ${label}`);
+        return parts.length ? [`• Held: ${parts.join(", ")}`] : [];
+      })(),
+      ...(ready.live.TIKTOK !== null ? [`• TikTok Seller Center: ${ready.live.TIKTOK} to ship`] : []),
       `• Printed today: ${printedTodayCount}`,
       `• Printer PC: ${printerOnline ? "Online" : "Offline"}${printerQueuedCount ? ` (${printerQueuedCount} in queue)` : ""}`,
       ...(waveNeedAttentionCount ? [`• NEED ATTENTION: ${waveNeedAttentionCount} parcel(s) failed — open Waves`] : []),

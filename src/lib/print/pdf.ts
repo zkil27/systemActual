@@ -24,6 +24,25 @@ export function pdfEscape(text: string): string {
   return out;
 }
 
+/** Characters above Latin-1 that the WinAnsi encoding (and pdf-lib's standard fonts) can still draw. */
+const WIN_ANSI_EXTRA = new Set("€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ");
+
+/**
+ * Plain text that pdf-lib's Helvetica can encode: control chars dropped,
+ * anything outside WinAnsi (emoji, CJK, C1 controls) turned into '?'.
+ */
+export function toWinAnsi(text: string): string {
+  let out = "";
+  for (const ch of text) {
+    const code = ch.codePointAt(0)!;
+    if (code < 32 || code === 127) continue;
+    if (code < 127 || (code >= 160 && code <= 255) || WIN_ANSI_EXTRA.has(ch)) out += ch;
+    else if (code === 0xfe0f || code === 0x200d) continue; // emoji joiners: drop silently
+    else out += "?";
+  }
+  return out.replace(/\?{2,}/g, "?");
+}
+
 export function buildPdf(pages: string[][], opts: PdfOptions = {}): Buffer {
   const W = opts.width ?? 288;
   const H = opts.height ?? 432;

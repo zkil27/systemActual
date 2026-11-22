@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Check, CheckCircle2, MoreHorizontal, Printer, RefreshCw } from "lucide-react";
 import { Button, Group } from "@/components/ui/Button";
 import { ItemThumb } from "@/components/ui/ItemThumb";
+import { ScrollChips } from "@/components/ui/ScrollChips";
 import { StatusText } from "@/components/ui/StatusPill";
 import type { StaffSafeOutboundPackage } from "@/lib/auth";
 import type { StaffPickGroup } from "@/app/api/scan/wave/route";
@@ -245,11 +246,7 @@ export function PickListSection({
 
       {/* Single unified Apple filter strip */}
       {showFilterStrip && waveData && (
-        <div
-          role="tablist"
-          aria-label="Filter pick list"
-          className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5 py-0.5"
-        >
+        <ScrollChips role="tablist" label="Filters">
           <button
             type="button"
             role="tab"
@@ -300,7 +297,7 @@ export function PickListSection({
                 </button>
               );
             })}
-        </div>
+        </ScrollChips>
       )}
 
       {waveError && (

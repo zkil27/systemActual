@@ -14,6 +14,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Toaster } from "@/components/ui/Toast";
+import { PullIndicator } from "@/components/ui/PullToRefresh";
+import { usePullToRefresh } from "@/lib/ui/use-pull-to-refresh";
 import { formatBadgeCount } from "@/lib/ui/format";
 
 interface AppShellProps {
@@ -27,6 +29,12 @@ interface AppShellProps {
   missingCount?: number;
   /** Content max-width on desktop; "wide" opens up to max-w-6xl. */
   width?: "default" | "wide";
+  /** Line under the large title, e.g. the "Updated · Pull to sync" status. */
+  subtitle?: React.ReactNode;
+  /** Pull down from the top of the page to run this (touch only). */
+  onRefresh?: () => Promise<unknown> | void;
+  /** Turn the pull off for a while, e.g. while the camera is scanning. */
+  pullEnabled?: boolean;
 }
 
 interface Tab {
@@ -130,7 +138,11 @@ export function AppShell({
   headerRight,
   missingCount,
   width = "default",
+  subtitle,
+  onRefresh,
+  pullEnabled = true,
 }: AppShellProps) {
+  const pull = usePullToRefresh(onRefresh, pullEnabled);
   const pathname = usePathname();
   const activeIndex = TABS.findIndex((t) => t.match(pathname));
   const maxW = width === "wide" ? "max-w-6xl" : "max-w-3xl";
@@ -224,6 +236,7 @@ export function AppShell({
             {title}
           </h1>
           {titleAccessory}
+          {subtitle && <div className="basis-full">{subtitle}</div>}
         </div>
         {children}
       </main>
@@ -277,6 +290,8 @@ export function AppShell({
         </div>
       </nav>
 
+      {onRefresh && <PullIndicator {...pull} />}
+
       <Toaster className="lg:pl-60" />
     </div>
   );
@@ -287,11 +302,14 @@ export function BarButton({
   label,
   onClick,
   disabled,
+  className = "flex",
   children,
 }: {
   label: string;
   onClick?: () => void;
   disabled?: boolean;
+  /** Display utilities, e.g. "hidden lg:flex" for desktop-only buttons. */
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -301,7 +319,7 @@ export function BarButton({
       title={label}
       onClick={onClick}
       disabled={disabled}
-      className="pressable flex h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-black/[0.04] disabled:text-ink-3"
+      className={`pressable ${className} h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-black/[0.04] disabled:text-ink-3`}
     >
       {children}
     </button>

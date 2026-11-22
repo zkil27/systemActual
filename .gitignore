@@ -18,3 +18,7 @@ print-agent/backups
 # Real (redacted) shop responses: review before committing anything from here.
 src/lib/__fixtures__/live/
 
+
+# Waybill previews made from real labels (buyer details)
+*.waybill.pdf
+label-samples/

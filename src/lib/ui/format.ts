@@ -55,3 +55,14 @@ export function manilaDayLabel(ymd: string): string {
   // Noon UTC+8 keeps the label on the same calendar day in any timezone.
   return dayFmt.format(new Date(Date.UTC(y, m - 1, d, 4)));
 }
+
+/** "just now", "4 min ago", "2 hr ago", else the Manila date and time. */
+export function updatedAgo(iso: string | null, now: number = Date.now()): string {
+  if (!iso) return "";
+  const mins = Math.floor((now - new Date(iso).getTime()) / 60_000);
+  if (Number.isNaN(mins)) return "";
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  if (mins < 24 * 60) return `${Math.floor(mins / 60)} hr ago`;
+  return manilaDateTime(iso);
+}

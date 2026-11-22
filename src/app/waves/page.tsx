@@ -11,6 +11,7 @@ import { formatPeso, manilaDateTime } from "@/lib/ui/format";
 import { useLiveRefresh } from "@/lib/ui/use-live-refresh";
 import type { ReadyBreakdown } from "@/lib/waves/build";
 import { groupPickItems } from "@/lib/waves/pick-list";
+import { addHeld, HELD_LABELS } from "@/lib/waves/ready";
 import { matchParcelsForVariant, type WaveParcel, type WaveSummary } from "@/lib/waves/plan";
 import { formatWaveScheduleSetting } from "@/lib/waves/schedule";
 
@@ -61,6 +62,40 @@ const SKIP_LABELS: Array<[keyof WaveSummary["skipped"], string]> = [
   ["alreadyInWave", "already in another wave"],
   ["notReady", "already arranged"],
 ];
+
+/**
+ * Header for the ready box. On the TikTok filter the headline is TikTok's own
+ * live "to ship" count (matches Seller Center); the line under it shows how
+ * that splits into ready / waiting / held, so any difference is explained.
+ */
+function readyHeader(ready: ReadyBreakdown, filter: "ALL" | "SHOPEE" | "TIKTOK") {
+  const scope = filter === "ALL" ? null : filter;
+  const readyNow = scope ? ready.byPlatform[scope] : ready.totalReady;
+  const waiting = scope ? ready.coolingOffByPlatform[scope] : ready.coolingOff;
+  const held = scope ? ready.held[scope] : addHeld(ready.held.SHOPEE, ready.held.TIKTOK);
+  const heldParts = HELD_LABELS.filter(([k]) => held[k] > 0).map(([k, label]) => `${held[k]} ${label}`);
+  const liveTikTok = ready.live?.TIKTOK ?? null;
+  const gap = ready.unexplained?.TIKTOK ?? null;
+
+  if (filter === "TIKTOK" && liveTikTok !== null) {
+    return {
+      title: `${liveTikTok} to ship on TikTok`,
+      aside: null,
+      details: [
+        `${readyNow} ready now`,
+        ...(waiting > 0 ? [`${waiting} waiting 1h`] : []),
+        ...heldParts,
+        ...(gap && gap > 0 ? [`${gap} still syncing`] : []),
+        ...(gap && gap < 0 ? [`${-gap} being re-checked`] : []),
+      ],
+    };
+  }
+  return {
+    title: `${readyNow} ready to ship`,
+    aside: waiting > 0 ? `${waiting} waiting 1h` : null,
+    details: [...heldParts, ...(filter === "ALL" && liveTikTok !== null ? [`TikTok Seller Center: ${liveTikTok} to ship`] : [])],
+  };
+}
 
 /** Preview what a wave would ship and print its pick list. Nothing is shipped from here yet. */
 export default function WavesPage() {
@@ -283,19 +318,21 @@ export default function WavesPage() {
   const skips = s ? SKIP_LABELS.filter(([k]) => s.skipped[k] > 0) : [];
 
   const allTimes = [...new Set([...PRESET_TIMES, ...selectedTimes])].sort();
+  const header = ready ? readyHeader(ready, platformFilter) : null;
 
   return (
-    <AppShell title="Waves" width="wide">
+    <AppShell title="Waves" width="wide" onRefresh={load}>
       <div className="space-y-6 lg:grid lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
         <div className="space-y-6">
           <Group className="space-y-3.5 p-4">
-            {ready && (
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="text-[16px] font-bold text-ink tabular-nums">
-                  {ready.totalReady} ready to ship
-                </span>
-                {ready.coolingOff > 0 && (
-                  <span className="text-[13px] text-ink-3 tabular-nums">{ready.coolingOff} waiting 1h</span>
+            {ready && header && (
+              <div className="space-y-1">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-[16px] font-bold text-ink tabular-nums">{header.title}</span>
+                  {header.aside && <span className="text-[13px] text-ink-3 tabular-nums">{header.aside}</span>}
+                </div>
+                {header.details.length > 0 && (
+                  <p className="text-[13px] leading-snug text-ink-3 tabular-nums">{header.details.join(" · ")}</p>
                 )}
               </div>
             )}

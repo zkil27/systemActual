@@ -14,6 +14,7 @@ import { sendDailyBriefIfDue } from "@/lib/reports/daily-brief";
 import { advanceShopeeWaves } from "@/lib/shipping/shopee-engine";
 import { advanceTikTokWaves } from "@/lib/shipping/tiktok-engine";
 import { finishDoneWaves, maybeStartScheduledWave } from "@/lib/waves/run";
+import { claimReadyReconcile, reconcileReadyOrders } from "@/lib/waves/reconcile";
 import { withSpan } from "@/lib/otel";
 import { runLocked } from "./lock";
 
@@ -207,6 +208,15 @@ async function tickOnce(
     });
   } catch (err) {
     console.error("[tick] waves", err);
+  }
+
+  // Keep the ledger's to-ship list matching Seller Center (at most every 5 min).
+  try {
+    if (await claimReadyReconcile()) {
+      await withSpan("worker.tick.readyReconcile", () => reconcileReadyOrders(sliceDeadline(deadline, 0.6)));
+    }
+  } catch (err) {
+    console.error("[tick] ready reconcile", err);
   }
 
   try {

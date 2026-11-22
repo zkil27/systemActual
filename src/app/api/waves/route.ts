@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { getOwnerSession } from "@/lib/auth";
 import { normalizeCourierName } from "@/lib/connectors/normalizer";
 import { buildWavePreview, getReadyCounts } from "@/lib/waves/build";
+import { claimReadyReconcile, reconcileReadyOrders } from "@/lib/waves/reconcile";
 import { reprintLabel, retryFailed, retryItem, shipNow, startWave, WaveStartError } from "@/lib/waves/run";
 import { isContinuousWave, nextWaveAt, parseWaveTimes } from "@/lib/waves/schedule";
 import { runTick } from "@/lib/worker/tick";
@@ -18,6 +19,7 @@ import {
 export const maxDuration = 60;
 /** Leave room to save the wave after the live re-check. */
 const RECHECK_BUDGET_MS = 40_000;
+const RECONCILE_BUDGET_MS = 45_000;
 
 export async function GET(req: NextRequest) {
   if (!(await getOwnerSession())) return NextResponse.json({ error: "Sign in" }, { status: 401 });
@@ -65,8 +67,16 @@ export async function GET(req: NextRequest) {
     prisma.wave.findMany({ orderBy: { createdAt: "desc" }, take: 5 }),
     prisma.shopConnection.count({ where: { isDemo: false, writesEnabled: true, accessToken: { not: null } } }),
     prisma.appSettings.findUnique({ where: { id: "default" }, select: { waveTimes: true, wavesAutoEnabled: true } }),
-    getReadyCounts(),
+    getReadyCounts(new Date(), { live: true }),
   ]);
+  // Opening Waves also tidies the ledger in the background (throttled to every 5 min).
+  after(async () => {
+    try {
+      if (await claimReadyReconcile()) await reconcileReadyOrders(Date.now() + RECONCILE_BUDGET_MS);
+    } catch (err) {
+      console.error("[waves] ready reconcile", err);
+    }
+  });
   const times = parseWaveTimes(settings?.waveTimes ?? "");
   const continuous = isContinuousWave(settings?.waveTimes ?? "");
   const waveIds = waves.map((w) => w.id);

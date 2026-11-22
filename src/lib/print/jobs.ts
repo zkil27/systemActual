@@ -42,11 +42,22 @@ export function computeNextPollMs(jobCount: number, runningWaveCount: number): n
   return jobCount > 0 || runningWaveCount > 0 ? 3_000 : 30_000;
 }
 
-/** Oldest queued jobs first, in wave order, claimed atomically for this PC. */
-export async function claimJobs(deviceId: string, now: Date = new Date()) {
+/** Job kinds a PC asked for ("TEST" only on a PC that's just trying a printer). Unknown names are ignored. */
+export function parseJobKinds(raw: unknown): PrintJobKind[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const kinds = raw.filter((k): k is PrintJobKind => Object.values(PrintJobKind).includes(k as PrintJobKind));
+  return kinds.length ? kinds : undefined;
+}
+
+/**
+ * Oldest queued jobs first, in wave order, claimed atomically for this PC.
+ * With `kinds`, only those kinds are claimed; everything else stays queued
+ * for the real warehouse printer.
+ */
+export async function claimJobs(deviceId: string, now: Date = new Date(), kinds?: PrintJobKind[]) {
   const order = [{ createdAt: "asc" as const }, { position: "asc" as const }];
   const queued = await prisma.printJob.findMany({
-    where: { status: PrintJobStatus.QUEUED },
+    where: { status: PrintJobStatus.QUEUED, ...(kinds ? { kind: { in: kinds } } : {}) },
     orderBy: order,
     take: CHUNK_SIZE,
     select: { id: true },

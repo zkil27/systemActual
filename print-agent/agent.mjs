@@ -3,17 +3,26 @@
 //  - Every minute: runs the app's sync (the daytime clock; webhooks cover the night).
 //  - Once a day (optional): backs up the database with pg_dump.
 // Only makes outgoing HTTPS requests. No ports are opened on the PC.
-import { print, getDefaultPrinter } from "pdf-to-printer";
+// pdf-to-printer is CommonJS: newer Node can't import its functions by name, so take them off the default export.
+import pdfToPrinter from "pdf-to-printer";
+const { print, getDefaultPrinter } = pdfToPrinter;
 import { execFile } from "node:child_process";
 import { mkdir, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-const VERSION = "1.1.0";
+const VERSION = "1.1.1";
 const BASE = (process.env.KYNA_URL || "").replace(/\/$/, "");
 const TOKEN = (process.env.DEVICE_TOKEN || "").trim();
 const PRINTER = (process.env.PRINTER_NAME || "").trim() || undefined;
 const PAPER = (process.env.PAPER_SIZE || "4x6").trim();
+// "shrink": labels that fit print at 100%; a label bigger than the sticker
+// (TikTok's is 105 x 148 mm, wider than 4x6) is scaled down instead of cut off.
+const SCALE = (process.env.PRINT_SCALE || "shrink").trim();
+// "off": print only, don't run the app's sync (for testing a printer on a PC that isn't the warehouse PC).
+const SYNC_CLOCK = (process.env.SYNC_CLOCK || "on").trim().toLowerCase() !== "off";
+// "TEST": only ever print test pages. Real labels and pick lists stay queued for the warehouse PC.
+const PRINT_ONLY = (process.env.PRINT_ONLY || "").split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
 const DEFAULT_POLL_MS = 30_000;
 const DEFAULT_TICK_MS = 180_000;
 
@@ -72,7 +81,7 @@ async function printOne(job) {
   const file = path.join(tmpdir(), `kyna-${job.id}.pdf`);
   await writeFile(file, buf);
   try {
-    await print(file, { printer: PRINTER, paperSize: PAPER, scale: "noscale", silent: true });
+    await print(file, { printer: PRINTER, paperSize: PAPER, scale: SCALE, silent: true });
   } finally {
     await unlink(file).catch(() => {});
   }
@@ -87,12 +96,22 @@ async function reportBatch(results) {
 async function printLoop() {
   let printerName = PRINTER;
   if (!printerName) printerName = (await getDefaultPrinter().catch(() => null))?.name ?? "default printer";
-  log(`Printing to: ${printerName} (${PAPER})`);
+  log(`Printing to: ${printerName} (${PAPER}, scale: ${SCALE})`);
+  if (PRINT_ONLY.length) log(`Only printing: ${PRINT_ONLY.join(", ")}. Real labels are left for the warehouse PC.`);
 
   for (;;) {
     try {
-      const { ok, data } = await api("/api/agent/poll", { method: "POST", body: { version: VERSION, printer: printerName } });
-      const jobs = ok && !data.paused ? data.jobs ?? [] : [];
+      const { ok, data } = await api("/api/agent/poll", {
+        method: "POST",
+        body: { version: VERSION, printer: printerName, ...(PRINT_ONLY.length ? { kinds: PRINT_ONLY } : {}) },
+      });
+      let jobs = ok && !data.paused ? data.jobs ?? [] : [];
+      if (PRINT_ONLY.length && jobs.some((j) => !PRINT_ONLY.includes(j.kind))) {
+        // An app that ignores the filter handed us something else: never print it, put it all back.
+        log(`Refused ${jobs.filter((j) => !PRINT_ONLY.includes(j.kind)).length} job(s) that aren't ${PRINT_ONLY.join("/")}. Returned to the queue.`);
+        await api("/api/agent/release", { method: "POST" }).catch(() => {});
+        jobs = [];
+      }
       const results = [];
       for (let i = 0; i < jobs.length; i++) {
         const job = jobs[i];
@@ -184,5 +203,6 @@ async function backupLoop() {
 
 log(`Kyna Ops print agent ${VERSION} → ${BASE}`);
 printLoop();
-tickLoop();
+if (SYNC_CLOCK) tickLoop();
+else log("Sync clock off (SYNC_CLOCK=off): printing only.");
 backupLoop();

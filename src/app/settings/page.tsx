@@ -21,6 +21,7 @@ interface SettingsPayload {
     telegramChatId: string;
     telegramDailyBriefUtc: string;
     missingSinceDate: string;
+    customWaybillEnabled: boolean;
   };
   integrations: {
     shopeeEnvReady: boolean;
@@ -211,6 +212,20 @@ export default function SettingsPage() {
     await loadSettings();
   }
 
+  async function setCustomWaybill(active: boolean) {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "update_settings", customWaybillEnabled: active }),
+    });
+    if (!res.ok) {
+      toast("Couldn't save", "error");
+      return;
+    }
+    toast(active ? "One sticker per parcel: on" : "One sticker per parcel: off");
+    await loadSettings();
+  }
+
   async function saveGeneral(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -389,6 +404,27 @@ export default function SettingsPage() {
                 <span className="text-[17px] text-ink">Upload a file</span>
                 <ChevronRight className="h-5 w-5 text-ink-3" />
               </Link>
+            </Group>
+          </section>
+
+          <section>
+            <GroupLabel>Labels</GroupLabel>
+            <Group className="divide-y divide-hairline">
+              <div className={rowClass}>
+                <span className="flex flex-col">
+                  <span className="text-[17px] text-ink">One sticker per parcel</span>
+                  <span className="text-[13px] text-ink-3">
+                    {data?.settings.customWaybillEnabled
+                      ? "On: shop's label as is, never split · big orders get a packing slip"
+                      : "Off: prints the shop's label as it is"}
+                  </span>
+                </span>
+                <Switch
+                  checked={Boolean(data?.settings.customWaybillEnabled)}
+                  onChange={setCustomWaybill}
+                  label="One sticker per parcel"
+                />
+              </div>
             </Group>
           </section>
 

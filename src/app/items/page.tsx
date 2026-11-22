@@ -5,6 +5,7 @@ import { ChevronRight, Link2, Search, Sparkles, Star } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Button, Group } from "@/components/ui/Button";
 import { ItemThumb } from "@/components/ui/ItemThumb";
+import { ScrollChips } from "@/components/ui/ScrollChips";
 import { Sheet } from "@/components/ui/Sheet";
 import { toast } from "@/components/ui/Toast";
 import { useLiveRefresh } from "@/lib/ui/use-live-refresh";
@@ -274,7 +275,7 @@ export default function ItemsPage() {
   const pinnedSet = new Set(bump?.pinnedItemIds ?? []);
 
   return (
-    <AppShell title="Items & stock">
+    <AppShell title="Items & stock" onRefresh={load}>
       <div className="space-y-6">
         <Group className="p-4">
           {importing ? (
@@ -384,7 +385,7 @@ export default function ItemsPage() {
         )}
 
         <div className="space-y-2.5">
-          <div className="no-scrollbar -mx-5 flex gap-1.5 overflow-x-auto px-5" role="group" aria-label="Filter items">
+          <ScrollChips label="Filters" rowClassName="gap-1.5 px-5 py-0.5">
             {(
               [
                 { id: "all", label: "All" },
@@ -408,7 +409,7 @@ export default function ItemsPage() {
                 </button>
               );
             })}
-          </div>
+          </ScrollChips>
 
           <label className="relative block">
             <span className="sr-only">Search items</span>

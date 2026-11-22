@@ -20,6 +20,7 @@ It only makes outgoing HTTPS requests. Nothing on the PC is opened to the intern
    - `DEVICE_TOKEN`: on the phone, go to **Settings → Printer → Set up printer PC**. It shows a code once. Send it to yourself on Messenger or Telegram and paste it here.
    - `PRINTER_NAME`: the name from step 5.
    - `PAPER_SIZE`: `4x6` or `A6`, matching your labels.
+   - `PRINT_SCALE` (optional): leave as `shrink`. A label bigger than the sticker (TikTok's is 105 × 148 mm, a little wider than 4x6) is then scaled down to fit instead of having its edges cut off. Labels that already fit still print at 100%.
 7. Try it: `npm start`. On the phone, tap **Test print**. A test label should come out within a few seconds.
 8. Make it start by itself: `powershell -ExecutionPolicy Bypass -File .\install-startup.ps1`
 

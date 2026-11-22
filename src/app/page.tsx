@@ -14,7 +14,7 @@ import { Sheet } from "@/components/ui/Sheet";
 import { ParcelRow } from "@/components/ParcelRow";
 import { toast } from "@/components/ui/Toast";
 import type { CategoryDailyTruth, DailyTruthReport } from "@/lib/analytics/daily-returns";
-import { formatPeso, formatSignedPeso, manilaDayLabel, manilaTime } from "@/lib/ui/format";
+import { formatPeso, formatSignedPeso, manilaDayLabel, manilaTime, updatedAgo } from "@/lib/ui/format";
 import type { MoneySummary } from "@/lib/money/summary";
 import { haptic } from "@/lib/ui/motion";
 import { returnsUrl } from "@/lib/ui/returns-filter";
@@ -377,6 +377,67 @@ function HomeSkeleton() {
   );
 }
 
+/** Oldest shop sync time: "Updated" should never overclaim freshness. */
+function oldestSync(report: DailyTruthReport | null): string | null {
+  if (!report) return null;
+  const real = report.shops.filter((s) => !s.isDemo);
+  const times = (real.length > 0 ? real : report.shops)
+    .map((s) => s.lastSyncedAt)
+    .filter((t): t is string => Boolean(t))
+    .sort();
+  return times[0] ?? null;
+}
+
+/**
+ * Phone-only line under the title. Teaches the pull gesture where the eye
+ * already is, and is itself a tap target for anyone who'd rather tap.
+ */
+function SyncLine({
+  syncedAt,
+  syncing,
+  done,
+  dateLabel,
+  onSync,
+}: {
+  syncedAt: string | null;
+  syncing: boolean;
+  done: boolean;
+  dateLabel: string | null;
+  onSync: () => void;
+}) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => tick((n) => n + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const ago = updatedAgo(syncedAt);
+  const action = dateLabel ? `Pull to sync ${dateLabel}` : "Pull to sync";
+
+  return (
+    <button
+      type="button"
+      onClick={onSync}
+      disabled={syncing}
+      aria-label={dateLabel ? `Sync ${dateLabel}` : "Sync stores"}
+      className="-mx-1.5 -my-2 inline-flex min-h-11 items-center gap-1.5 rounded-full px-1.5 text-[14px] font-medium text-ink-3 transition-colors active:bg-black/[0.04] lg:hidden"
+    >
+      {done ? (
+        <Check className="anim-pop h-4 w-4 text-arrived" strokeWidth={2.8} />
+      ) : (
+        <RefreshCw className={`h-4 w-4 text-brand ${syncing ? "anim-spin" : ""}`} />
+      )}
+      {syncing ? (
+        <span>Syncing…</span>
+      ) : (
+        <span>
+          {ago && <>Updated {ago} · </>}
+          <span className="font-semibold text-brand">{action}</span>
+        </span>
+      )}
+    </button>
+  );
+}
+
 export default function DashboardPage() {
   const [range, setRange] = useState<Range>("today");
   const [customDate, setCustomDate] = useState("");
@@ -476,6 +537,18 @@ export default function DashboardPage() {
       title={title}
       width="wide"
       missingCount={report?.combined.missingNowCount}
+      onRefresh={handleSync}
+      subtitle={
+        report ? (
+          <SyncLine
+            syncedAt={oldestSync(report)}
+            syncing={syncState === "syncing" || liveSyncing}
+            done={syncState === "done"}
+            dateLabel={customDate ? manilaDayLabel(customDate) : null}
+            onSync={handleSync}
+          />
+        ) : undefined
+      }
       titleAccessory={
         isDemoOnly ? (
           <Link
@@ -490,7 +563,7 @@ export default function DashboardPage() {
         <>
           <label
             title="Pick a date"
-            className="pressable relative flex h-11 w-11 cursor-pointer items-center justify-center rounded-full text-brand hover:bg-black/[0.04]"
+            className="pressable relative hidden h-11 w-11 lg:flex cursor-pointer items-center justify-center rounded-full text-brand hover:bg-black/[0.04]"
           >
             <CalendarDays className="h-[22px] w-[22px]" />
             <input
@@ -507,6 +580,7 @@ export default function DashboardPage() {
             label={customDate ? `Sync ${manilaDayLabel(customDate)}` : "Sync stores"}
             onClick={handleSync}
             disabled={syncState === "syncing"}
+            className="hidden lg:flex"
           >
             {syncState === "done" ? (
               <Check key="done" className="anim-pop h-[22px] w-[22px] text-arrived" strokeWidth={2.8} />
@@ -538,7 +612,7 @@ export default function DashboardPage() {
               className={`inline-flex h-10 items-center rounded-full transition-colors ${
                 customDate
                   ? "bg-brand/12 text-brand shadow-[inset_0_0_0_1px_rgb(13_148_136/0.35)]"
-                  : "bg-white/80 text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline)] hover:bg-white"
+                  : "bg-white text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] hover:text-ink active:bg-slate-100"
               }`}
             >
               <label className="relative flex h-full cursor-pointer items-center gap-1.5 px-3.5 text-[14px] font-semibold">
@@ -558,28 +632,12 @@ export default function DashboardPage() {
                   type="button"
                   aria-label="Clear selected date"
                   onClick={() => setCustomDate("")}
-                  className="mr-1.5 flex h-6 w-6 items-center justify-center rounded-full text-brand/80 hover:bg-brand/15 hover:text-brand"
+                  className="relative mr-1.5 flex h-6 w-6 items-center justify-center rounded-full text-brand/80 after:absolute after:-inset-2.5 after:content-[''] hover:bg-brand/15 hover:text-brand"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
               )}
             </div>
-
-            {customDate && (
-              <button
-                type="button"
-                onClick={handleSync}
-                disabled={syncState === "syncing"}
-                className="pressable inline-flex h-10 items-center gap-1.5 rounded-full bg-white px-3.5 text-[14px] font-semibold text-brand shadow-[inset_0_0_0_1px_rgb(13_148_136/0.3)] hover:bg-brand/5 disabled:opacity-60"
-              >
-                {syncState === "done" ? (
-                  <Check className="h-4 w-4 text-arrived" strokeWidth={2.5} />
-                ) : (
-                  <RefreshCw className={`h-4 w-4 ${syncState === "syncing" ? "anim-spin" : ""}`} />
-                )}
-                <span>{syncState === "syncing" ? "Syncing..." : `Sync ${manilaDayLabel(customDate)}`}</span>
-              </button>
-            )}
           </div>
         </div>
 
@@ -607,8 +665,9 @@ export default function DashboardPage() {
                 title="To check"
                 action={
                   toCheck.length > 0 ? (
-                    <Link href="/returns" className="text-[16px] font-semibold text-brand hover:underline">
+                    <Link href="/returns" className="-my-2.5 -mr-2 inline-flex min-h-11 items-center gap-0.5 rounded-full pl-3 pr-1.5 text-[16px] font-semibold text-brand hover:bg-brand/5 active:bg-brand/10">
                       See all
+                      <ChevronRight className="h-[18px] w-[18px]" strokeWidth={2.4} />
                     </Link>
                   ) : undefined
                 }
@@ -654,9 +713,10 @@ export default function DashboardPage() {
                         <button
                           type="button"
                           onClick={() => setTopOpen(true)}
-                          className="text-[16px] font-semibold text-brand hover:underline"
+                          className="-my-2.5 -mr-2 inline-flex min-h-11 items-center gap-0.5 rounded-full pl-3 pr-1.5 text-[16px] font-semibold text-brand hover:bg-brand/5 active:bg-brand/10"
                         >
                           See all
+                          <ChevronRight className="h-[18px] w-[18px]" strokeWidth={2.4} />
                         </button>
                       ) : undefined
                     }

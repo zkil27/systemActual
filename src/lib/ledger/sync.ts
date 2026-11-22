@@ -238,10 +238,16 @@ const SHOPEE_READY_LOOKBACK_MS = 14 * 24 * 3600_000;
  * Pulls live ready-to-ship orders directly from every connected shop into the
  * ledger (by status, independent of `ordersSyncedTo`). Used by wave planning
  * so previews and waves stay accurate even if incremental sync is behind.
- * Returns `${shopConnectionId}:${orderSn}` keys for orders verified live now.
+ * Returns `${shopConnectionId}:${orderSn}` keys for orders verified live now,
+ * and the shops whose pass reached the last page (their `fresh` set is the
+ * shop's whole ready list, so anything else local is stale).
  */
-export async function syncReadyOrders(deadline: number, platform?: Platform): Promise<Set<string>> {
+export async function syncReadyOrders(
+  deadline: number,
+  platform?: Platform
+): Promise<{ fresh: Set<string>; completeShops: Set<string> }> {
   const fresh = new Set<string>();
+  const completeShops = new Set<string>();
   const shops = await prisma.shopConnection.findMany({
     where: {
       isDemo: false,
@@ -327,7 +333,10 @@ export async function syncReadyOrders(deadline: number, platform?: Platform): Pr
               cursor = String(list.next_cursor);
             }
           }
+        } else {
+          return;
         }
+        completeShops.add(shop.id);
       } catch (err) {
         if (err instanceof OutOfTime) return;
         console.error("[syncReadyOrders]", shop.shopName, err);
@@ -335,5 +344,5 @@ export async function syncReadyOrders(deadline: number, platform?: Platform): Pr
     })
   );
 
-  return fresh;
+  return { fresh, completeShops };
 }

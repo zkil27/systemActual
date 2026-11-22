@@ -226,6 +226,12 @@ Shared building blocks live in `src/components/ui/`:
 - **ItemThumb:** the garment photo in sm, md, lg and xl sizes, with a shirt icon as fallback.
 - **StatusPill / StatusText:** one status per parcel from `getParcelStatus`. Priority is Missing, then Issue, Arrived, Overdue and On the way.
 - **Toast:** a single dark capsule under the top bar that leaves after 2.6s. It replaces the old inline notice banners.
+- **Pull to sync (`PullIndicator` + `usePullToRefresh`):** pull down from the top of any page to sync, the way a phone browser refreshes. Pages opt in with `AppShell onRefresh`.
+  - Touch only. It starts only at scroll top, never inside a sheet or a field, and lets sideways drags through to chip rows.
+  - It fires past 72px of finger travel with one vibration tick. A white capsule drops from under the top bar: "Pull to sync" → "Release to sync" → "Syncing…" → check.
+  - The browser's own pull-to-reload is off (`overscroll-behavior-y: contain` on `html`).
+  - On phones the top-bar sync button is replaced by a tappable "Updated 4 min ago · Pull to sync" line under the title. Desktop keeps the button.
+- **ScrollChips:** every sideways chip row. The hidden side fades out and a round white chevron button pages the row along. The first row a device ever sees nudges 56px and back, once.
 
 Composite components:
 
@@ -253,6 +259,8 @@ Motion follows Apple's HIG: it has a purpose, it's short, it never blocks input,
 | PIN dot filled, badge change | pop | 260ms |
 | Scan saved | checkmark draws in on a green card + vibration; the scanner stays usable | 400ms |
 | Sync | spin, then a checkmark pop + toast | — |
+| Pull to sync | capsule follows the finger, icon turns with travel; settles back | 300ms |
+| First chip row ever | scrolls 56px and back, once per device | ~650ms |
 
 - Returns rows rise in 30ms apart on first load only. Filter changes swap in place.
 - With `prefers-reduced-motion: reduce`:
@@ -268,6 +276,9 @@ Motion follows Apple's HIG: it has a purpose, it's short, it never blocks input,
 - **Do** use `StatusText` in rows and `StatusPill` in sheets, so a status reads the same everywhere.
 - **Do** put helper text behind a tap, or cut it.
 - **Don't** add eyebrows, icon tiles above headings, or cards inside cards. Inside a sheet, use hairline rows.
+- **Do** make anything tappable look tappable: a trailing chevron on rows, cards and "See all" links, and a visible outline (`hairline-strong`) on chips. Anything not tappable shows neither.
+- **Do** give every tappable thing at least a 44px hit area, even when it looks smaller (use an `after:` inset).
+- **Don't** let a row scroll sideways without `ScrollChips`. A hard edge hides the options.
 - **Don't** show peso values anywhere on `/scan`.
 - **Don't** show demo credentials outside development. Login and `/scan` check `NODE_ENV === "development"` inline, so production builds drop the strings.
 - **Don't** add motion to things people repeat all day without a state change behind it.

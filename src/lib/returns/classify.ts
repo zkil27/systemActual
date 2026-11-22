@@ -104,7 +104,8 @@ const TIKTOK_RETURN_STATUS: Record<string, DigitalStatus> = {
 /**
  * Statuses only reached after the seller has the returned parcel in hand (or the
  * platform accepted it on delivery). TikTok has no seller-side reverse
- * tracking call, so this is the best "courier delivered it" signal. Confirm.
+ * tracking call, so this plus the 48-hour post-delivery inspection deadline on
+ * BUYER_SHIPPED_ITEM is the best "courier delivered it" signal.
  */
 const TIKTOK_SELLER_HAS_PARCEL = new Set([
   "REJECT_RECEIVE_PACKAGE",
@@ -112,24 +113,62 @@ const TIKTOK_SELLER_HAS_PARCEL = new Set([
   "RETURN_OR_REFUND_REQUEST_COMPLETE",
 ]);
 
+/**
+ * On TikTok PH quick-refund returns, `return_status` stays `BUYER_SHIPPED_ITEM`
+ * both while J&T is in transit (when `SELLER_RESPOND_RECEIVE_PACKAGE` has a
+ * 14-day transit deadline) and after J&T delivers the parcel back to the
+ * warehouse (when `update_time` moves to the delivery timestamp and the
+ * `SELLER_RESPOND_RECEIVE_PACKAGE` deadline resets to 48 hours from delivery).
+ */
+const TIKTOK_POST_DELIVERY_REVIEW_MAX_SEC = 5 * 24 * 3600;
+
 export interface TikTokReturnClass {
   category: ReturnCategory;
   expectsPhysicalReturn: boolean;
   returnType: string;
   digitalStatus: DigitalStatus;
   courierDelivered: boolean;
+  disputeDeadlineAt: Date | null;
 }
 
-export function classifyTikTokReturn(r: { return_type?: unknown; return_status?: unknown }): TikTokReturnClass {
+export function classifyTikTokReturn(r: {
+  return_type?: unknown;
+  return_status?: unknown;
+  update_time?: unknown;
+  seller_next_action_response?: unknown;
+}): TikTokReturnClass {
   const returnType = String(r.return_type ?? "RETURN_AND_REFUND").toUpperCase();
   const status = String(r.return_status ?? "").toUpperCase();
   const expectsPhysicalReturn = returnType !== "REFUND";
+
+  const actions = Array.isArray(r.seller_next_action_response)
+    ? (r.seller_next_action_response as Array<Record<string, unknown>>)
+    : [];
+  const receiveAction = actions.find(
+    (a) => String(a?.action ?? "").toUpperCase() === "SELLER_RESPOND_RECEIVE_PACKAGE"
+  );
+  const deadlineSec = Number(receiveAction?.deadline);
+  const updateSec = Number(r.update_time);
+  const hasShortInspectionWindow =
+    status === "BUYER_SHIPPED_ITEM" &&
+    Number.isFinite(deadlineSec) &&
+    deadlineSec > 0 &&
+    Number.isFinite(updateSec) &&
+    updateSec > 0 &&
+    deadlineSec >= updateSec &&
+    deadlineSec - updateSec <= TIKTOK_POST_DELIVERY_REVIEW_MAX_SEC;
+
+  const courierDelivered =
+    expectsPhysicalReturn && (TIKTOK_SELLER_HAS_PARCEL.has(status) || hasShortInspectionWindow);
+  const baseStatus = TIKTOK_RETURN_STATUS[status] ?? DigitalStatus.RETURN_REQUESTED;
+
   return {
     category: ReturnCategory.RETURN_REFUND,
     expectsPhysicalReturn,
     returnType,
-    digitalStatus: TIKTOK_RETURN_STATUS[status] ?? DigitalStatus.RETURN_REQUESTED,
-    courierDelivered: expectsPhysicalReturn && TIKTOK_SELLER_HAS_PARCEL.has(status),
+    digitalStatus: hasShortInspectionWindow ? DigitalStatus.COURIER_RETURNED : baseStatus,
+    courierDelivered,
+    disputeDeadlineAt: hasShortInspectionWindow ? new Date(deadlineSec * 1000) : null,
   };
 }
 

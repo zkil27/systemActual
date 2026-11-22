@@ -39,6 +39,7 @@ export async function GET(req: NextRequest) {
       telegramChatId: settings.telegramChatId || "",
       telegramDailyBriefUtc: settings.telegramDailyBriefUtc,
       missingSinceDate: settings.missingSinceAt ? getManilaDateString(settings.missingSinceAt) : "",
+      customWaybillEnabled: settings.customWaybillEnabled,
     },
     integrations: {
       shopeeEnvReady: isShopeeConfigured(),
@@ -75,6 +76,7 @@ const updateSettingsSchema = z.object({
   stockSafetyBuffer: z.number().int().min(0).max(1000).optional(),
   waveTimes: z.string().max(120).optional(),
   wavesAutoEnabled: z.boolean().optional(),
+  customWaybillEnabled: z.boolean().optional(),
   defaultUnitCostPhp: z.number().min(1).max(100000).optional(),
   defaultSellingPrice: z.number().min(1).max(100000).optional(),
   overdueRtsDays: z.number().int().min(1).max(60).optional(),
@@ -138,6 +140,9 @@ export async function POST(req: NextRequest) {
               }
             : {}),
           ...(data.wavesAutoEnabled !== undefined ? { wavesAutoEnabled: data.wavesAutoEnabled } : {}),
+          ...(data.customWaybillEnabled !== undefined
+            ? { customWaybillEnabled: data.customWaybillEnabled }
+            : {}),
           ...(data.telegramChatId !== undefined
             ? { telegramChatId: data.telegramChatId.trim() || null }
             : {}),

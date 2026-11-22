@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { normalizeCourierName } from "@/lib/connectors/normalizer";
 import { syncReadyOrders } from "@/lib/ledger/sync";
 import { recheckOrders } from "./recheck";
+import { getLiveToShipCounts, type LiveToShip } from "./live-count";
+import { classifyReady, ledgerToShip, type ReadyClassification } from "./ready";
 import {
   MAX_WAVE_SIZE,
   MIN_ORDER_AGE_MS,
@@ -16,8 +18,11 @@ import {
 
 const PREVIEW_KEEP_MS = 24 * 3600_000;
 
-const readyWhere = (platform?: Platform): Prisma.OrderWhereInput => ({
-  cancelRequested: false,
+export const readyWhere = (
+  platform?: Platform,
+  opts?: { includeCancelRequested?: boolean }
+): Prisma.OrderWhereInput => ({
+  ...(opts?.includeCancelRequested ? {} : { cancelRequested: false }),
   shopConnection: { isDemo: false, accessToken: { not: null } },
   OR: (platform ? [platform] : (Object.keys(READY_ORDER_STATUSES) as Platform[])).map((p) => ({
     platform: p,
@@ -25,74 +30,56 @@ const readyWhere = (platform?: Platform): Prisma.OrderWhereInput => ({
   })),
 });
 
-export interface ReadyBreakdown {
-  totalReady: number;
-  coolingOff: number;
-  byPlatform: { SHOPEE: number; TIKTOK: number };
-  byCourier: Array<{ courier: string; count: number }>;
+export interface ReadyBreakdown extends ReadyClassification {
+  /** Live "to ship" count from the shop (Seller Center's number). null = not fetched / unavailable. */
+  live: LiveToShip;
+  /**
+   * live − what the ledger accounts for (ready + waiting + held).
+   * > 0: ledger is missing orders; < 0: ledger has orders the shop no longer lists. null without a live count.
+   */
+  unexplained: { TIKTOK: number | null };
 }
 
-/** Fast ledger count of ready parcels by shop and courier (no external API calls). */
-export async function getReadyCounts(now: Date = new Date()): Promise<ReadyBreakdown> {
-  const orders = await prisma.order.findMany({
-    where: readyWhere(),
-    select: {
-      platform: true,
-      status: true,
-      cancelRequested: true,
-      platformCreatedAt: true,
-      packages: {
-        select: {
-          carrier: true,
-          status: true,
-          trackingNumber: true,
-          waveItems: { where: { activePackageId: { not: null } }, select: { id: true } },
+/**
+ * Ledger count of to-ship orders by shop, courier and reason. With `live`,
+ * also fetches the shop's own count (cached ~1 min) so the gap can be shown.
+ */
+export async function getReadyCounts(now: Date = new Date(), opts?: { live?: boolean }): Promise<ReadyBreakdown> {
+  const [orders, live] = await Promise.all([
+    prisma.order.findMany({
+      // Cancel requests are included so they show as "held" instead of vanishing.
+      where: readyWhere(undefined, { includeCancelRequested: true }),
+      select: {
+        platform: true,
+        status: true,
+        cancelRequested: true,
+        platformCreatedAt: true,
+        packages: {
+          select: {
+            carrier: true,
+            status: true,
+            trackingNumber: true,
+            waveItems: { where: { activePackageId: { not: null } }, select: { id: true } },
+          },
         },
       },
-    },
-    take: MAX_WAVE_SIZE,
-  });
+      take: MAX_WAVE_SIZE,
+    }),
+    opts?.live ? getLiveToShipCounts() : Promise.resolve<LiveToShip>({ TIKTOK: null }),
+  ]);
 
-  let totalReady = 0;
-  let coolingOff = 0;
-  const byPlatform = { SHOPEE: 0, TIKTOK: 0 };
-  const courierMap = new Map<string, number>();
-
-  for (const o of orders) {
-    for (const pkg of o.packages) {
-      const blocker = shipBlocker(
-        {
-          platform: o.platform,
-          status: o.status,
-          cancelRequested: o.cancelRequested,
-          platformCreatedAt: o.platformCreatedAt,
-          packageCount: o.packages.length,
-        },
-        { status: pkg.status, trackingNumber: pkg.trackingNumber, inActiveWave: pkg.waveItems.length > 0 },
-        now
-      );
-      if (blocker === "tooNew") {
-        coolingOff++;
-        continue;
-      }
-      if (blocker) {
-        if (blocker === "split") break;
-        continue;
-      }
-      totalReady++;
-      byPlatform[o.platform]++;
-      const courier = normalizeCourierName(pkg.carrier);
-      courierMap.set(courier, (courierMap.get(courier) ?? 0) + 1);
-    }
-  }
+  const counts = classifyReady(
+    orders.map((o) => ({
+      ...o,
+      packages: o.packages.map((p) => ({ ...p, inActiveWave: p.waveItems.length > 0 })),
+    })),
+    now
+  );
 
   return {
-    totalReady,
-    coolingOff,
-    byPlatform,
-    byCourier: [...courierMap.entries()]
-      .map(([courier, count]) => ({ courier, count }))
-      .sort((a, b) => b.count - a.count || a.courier.localeCompare(b.courier)),
+    ...counts,
+    live,
+    unexplained: { TIKTOK: live.TIKTOK === null ? null : live.TIKTOK - ledgerToShip(counts, "TIKTOK") },
   };
 }
 
@@ -124,7 +111,7 @@ export async function buildWavePreview(opts: {
   // Pull live ready-to-ship orders from the shops first so the wave stays
   // accurate even if the incremental ledger sync is still catching up.
   const liveSyncDeadline = Date.now() + Math.max(0, opts.deadline - Date.now()) * 0.5;
-  const freshLiveKeys = await syncReadyOrders(liveSyncDeadline, opts.platform);
+  const { fresh: freshLiveKeys } = await syncReadyOrders(liveSyncDeadline, opts.platform);
 
   const [tooNew, rawCandidates] = await Promise.all([
     prisma.order.count({ where: { ...readyWhere(opts.platform), platformCreatedAt: { gt: cutoff } } }),

@@ -102,6 +102,40 @@ describe("TikTok returns", () => {
       DigitalStatus.CANCELLED_RETURN
     );
   });
+
+  it("detects TikTok BUYER_SHIPPED_ITEM delivered to seller via 48h SELLER_RESPOND_RECEIVE_PACKAGE deadline", () => {
+    const updateSec = 1795311579; // 2026-11-22T01:39:39Z (09:39 Manila)
+    const transitDeadlineSec = updateSec + 14 * 24 * 3600; // 14-day transit window
+    const deliveredDeadlineSec = updateSec + 2 * 24 * 3600; // 48-hour seller inspection window
+
+    const inTransit = mapTikTokReturn(
+      {
+        ...tiktokReturnAndRefund,
+        update_time: updateSec,
+        seller_next_action_response: [
+          { action: "SELLER_RESPOND_RECEIVE_PACKAGE", deadline: transitDeadlineSec },
+        ],
+      },
+      ctx
+    );
+    expect(inTransit.digitalStatus).toBe(DigitalStatus.RETURN_IN_TRANSIT);
+    expect(inTransit.courierReturnedToSellerAt).toBeNull();
+    expect(inTransit.disputeDeadlineAt).toBeNull();
+
+    const delivered = mapTikTokReturn(
+      {
+        ...tiktokReturnAndRefund,
+        update_time: updateSec,
+        seller_next_action_response: [
+          { action: "SELLER_RESPOND_RECEIVE_PACKAGE", deadline: deliveredDeadlineSec },
+        ],
+      },
+      ctx
+    );
+    expect(delivered.digitalStatus).toBe(DigitalStatus.COURIER_RETURNED);
+    expect(delivered.courierReturnedToSellerAt?.getTime()).toBe(updateSec * 1000);
+    expect(delivered.disputeDeadlineAt?.getTime()).toBe(deliveredDeadlineSec * 1000);
+  });
 });
 
 describe("failed deliveries from the order ledger", () => {
@@ -308,18 +342,22 @@ describe("missing / overdue rules", () => {
 
   it("applies soft go-live cutoff across active and overdue checks", () => {
     const startAt = new Date("2026-11-21T16:00:00Z"); // 2026-11-22 00:00 Manila
-    const preTagged = {
+    const preTaggedOpen = {
       ...base,
       digitalReturnTaggedAt: new Date("2026-11-08T00:00:00Z"),
       courierReturnedToSellerAt: null,
       physicallyReceivedAt: null,
     };
+    const preTaggedResolved = {
+      ...preTaggedOpen,
+      digitalStatus: DigitalStatus.RESOLVED_REFUNDED,
+    };
     const preReturned = {
-      ...preTagged,
+      ...preTaggedOpen,
       courierReturnedToSellerAt: new Date("2026-11-20T08:00:00Z"),
     };
     const returnedAfterStart = {
-      ...preTagged,
+      ...preTaggedOpen,
       courierReturnedToSellerAt: new Date("2026-11-22T02:00:00Z"),
     };
     const scannedAfterStart = {
@@ -333,15 +371,16 @@ describe("missing / overdue rules", () => {
       physicallyReceivedAt: null,
     };
 
-    expect(isActiveSince(preTagged, null)).toBe(true);
-    expect(isActiveSince(preTagged, startAt)).toBe(false);
+    expect(isActiveSince(preTaggedOpen, null)).toBe(true);
+    expect(isActiveSince(preTaggedOpen, startAt)).toBe(true);
+    expect(isActiveSince(preTaggedResolved, startAt)).toBe(false);
     expect(isActiveSince(preReturned, startAt)).toBe(false);
     expect(isActiveSince(returnedAfterStart, startAt)).toBe(true);
     expect(isActiveSince(scannedAfterStart, startAt)).toBe(true);
     expect(isActiveSince(taggedAfterStart, startAt)).toBe(true);
 
     // Pre-go-live unreturned parcel is hidden from Overdue; post-go-live one >10d is Overdue
-    expect(isOverdueRts(preTagged, 10, now, startAt)).toBe(false);
+    expect(isOverdueRts(preTaggedOpen, 10, now, startAt)).toBe(false);
     expect(isOverdueRts(taggedAfterStart, 10, new Date("2026-12-03T00:00:00Z"), startAt)).toBe(true);
   });
 });

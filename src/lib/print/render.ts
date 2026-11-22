@@ -4,6 +4,8 @@ import { buildPdf } from "./pdf";
 import { prisma } from "@/lib/prisma";
 import { pickListPages, type WaveSummary } from "@/lib/waves/plan";
 import { fetchBatchLabelPdf, fetchLabelPdf } from "@/lib/shipping/labels";
+import { assembleWaybillSources, composeWaybills, type WaybillParcel } from "./waybill";
+import { buildTestLabelPdf } from "./test-label";
 
 export class NotPrintableError extends Error {}
 
@@ -50,18 +52,8 @@ export async function renderJobPdf(
 ): Promise<Buffer> {
   switch (job.kind) {
     case PrintJobKind.TEST:
-      return buildPdf([
-        [
-          "KYNA OPS",
-          "Test print",
-          "",
-          `Sent: ${formatManilaDateTime(job.createdAt)}`,
-          `Printed on: ${printerName || "default printer"}`,
-          "",
-          "If this fits inside the label,",
-          "printing is set up correctly.",
-        ],
-      ], { fontSize: 14 });
+      // TikTok-label-sized check page: shows cut-off edges and scaling on one sticker.
+      return buildTestLabelPdf({ sentAt: formatManilaDateTime(job.createdAt), printerName });
     case PrintJobKind.PICK_LIST: {
       if (job.title.startsWith(DIVIDER_PREFIX)) {
         return buildPdf([buildCourierDividerLines(job.title, job.createdAt)], { fontSize: 13 });
@@ -71,11 +63,64 @@ export async function renderJobPdf(
       if (!wave) throw new NotPrintableError("That wave was deleted.");
       return buildPdf(pickListPages(wave.summaryJson as unknown as WaveSummary, wave.createdAt), { fontSize: 10 });
     }
-    case PrintJobKind.LABEL:
-      if (job.batchPackageIds && job.batchPackageIds.length > 1) {
-        return fetchBatchLabelPdf(job.batchPackageIds);
-      }
-      if (!job.packageId) throw new NotPrintableError("Label has no parcel.");
-      return fetchLabelPdf(job.packageId);
+    case PrintJobKind.LABEL: {
+      const packageIds =
+        job.batchPackageIds && job.batchPackageIds.length > 1
+          ? job.batchPackageIds
+          : job.packageId
+            ? [job.packageId]
+            : [];
+      if (!packageIds.length) throw new NotPrintableError("Label has no parcel.");
+      const platformPdf =
+        packageIds.length > 1 ? await fetchBatchLabelPdf(packageIds) : await fetchLabelPdf(packageIds[0]);
+      return withCustomWaybill(packageIds, platformPdf);
+    }
+  }
+}
+
+/**
+ * When "one sticker per parcel" is on: each parcel's shop label page 1,
+ * untouched, plus our packing slip if the label ran onto more pages. Any
+ * problem prints the shop's PDF as it came, so this never stops shipping.
+ */
+async function withCustomWaybill(packageIds: string[], platformPdf: Buffer): Promise<Buffer> {
+  const settings = await prisma.appSettings.findUnique({
+    where: { id: "default" },
+    select: { customWaybillEnabled: true },
+  });
+  if (!settings?.customWaybillEnabled) return platformPdf;
+
+  try {
+    const pkgs = await prisma.package.findMany({
+      where: { id: { in: packageIds } },
+      select: {
+        id: true,
+        trackingNumber: true,
+        order: {
+          select: {
+            orderSn: true,
+            lines: { select: { name: true, variationName: true, quantity: true } },
+            _count: { select: { packages: true } },
+          },
+        },
+      },
+    });
+    const byId = new Map(pkgs.map((p) => [p.id, p]));
+    const ordered = packageIds.map((id) => byId.get(id));
+    if (ordered.some((p) => !p)) throw new Error("Some parcels in this label job are gone.");
+
+    const parcels: WaybillParcel[] = ordered.map((p) => ({
+      orderSn: p!.order.orderSn,
+      trackingNumber: p!.trackingNumber,
+      lines: p!.order.lines,
+      parcelsInOrder: p!.order._count.packages,
+    }));
+    const sources = await assembleWaybillSources(platformPdf, parcels, (i) => fetchLabelPdf(packageIds[i]));
+    // Nothing ran over: send the shop's file byte-for-byte, not a re-saved copy.
+    if (!sources.some((s) => s.overflowed)) return platformPdf;
+    return await composeWaybills(sources);
+  } catch (err) {
+    console.error("[Custom waybill] falling back to the shop's label", err);
+    return platformPdf;
   }
 }

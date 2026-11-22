@@ -218,6 +218,8 @@ model AppSettings {
   wavesAutoEnabled          Boolean  @default(false)
   /// Last wave slot that fired ("2026-11-21 08:30"), so each slot runs once.
   lastWaveSlot              String?
+  /// Print our own one-sticker waybill (shop's courier section + our item list) instead of the shop's label as-is.
+  customWaybillEnabled      Boolean  @default(false)
   updatedAt                 DateTime @updatedAt
 }
 

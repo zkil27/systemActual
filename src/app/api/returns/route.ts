@@ -33,8 +33,8 @@ export async function GET(req: NextRequest) {
 
     const conditions: Prisma.ReturnParcelWhereInput[] = [];
     // Apply the go-live cutoff only when viewing the unfiltered active queue;
-    // explicit date/range filters (Yesterday, 7 Days, custom date) inspect history.
-    if (!hasDateFilter) {
+    // explicit date/range filters or text searches inspect history as well.
+    if (!hasDateFilter && !q) {
       const activeFilter = activeSinceWhere(missingSinceAt);
       if (activeFilter) {
         conditions.push(activeFilter);

@@ -23,10 +23,18 @@ export function isExpectedAtDoor(p: Pick<ParcelRuleInput, "expectsPhysicalReturn
 
 /**
  * Soft go-live cutoff: returns before `startAt` stay in Postgres for history,
- * but only parcels with return activity at or after `startAt` count in active views.
+ * but only parcels with return activity at or after `startAt` — or still open /
+ * on the way back to the warehouse — count in active views.
  */
 export function isActiveSince(
-  p: Pick<ParcelRuleInput, "digitalReturnTaggedAt" | "courierReturnedToSellerAt" | "physicallyReceivedAt">,
+  p: Pick<
+    ParcelRuleInput,
+    | "expectsPhysicalReturn"
+    | "digitalStatus"
+    | "digitalReturnTaggedAt"
+    | "courierReturnedToSellerAt"
+    | "physicallyReceivedAt"
+  >,
   startAt?: Date | null
 ): boolean {
   if (!startAt) return true;
@@ -34,6 +42,14 @@ export function isActiveSince(
   if (p.courierReturnedToSellerAt && p.courierReturnedToSellerAt.getTime() >= t) return true;
   if (p.physicallyReceivedAt && p.physicallyReceivedAt.getTime() >= t) return true;
   if (!p.courierReturnedToSellerAt && p.digitalReturnTaggedAt && p.digitalReturnTaggedAt.getTime() >= t) {
+    return true;
+  }
+  if (
+    isExpectedAtDoor(p) &&
+    !p.courierReturnedToSellerAt &&
+    !p.physicallyReceivedAt &&
+    p.digitalStatus !== DigitalStatus.RESOLVED_REFUNDED
+  ) {
     return true;
   }
   return false;
@@ -46,6 +62,14 @@ export function activeSinceWhere(startAt?: Date | null): Prisma.ReturnParcelWher
       { courierReturnedToSellerAt: { gte: startAt } },
       { physicallyReceivedAt: { gte: startAt } },
       { courierReturnedToSellerAt: null, digitalReturnTaggedAt: { gte: startAt } },
+      {
+        expectsPhysicalReturn: true,
+        courierReturnedToSellerAt: null,
+        physicallyReceivedAt: null,
+        digitalStatus: {
+          notIn: [DigitalStatus.CANCELLED_RETURN, DigitalStatus.RESOLVED_REFUNDED],
+        },
+      },
     ],
   };
 }

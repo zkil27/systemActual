@@ -7,6 +7,8 @@ import { AppShell } from "@/components/AppShell";
 import { ParcelDetailPanel, ParcelDetailSheet } from "@/components/ParcelDetailSheet";
 import { ParcelRow } from "@/components/ParcelRow";
 import { Button, Group } from "@/components/ui/Button";
+import { ScrollChips } from "@/components/ui/ScrollChips";
+import { toast } from "@/components/ui/Toast";
 import { manilaDayLabel } from "@/lib/ui/format";
 import { stepSelection } from "@/lib/ui/returns-nav";
 import { DESKTOP_QUERY, useMediaQuery } from "@/lib/ui/use-media-query";
@@ -44,9 +46,12 @@ interface ReturnRow {
 /** Scrolling filter chips with one highlight that slides to the selected chip. */
 function FilterChips({
   value,
+  count,
   onChange,
 }: {
   value: ReturnFilter;
+  /** Rows in the selected filter; shown on its chip once known. */
+  count: number | null;
   onChange: (f: ReturnFilter) => void;
 }) {
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -57,14 +62,10 @@ function FilterChips({
     if (!el) return;
     setBox({ x: el.offsetLeft, w: el.offsetWidth });
     el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
-  }, [value]);
+  }, [value, count]);
 
   return (
-    <div
-      role="tablist"
-      aria-label="Filter returns"
-      className="no-scrollbar relative -mx-5 flex gap-2 overflow-x-auto px-5 py-0.5 lg:mr-0 lg:pr-0"
-    >
+    <ScrollChips role="tablist" label="Filters" className="-mx-5 lg:mr-0" rowClassName="gap-2 px-5 py-0.5 lg:pr-0">
       {box && (
         <span
           aria-hidden="true"
@@ -100,10 +101,13 @@ function FilterChips({
             }`}
           >
             {f.label}
+            {active && f.id !== "all" && count !== null && (
+              <span className="ml-1.5 tabular-nums opacity-80">{count}</span>
+            )}
           </button>
         );
       })}
-    </div>
+    </ScrollChips>
   );
 }
 
@@ -188,6 +192,16 @@ function ReturnsExplorerInner() {
   useLiveRefresh({
     onRefresh: () => loadParcels({ silent: true }),
   });
+
+  async function syncAndReload() {
+    try {
+      const res = await fetch("/api/sync", { method: "POST" });
+      if (!res.ok) toast("Couldn't reach your stores", "error");
+    } catch {
+      toast("No connection", "error");
+    }
+    await loadParcels({ silent: true });
+  }
 
   async function loadMore() {
     if (!parcels || loadingMore) return;
@@ -302,6 +316,7 @@ function ReturnsExplorerInner() {
     <AppShell
       title="Returns"
       width="wide"
+      onRefresh={syncAndReload}
       missingCount={
         filter === "missing" && !dateActive && totalCount !== null && !loading
           ? totalCount
@@ -314,7 +329,7 @@ function ReturnsExplorerInner() {
           title="Filter by date range"
           aria-expanded={customOpen}
           onClick={() => setCustomOpen((o) => !o)}
-          className={`pressable relative flex h-11 w-11 items-center justify-center rounded-full hover:bg-black/[0.04] ${
+          className={`pressable relative hidden h-11 w-11 items-center justify-center rounded-full hover:bg-black/[0.04] lg:flex ${
             customOpen || isCustomActive ? "text-brand" : "text-ink-2"
           }`}
         >
@@ -345,13 +360,9 @@ function ReturnsExplorerInner() {
               />
             </label>
 
-            <FilterChips value={filter} onChange={selectFilter} />
+            <FilterChips value={filter} count={loading ? null : totalCount} onChange={selectFilter} />
 
-            <div
-              role="group"
-              aria-label="Filter by date"
-              className="no-scrollbar -mx-5 flex items-center gap-1.5 overflow-x-auto px-5 pt-0.5 lg:mr-0 lg:pr-0"
-            >
+            <ScrollChips label="Dates" className="-mx-5 lg:mr-0" rowClassName="items-center gap-1.5 px-5 pt-0.5 lg:pr-0">
               {RETURN_DATE_PRESETS.map((preset) => {
                 const active = !isCustomActive && dateFilter.range === preset.id;
                 return (
@@ -360,10 +371,10 @@ function ReturnsExplorerInner() {
                     type="button"
                     aria-pressed={active}
                     onClick={() => selectDatePreset(preset.id)}
-                    className={`h-8 shrink-0 rounded-full px-3 text-[13px] font-semibold transition-colors ${
+                    className={`h-9 shrink-0 rounded-full px-3.5 text-[14px] font-semibold transition-colors ${
                       active
                         ? "bg-brand/12 text-brand shadow-[inset_0_0_0_1px_rgb(13_148_136/0.35)]"
-                        : "bg-white/70 text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline)] hover:bg-white active:bg-slate-100"
+                        : "bg-white text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] hover:text-ink active:bg-slate-100"
                     }`}
                   >
                     {preset.label}
@@ -374,16 +385,16 @@ function ReturnsExplorerInner() {
                 type="button"
                 aria-pressed={isCustomActive || customOpen}
                 onClick={() => setCustomOpen((o) => !o)}
-                className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-semibold transition-colors ${
+                className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-semibold transition-colors ${
                   isCustomActive || customOpen
                     ? "bg-brand/12 text-brand shadow-[inset_0_0_0_1px_rgb(13_148_136/0.35)]"
-                    : "bg-white/70 text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline)] hover:bg-white active:bg-slate-100"
+                    : "bg-white text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] hover:text-ink active:bg-slate-100"
                 }`}
               >
                 <CalendarDays className="h-3.5 w-3.5" />
                 <span>{customLabel ?? "Custom"}</span>
               </button>
-            </div>
+            </ScrollChips>
 
             {customOpen && (
               <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] bg-white p-2.5 shadow-[var(--shadow-card)]">

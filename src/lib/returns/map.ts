@@ -169,6 +169,7 @@ export function mapTikTokReturn(
     category: cls.category,
     digitalStatus: cls.digitalStatus,
     returnReason: str(r.return_reason_text) ?? str(r.return_reason) ?? "Buyer return",
+    disputeDeadlineAt: cls.disputeDeadlineAt,
     ...summarize(items),
     items,
     orderTotalPhp: Number((r.refund_amount as Raw | undefined)?.refund_total) || 0,

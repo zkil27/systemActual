@@ -6,7 +6,7 @@
   "description": "Runs on the warehouse PC: prints Kyna Ops labels silently and keeps the app's sync running every minute.",
   "scripts": {
     "start": "node --env-file=.env agent.mjs",
-    "printers": "node -e \"import('pdf-to-printer').then(async m => console.log((await m.getPrinters()).map(p => p.name).join('\\n')))\""
+    "printers": "node -e \"import('pdf-to-printer').then(async m => console.log((await (m.getPrinters || m.default.getPrinters)()).map(p => p.name).join('\\n')))\""
   },
   "engines": {
     "node": ">=20.6"
