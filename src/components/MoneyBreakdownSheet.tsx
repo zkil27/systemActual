@@ -213,6 +213,7 @@ function Body({ initialRange, open }: { initialRange: MoneyRange; open: boolean 
             </div>
             <SegmentedControl
               label="Transaction kind"
+              size="sm"
               options={KIND_FILTERS}
               value={kind}
               onChange={(id) => setKind(id as KindFilter)}

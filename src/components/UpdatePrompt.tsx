@@ -33,7 +33,16 @@ function formatDate(date: string) {
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
+const PREVIEW_PARAM = "preview-update";
+
 function reloadApp() {
+  // Drop the preview flag, or the reload would show the preview again.
+  const url = new URL(window.location.href);
+  if (url.searchParams.has(PREVIEW_PARAM)) {
+    url.searchParams.delete(PREVIEW_PARAM);
+    window.location.replace(url.toString());
+    return;
+  }
   window.location.reload();
 }
 
@@ -87,7 +96,7 @@ export function UpdatePrompt() {
 
   // Preview without a deploy: add ?preview-update=major (or minor) to any URL.
   useEffect(() => {
-    const preview = new URLSearchParams(window.location.search).get("preview-update");
+    const preview = new URLSearchParams(window.location.search).get(PREVIEW_PARAM);
     if (preview === "major") {
       setReleases(RELEASES.slice(0, 3));
       setKind("major");

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Check } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Sheet } from "@/components/ui/Sheet";
 import { toast } from "@/components/ui/Toast";
@@ -96,8 +97,13 @@ export function AutoShipSheet({
 
         {!continuousMode && (
           <div className="space-y-2.5">
-            <p className="text-[13px] text-ink-3">Tap wave times (Manila time):</p>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-[15px] font-semibold text-ink">Wave times</p>
+              <p className="text-[14px] text-ink-3 tabular-nums">
+                {selectedTimes.length ? `${selectedTimes.length} selected` : "Manila time"}
+              </p>
+            </div>
+            <div className="grid grid-cols-3 gap-2" role="group" aria-label="Wave times, Manila time">
               {allTimes.map((t) => {
                 const active = selectedTimes.includes(t);
                 return (
@@ -106,10 +112,15 @@ export function AutoShipSheet({
                     type="button"
                     aria-pressed={active}
                     onClick={() => toggleTime(t)}
-                    className={`pressable h-9 rounded-full px-3 text-[13px] font-semibold tabular-nums ${
-                      active ? "bg-ink text-ink-inverse" : "bg-surface-muted text-ink-2 hover:bg-surface-track"
+                    className={`pressable relative flex h-14 items-center justify-center rounded-[var(--radius-control)] text-[16px] font-semibold tabular-nums transition-colors ${
+                      active
+                        ? "bg-brand-soft text-brand shadow-[inset_0_0_0_2px_var(--color-brand)]"
+                        : "bg-surface-muted text-ink-2 hover:bg-surface-track"
                     }`}
                   >
+                    {active && (
+                      <Check className="absolute right-1.5 top-1.5 h-3.5 w-3.5" strokeWidth={3} aria-hidden="true" />
+                    )}
                     {clock(t)}
                   </button>
                 );
