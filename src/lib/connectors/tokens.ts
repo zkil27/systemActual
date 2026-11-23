@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { Platform, type ShopConnection } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { notifyOwnerTelegram } from "@/lib/telegram";
 
 /**
@@ -77,6 +78,7 @@ export async function refreshShopeeTokens(
         partner_id: Number(cfg.partnerId),
         shop_id: Number(shopId),
       }),
+      signal: AbortSignal.timeout(15_000),
     }
   );
   const data = await res.json();
@@ -102,7 +104,9 @@ export async function refreshTikTokTokens(
     refresh_token: refreshToken,
     grant_type: "refresh_token",
   });
-  const res = await fetchFn(`${cfg.authUrl}/api/v2/token/refresh?${qs.toString()}`);
+  const res = await fetchFn(`${cfg.authUrl}/api/v2/token/refresh?${qs.toString()}`, {
+    signal: AbortSignal.timeout(15_000),
+  });
   const data = await res.json();
   if (!res.ok || data.code !== 0 || !data.data?.access_token) {
     throw new Error(data.message || "TikTok token refresh failed");
@@ -137,17 +141,26 @@ export async function ensureFreshTokenWith(conn: TokenConn, deps: TokenDeps): Pr
   if (!conn.accessToken || !conn.refreshToken) {
     throw new Error(`${conn.shopName} is not connected.`);
   }
-  if (!isTokenDue(conn.tokenExpiresAt, deps.now)) return conn.accessToken;
+  const plainAccess = decryptSecret(conn.accessToken);
+  const plainRefresh = decryptSecret(conn.refreshToken);
+  if (!isTokenDue(conn.tokenExpiresAt, deps.now)) return plainAccess;
 
-  const previous = conn.refreshToken;
+  // Keep raw stored refreshToken for optimistic concurrency match in DB,
+  // while passing plaintext refreshToken to the platform refresh endpoint.
+  const previousStored = conn.refreshToken;
+  const plainConn: TokenConn = { ...conn, accessToken: plainAccess, refreshToken: plainRefresh };
   let tokens: TokenSet;
   try {
-    tokens = await deps.refresh(conn);
+    tokens = await deps.refresh(plainConn);
   } catch (err) {
     // A parallel tick may have refreshed (and rotated the refresh token) first.
     const latest = await deps.reload(conn.id);
-    if (latest?.accessToken && latest.refreshToken !== previous && !isTokenDue(latest.tokenExpiresAt, deps.now)) {
-      return latest.accessToken;
+    if (
+      latest?.accessToken &&
+      latest.refreshToken !== previousStored &&
+      !isTokenDue(latest.tokenExpiresAt, deps.now)
+    ) {
+      return decryptSecret(latest.accessToken);
     }
     const message = err instanceof Error ? err.message : String(err);
     await deps.markError(conn, message);
@@ -159,10 +172,10 @@ export async function ensureFreshTokenWith(conn: TokenConn, deps: TokenDeps): Pr
     throw err;
   }
 
-  const saved = await deps.save(conn, previous, tokens);
+  const saved = await deps.save(conn, previousStored, tokens);
   if (!saved) {
     const latest = await deps.reload(conn.id);
-    if (latest?.accessToken) return latest.accessToken;
+    if (latest?.accessToken) return decryptSecret(latest.accessToken);
   }
   return tokens.accessToken;
 }
@@ -171,14 +184,14 @@ const prismaTokenDeps = (now: Date): TokenDeps => ({
   now,
   refresh: (conn) =>
     conn.platform === Platform.SHOPEE
-      ? refreshShopeeTokens(conn.refreshToken!, conn.shopId, fetch, now)
-      : refreshTikTokTokens(conn.refreshToken!, fetch, now),
+      ? refreshShopeeTokens(decryptSecret(conn.refreshToken!), conn.shopId, fetch, now)
+      : refreshTikTokTokens(decryptSecret(conn.refreshToken!), fetch, now),
   save: async (conn, previousRefreshToken, tokens) => {
     const result = await prisma.shopConnection.updateMany({
       where: { id: conn.id, refreshToken: previousRefreshToken },
       data: {
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
+        accessToken: encryptSecret(tokens.accessToken),
+        refreshToken: encryptSecret(tokens.refreshToken),
         tokenExpiresAt: tokens.expiresAt,
         tokenErrorAt: null,
         tokenError: null,

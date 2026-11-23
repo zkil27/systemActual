@@ -25,7 +25,8 @@ export function tiktokShipDecision(
   order: { status: string; cancelRequested: boolean; platformCreatedAt: Date },
   pkg: { status: string | null },
   shipRequested: boolean,
-  now: Date
+  now: Date,
+  opts?: { includeNewOrders?: boolean }
 ): ShipDecision {
   const s = order.status.toUpperCase();
   const p = (pkg.status ?? "").toUpperCase();
@@ -37,7 +38,7 @@ export function tiktokShipDecision(
       : { kind: "failed", reason: "Shipment was arranged outside Kyna Ops. Print this label from Seller Center." };
   }
   if (s === "AWAITING_SHIPMENT" && (!p || p === "TO_FULFILL")) {
-    if (now.getTime() - order.platformCreatedAt.getTime() < MIN_ORDER_AGE_MS) {
+    if (!opts?.includeNewOrders && now.getTime() - order.platformCreatedAt.getTime() < MIN_ORDER_AGE_MS) {
       return { kind: "wait", reason: "Order is less than 1 hour old" };
     }
     return { kind: "ship" };

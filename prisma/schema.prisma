@@ -29,6 +29,14 @@ enum DigitalStatus {
   CANCELLED_RETURN
 }
 
+/// Owner-tracked dispute with the marketplace for a missing / damaged return.
+enum DisputeStatus {
+  NONE
+  FILED
+  WON
+  LOST
+}
+
 enum PhysicalCondition {
   GOOD_RESTOCKABLE
   DAMAGED_PACKAGING
@@ -38,11 +46,13 @@ enum PhysicalCondition {
 }
 
 model OwnerUser {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  name         String
-  createdAt    DateTime @default(now())
+  id                  String    @id @default(cuid())
+  email               String    @unique
+  passwordHash        String
+  name                String
+  failedLoginAttempts Int       @default(0)
+  loginLockedUntil    DateTime?
+  createdAt           DateTime  @default(now())
 }
 
 model StaffMember {
@@ -50,6 +60,7 @@ model StaffMember {
   name           String         @unique
   pinHash        String
   active         Boolean        @default(true)
+  tokenVersion   Int            @default(1)
   scans          PhysicalScan[]
   packedPackages Package[]
   createdAt      DateTime       @default(now())
@@ -128,6 +139,16 @@ model ReturnParcel {
   physicalCondition PhysicalCondition?
   disputeDraft      String?            @db.Text
 
+  /// Owner's dispute lifecycle with the marketplace (Phase 3).
+  disputeStatus  DisputeStatus @default(NONE)
+  disputeFiledAt DateTime?
+  disputeRef     String?
+  /// What the marketplace paid back after a won dispute.
+  reimbursedPhp  Decimal?      @db.Decimal(10, 2)
+  /// Owner closed the case by hand ("Found" / "Settled"). Resolved parcels are never Missing or Overdue.
+  resolvedAt     DateTime?
+  resolvedNote   String?
+
   /// "F:<orderSn>" for a failed delivery (incl. Shopee Return on the Spot),
   /// "R:<returnSn>" for a buyer return. Several returns on one order stay separate.
   dedupeKey             String
@@ -155,6 +176,7 @@ model ReturnParcel {
   @@index([courierReturnedToSellerAt])
   @@index([physicallyReceivedAt])
   @@index([category, digitalStatus])
+  @@index([disputeDeadlineAt])
 }
 
 model ReturnEvent {
@@ -183,8 +205,11 @@ model PhysicalScan {
   notes          String?
   photoUrls      String[]
   scannedAt      DateTime          @default(now())
+  /// Made on the phone per save, so a retry on flaky Wi-Fi is recorded once.
+  clientKey      String?           @unique
 
   @@index([scannedAt])
+  @@index([parcelId, scannedAt])
 }
 
 model ImportJob {
@@ -330,11 +355,22 @@ model ListingVariant {
 
 /// One real item across both shops, e.g. "Ribbed Top".
 model Garment {
-  id        String           @id @default(cuid())
-  name      String
-  imageUrl  String?
-  variants  GarmentVariant[]
-  createdAt DateTime         @default(now())
+  id                String           @id @default(cuid())
+  name              String
+  imageUrl          String?
+  variants          GarmentVariant[]
+  /// Hidden from the Items list and stock alerts (discontinued). Stock keeps syncing.
+  archivedAt        DateTime?
+  /// Optional overrides; null = use the shop-wide default from Settings.
+  unitCostPhp       Decimal?         @db.Decimal(10, 2)
+  sellingPricePhp   Decimal?         @db.Decimal(10, 2)
+  /// "Low stock" at or below this many available (default 5).
+  lowStockThreshold Int?
+  /// Pieces held back from the shops for this garment (default: Settings buffer).
+  safetyBuffer      Int?
+  /// Shelf / bin label shown to packers, e.g. "A3".
+  binLocation       String?
+  createdAt         DateTime         @default(now())
 }
 
 /// One real colour/size of a garment, e.g. "Black, M". Holds the stock count.
@@ -417,7 +453,8 @@ model StockMovement {
   staffMemberId    String?
   createdAt        DateTime       @default(now())
 
-  @@index([garmentVariantId])
+  @@index([garmentVariantId, createdAt])
+  @@index([createdAt])
 }
 
 enum PrintJobKind {
@@ -443,8 +480,22 @@ model PrintDevice {
   lastSeenAt   DateTime?
   agentVersion String?
   printerName  String?
+  /// Windows printer state from the agent ("Normal", "Offline", "PaperOut", ...).
+  printerStatus   String?
+  /// Nightly pg_dump on the PC: last success, last error, size of the last file.
+  lastBackupAt    DateTime?
+  lastBackupError String?
+  lastBackupBytes Int?
   createdAt    DateTime   @default(now())
   jobs         PrintJob[]
+}
+
+/// One row per alert key so a proactive Telegram alert is sent once per episode.
+model AlertLog {
+  key    String   @id
+  sentAt DateTime
+  /// Free text for debugging ("3 parcels", "printer offline 12m").
+  detail String?
 }
 
 model PrintJob {

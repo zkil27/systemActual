@@ -1,10 +1,12 @@
 import { Platform } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
+  cancelledToPullWhere,
   evaluateOutboundScan,
   isAwaitingRiderPickup,
   isOrderCancelledForPacking,
   lastTrackingDigits,
+  unpickedPrintedWhere,
 } from "@/lib/shipping/outbound";
 
 describe("isAwaitingRiderPickup", () => {
@@ -126,5 +128,19 @@ describe("evaluateOutboundScan", () => {
   it("auto-packs 1-piece valid orders when autoPackSingle is enabled", () => {
     expect(evaluateOutboundScan(singleValid, { autoPackSingle: true }).status).toBe("AUTO_PACK_OK");
     expect(evaluateOutboundScan(singleValid, { autoPackSingle: false }).status).toBe("READY_TO_PACK");
+  });
+});
+
+describe("cancelledToPullWhere & unpickedPrintedWhere", () => {
+  it("flags cancelled printed parcels even if already marked packed", () => {
+    const where = cancelledToPullWhere(new Date("2026-11-23T00:00:00Z"));
+    expect((where.package as Record<string, unknown>)?.packedAt).toBeUndefined();
+  });
+
+  it("looks back 3 days for unpicked printed parcels across midnight", () => {
+    const now = new Date("2026-11-23T00:05:00+08:00");
+    const where = unpickedPrintedWhere(now);
+    const waveCreated = (where.wave as { createdAt?: { gte?: Date } })?.createdAt?.gte;
+    expect(waveCreated?.getTime()).toBe(now.getTime() - 3 * 24 * 60 * 60_000);
   });
 });

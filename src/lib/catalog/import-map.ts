@@ -66,8 +66,13 @@ export function mapShopeeItem(base: Raw, models: Raw | null): ImportedListing[] 
     });
 }
 
-/** TikTok: one product from Get Product (/product/202309/products/{id}). */
-export function mapTikTokProduct(p: Raw): ImportedListing[] {
+/**
+ * TikTok: one product from Get Product (/product/202309/products/{id}).
+ * A SKU can hold stock in several warehouses, but we only ever update one, so
+ * "available" is that warehouse's quantity: the one already linked
+ * (`knownWarehouses`, by SKU id), else the first listed.
+ */
+export function mapTikTokProduct(p: Raw, knownWarehouses?: ReadonlyMap<string, string>): ImportedListing[] {
   const listingId = String(p.id);
   const name = String(p.title ?? "Item");
   const mainUrls = arr(arr(p.main_images)[0]?.urls as unknown);
@@ -76,14 +81,17 @@ export function mapTikTokProduct(p: Raw): ImportedListing[] {
     const attrs = arr(s.sales_attributes);
     const skuImg = arr((attrs.find((a) => a.sku_img)?.sku_img as Raw | undefined)?.urls as unknown);
     const label = attrs.map((a) => String(a.value_name ?? "")).filter(Boolean).join(", ");
+    const inventory = arr(s.inventory).filter((i) => i.warehouse_id !== undefined && i.warehouse_id !== null);
+    const known = knownWarehouses?.get(String(s.id));
+    const chosen = (known && inventory.find((i) => String(i.warehouse_id) === known)) || inventory[0];
     return {
       listingId,
       variationId: String(s.id),
       name,
       variationName: label || null,
       imageUrl: skuImg.length ? String(skuImg[0]) : productImage,
-      availableStock: arr(s.inventory).reduce((n, i) => n + num(i.quantity), 0),
-      warehouseId: arr(s.inventory)[0]?.warehouse_id ? String(arr(s.inventory)[0].warehouse_id) : null,
+      availableStock: chosen ? num(chosen.quantity) : arr(s.inventory).reduce((n, i) => n + num(i.quantity), 0),
+      warehouseId: chosen ? String(chosen.warehouse_id) : null,
     };
   });
 }

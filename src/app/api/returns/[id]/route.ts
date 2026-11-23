@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { DisputeStatus, PhysicalCondition, Prisma } from "@prisma/client";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { buildDisputeAppealDraft } from "@/lib/reports/dispute-template";
-import { isMissingDiscrepancy } from "@/lib/returns/rules";
+import { isMissingDiscrepancy, isOverdueRts, isUrgentDeadline } from "@/lib/returns/rules";
+import { applyReturnAction, type ReturnAction } from "@/lib/returns/owner-actions";
 
 export async function GET(
   _req: NextRequest,
@@ -34,6 +37,19 @@ export async function GET(
           physicallyReceivedAt: true,
           physicalCondition: true,
           disputeDraft: true,
+          disputeDeadlineAt: true,
+          disputeStatus: true,
+          disputeFiledAt: true,
+          disputeRef: true,
+          reimbursedPhp: true,
+          resolvedAt: true,
+          resolvedNote: true,
+          returnSn: true,
+          events: {
+            orderBy: { eventTimestamp: "desc" },
+            take: 40,
+            select: { id: true, source: true, rawStatus: true, description: true, eventTimestamp: true },
+          },
           scans: {
             orderBy: { scannedAt: "desc" },
             select: {
@@ -49,7 +65,7 @@ export async function GET(
       }),
       prisma.appSettings.findUnique({
         where: { id: "default" },
-        select: { missingSinceAt: true },
+        select: { missingSinceAt: true, overdueRtsDays: true },
       }),
     ]);
     if (!parcel) {
@@ -61,7 +77,10 @@ export async function GET(
         ...parcel,
         orderTotalPhp: Number(parcel.orderTotalPhp),
         estimatedUnitCostPhp: Number(parcel.estimatedUnitCostPhp),
+        reimbursedPhp: parcel.reimbursedPhp === null ? null : Number(parcel.reimbursedPhp),
         isMissingDiscrepancy: isMissingDiscrepancy(parcel, settings?.missingSinceAt ?? null),
+        isOverdueRts: isOverdueRts(parcel, settings?.overdueRtsDays ?? 10, new Date(), settings?.missingSinceAt ?? null),
+        isUrgentDeadline: isUrgentDeadline(parcel),
       },
     });
   } catch (err) {
@@ -116,5 +135,48 @@ export async function POST(
   } catch (err) {
     console.error("[Dispute draft error]", err);
     return NextResponse.json({ error: "Could not build dispute draft." }, { status: 500 });
+  }
+}
+
+const patchSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("set_dispute"),
+    status: z.nativeEnum(DisputeStatus),
+    ref: z.string().trim().max(120).optional().nullable(),
+    reimbursedPhp: z.number().min(0).max(1_000_000).optional().nullable(),
+    note: z.string().trim().max(500).optional().nullable(),
+  }),
+  z.object({
+    action: z.literal("resolve"),
+    outcome: z.enum(["FOUND", "SETTLED"]),
+    note: z.string().trim().max(500).optional().nullable(),
+  }),
+  z.object({ action: z.literal("reopen") }),
+  z.object({
+    action: z.literal("correct_condition"),
+    condition: z.nativeEnum(PhysicalCondition),
+    note: z.string().trim().max(500).optional().nullable(),
+  }),
+]);
+
+/** Owner actions on one return: dispute status, settle / reopen, fix a wrong scan. */
+export async function PATCH(req: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const { id } = await context.params;
+  const parsed = patchSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid action." }, { status: 400 });
+  }
+  try {
+    const result = await applyReturnAction(id, parsed.data as ReturnAction);
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    }
+    return NextResponse.json(result);
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
+      return NextResponse.json({ error: "Parcel not found." }, { status: 404 });
+    }
+    console.error("[Return action error]", err);
+    return NextResponse.json({ error: "Could not update parcel." }, { status: 500 });
   }
 }

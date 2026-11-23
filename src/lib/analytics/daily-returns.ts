@@ -1,7 +1,6 @@
 import {
   PhysicalCondition,
   Platform,
-  PrintJobKind,
   PrintJobStatus,
   ReturnCategory,
   WaveItemStatus,
@@ -13,16 +12,20 @@ import { getMoneySummary, type MoneySummary } from "@/lib/money/summary";
 import { getStockOperationsSummary } from "@/lib/catalog/garments";
 import { getShopeeBumpStatus } from "@/lib/catalog/shopee-bump";
 import { isOnline } from "@/lib/print/device";
+import { countPrintedLabels } from "@/lib/print/jobs";
 import { getReadyCounts } from "@/lib/waves/build";
 import { isContinuousWave } from "@/lib/waves/schedule";
 import {
   costAtRiskPhp,
   isMissingDiscrepancy as isMissing,
+  isUrgentDeadline as isUrgent,
+  urgentDeadlineWhere,
   isOverdueRts as isOverdue,
   missingWhere,
   overdueWhere,
 } from "@/lib/returns/rules";
 import { withSpan } from "@/lib/otel";
+import { getCourierRates, getItemReturnRates, itemKey, type CourierRate } from "@/lib/analytics/rates";
 
 export interface CategoryDailyTruth {
   taggedCount: number;
@@ -65,7 +68,12 @@ export interface DailyTruthReport {
     failedCount: number;
     returnCount: number;
     totalCount: number;
+    /** 30-day pieces returned / pieces shipped, or null when too few shipped to say. */
+    returnRatePct: number | null;
+    shipped30d: number;
   }>;
+  /** 30-day courier failure / missing rates (real shops only). */
+  courierRates: CourierRate[];
   attentionParcels: Array<{
     id: string;
     platform: Platform;
@@ -157,10 +165,11 @@ export async function getDailyTruthReport(options?: {
   const returnShippingEstimatePhp = Number(settings?.returnShippingEstimatePhp ?? 40);
   const stockSafetyBuffer = settings?.stockSafetyBuffer ?? 0;
   const missingSinceAt = settings?.missingSinceAt ?? null;
-  const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   const connectedPlatforms = new Set(
     shops.filter((s) => !s.isDemo && s.accessToken).map((s) => s.platform)
   ).size;
+  const hasRealShop = connectedPlatforms > 0;
+  const realShopFilter = hasRealShop ? { shopConnection: { isDemo: false } } : {};
   const liveShopee = shops.find(
     (s) => s.platform === Platform.SHOPEE && !s.isDemo && Boolean(s.accessToken)
   );
@@ -180,13 +189,14 @@ export async function getDailyTruthReport(options?: {
     withSpan("dashboard.returnParcels", () =>
       prisma.returnParcel.findMany({
         where: {
+          ...realShopFilter,
           OR: [
             { digitalReturnTaggedAt: { gte: start, lt: end } },
             { courierReturnedToSellerAt: { gte: start, lt: end } },
             { physicallyReceivedAt: { gte: start, lt: end } },
             missingWhere(missingSinceAt),
             overdueWhere(overdueRtsDays, now, missingSinceAt),
-            { disputeDeadlineAt: { gt: new Date(now.getTime() - 2 * 3600_000), lte: in24h } },
+            urgentDeadlineWhere(now),
           ],
         },
         select: {
@@ -209,6 +219,8 @@ export async function getDailyTruthReport(options?: {
           physicallyReceivedAt: true,
           physicalCondition: true,
           disputeDeadlineAt: true,
+          disputeStatus: true,
+          resolvedAt: true,
           expectsPhysicalReturn: true,
         },
         orderBy: [{ courierReturnedToSellerAt: "desc" }, { digitalReturnTaggedAt: "desc" }],
@@ -216,13 +228,7 @@ export async function getDailyTruthReport(options?: {
     ),
     withSpan("dashboard.money", () => getMoneySummary(start, end, shops)),
     withSpan("dashboard.readyCounts", () => getReadyCounts(now)),
-    prisma.printJob.count({
-      where: {
-        kind: PrintJobKind.LABEL,
-        status: PrintJobStatus.PRINTED,
-        printedAt: { gte: start, lt: end },
-      },
-    }),
+    countPrintedLabels(start, end),
     prisma.wave.count({ where: { status: WaveStatus.RUNNING } }),
     prisma.waveItem.count({
       where: {
@@ -283,11 +289,7 @@ export async function getDailyTruthReport(options?: {
 
     const isMissingDiscrepancy = isMissing(p, missingSinceAt);
     const isOverdueRts = isOverdue(p, overdueRtsDays, now, missingSinceAt);
-    const isUrgentDeadline = Boolean(
-      p.disputeDeadlineAt &&
-        p.disputeDeadlineAt.getTime() > now.getTime() - 2 * 60 * 60 * 1000 &&
-        p.disputeDeadlineAt.getTime() <= in24h.getTime()
-    );
+    const isUrgentDeadline = isUrgent(p, now);
 
     if (isMissingDiscrepancy) {
       missingNowCount++;
@@ -394,10 +396,18 @@ export async function getDailyTruthReport(options?: {
     .map(([courier, stats]) => ({ courier, ...stats }))
     .sort((a, b) => b.tagged + b.missing - (a.tagged + a.missing));
 
-  const topItems = Array.from(itemMap.values())
+  const topRaw = Array.from(itemMap.values())
     .map((x) => ({ ...x, totalCount: x.failedCount + x.returnCount }))
     .sort((a, b) => b.totalCount - a.totalCount)
     .slice(0, 6);
+  const [itemRates, courierRates] = await Promise.all([
+    getItemReturnRates(topRaw.map((x) => x.itemSummary), now).catch(() => new Map()),
+    hasRealShop ? getCourierRates(now).catch(() => []) : Promise.resolve([]),
+  ]);
+  const topItems = topRaw.map((x) => {
+    const r = itemRates.get(itemKey(x.itemSummary));
+    return { ...x, returnRatePct: r?.ratePct ?? null, shipped30d: r?.shipped ?? 0 };
+  });
 
   // Prioritize Missing Discrepancies first, then Urgent Deadlines, then recent activity
   attentionCandidates.sort((a, b) => {
@@ -453,6 +463,7 @@ export async function getDailyTruthReport(options?: {
       damagedOrSwappedTodayCount,
     },
     topItems,
+    courierRates,
     attentionParcels,
     shops: shops.map((s) => ({
       id: s.id,

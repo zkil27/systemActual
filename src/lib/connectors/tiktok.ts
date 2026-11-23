@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { decryptSecret } from "@/lib/crypto";
 import { tiktokExpiry } from "./tokens";
 
 export function getTikTokConfig() {
@@ -70,7 +71,7 @@ export function buildTikTokAuthUrl(state: string): string {
 export async function exchangeTikTokCode(code: string) {
   const cfg = getTikTokConfig();
   const url = `${cfg.authUrl}/api/v2/token/get?app_key=${encodeURIComponent(cfg.appKey)}&app_secret=${encodeURIComponent(cfg.appSecret)}&auth_code=${encodeURIComponent(code)}&grant_type=authorized_code`;
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
   const data = await res.json();
   if (!res.ok || data.code !== 0) {
     throw new Error(data.message || "TikTok token exchange failed");
@@ -98,12 +99,14 @@ export async function tiktokRequest(opts: {
   fetchFn?: typeof fetch;
 }) {
   const cfg = getTikTokConfig();
+  const accessToken = decryptSecret(opts.accessToken);
+  const shopCipher = opts.shopCipher ? decryptSecret(opts.shopCipher) : null;
   const timestamp = String(Math.floor(Date.now() / 1000));
   const rawBody = opts.body ? JSON.stringify(opts.body) : undefined;
   const query: Record<string, string> = {
     app_key: cfg.appKey,
     timestamp,
-    ...(opts.shopCipher ? { shop_cipher: opts.shopCipher } : {}),
+    ...(shopCipher ? { shop_cipher: shopCipher } : {}),
     ...(opts.query ?? {}),
   };
   const sign = signTikTokRequest({ appSecret: cfg.appSecret, path: opts.path, query, rawBody });
@@ -112,7 +115,7 @@ export async function tiktokRequest(opts: {
     method: opts.method,
     headers: {
       ...(rawBody ? { "Content-Type": "application/json" } : {}),
-      "x-tts-access-token": opts.accessToken,
+      "x-tts-access-token": accessToken,
     },
     body: rawBody,
     signal: AbortSignal.timeout(15_000),

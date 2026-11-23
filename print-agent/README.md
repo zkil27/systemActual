@@ -40,9 +40,16 @@ The free database plan has no restorable backups. To keep your own:
 1. Install the PostgreSQL command-line tools (`pg_dump`). The version must match your Supabase Postgres version or be newer.
 2. In `.env`, set `BACKUP_DATABASE_URL` to the Supabase direct or session-pooler connection string (port 5432).
 3. Each day, after `BACKUP_HOUR`, the agent saves `kyna-YYYY-MM-DD.dump` in `BACKUP_DIR` and keeps the last 7.
+4. Each backup is checked (a real `pg_dump` archive, not a near-empty file) before older ones are deleted. The result shows on the phone in **Settings → Printer** and **Settings → Health**, and a failed backup is flagged there.
 
 This puts the database password on this PC. Use a Windows account only trusted staff can open.
 
+## Printer status
+
+Before each label the agent asks Windows (`Get-Printer`) what the printer says. If it reports Offline, PaperOut, Error, a jam or an open door, labels stay in the queue instead of being sent to a printer that can't print them. The phone shows the status, and Telegram alerts you if labels are waiting. Printing resumes by itself once Windows reports the printer is normal again.
+
 ## Logs
 
-When started from the startup task, the output isn't shown. To watch it live, stop the task in Task Scheduler and run `npm start` in a PowerShell window.
+Everything the agent prints is also written to `agent-YYYY-MM-DD.log` in `LOG_DIR` (default: `BACKUP_DIR`, i.e. `C:\KynaBackups`). The last `LOG_KEEP` days (default 14) are kept.
+
+To watch it live instead, stop the task in Task Scheduler and run `npm start` in a PowerShell window.

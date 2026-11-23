@@ -62,7 +62,12 @@ async function shipBatch(shop: ShopConnection, token: string, deadline: number):
       await wait([item], RETRY_MS, "Re-checking the order");
       continue;
     }
-    const d = tiktokShipDecision(item.package.order, item.package, Boolean(item.shipRequestedAt), new Date());
+    const includeNewOrders = Boolean(
+      (item.wave?.summaryJson as { includeNewOrders?: boolean } | null)?.includeNewOrders
+    );
+    const d = tiktokShipDecision(item.package.order, item.package, Boolean(item.shipRequestedAt), new Date(), {
+      includeNewOrders,
+    });
     if (d.kind === "ship") toShip.push(item);
     else if (d.kind === "arranged") await advance([item], WaveItemStatus.SHIPPING_ARRANGED, { nextAttemptAt: later(15_000) });
     else if (d.kind === "cancelled") await finish([item], WaveItemStatus.SKIPPED_CANCELLED, "Cancelled before shipping", true);

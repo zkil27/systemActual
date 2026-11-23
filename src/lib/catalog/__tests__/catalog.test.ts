@@ -177,9 +177,22 @@ describe("stock import mapping", () => {
         name: "Ribbed Top",
         variationName: "Black, M",
         imageUrl: "https://p16.tiktokcdn.com/main",
-        availableStock: 12,
+        // Only the warehouse we update counts; w2's pieces can't be sold through our pushes.
+        availableStock: 10,
         warehouseId: "w1",
       },
     ]);
+  });
+
+  it("keeps the TikTok warehouse already linked to a SKU", () => {
+    const product = {
+      id: "p1",
+      title: "Ribbed Top",
+      skus: [{ id: "sku1", inventory: [{ warehouse_id: "w1", quantity: 10 }, { warehouse_id: "w2", quantity: 2 }] }],
+    };
+    const [row] = mapTikTokProduct(product, new Map([["sku1", "w2"]]));
+    expect(row).toMatchObject({ availableStock: 2, warehouseId: "w2" });
+    // A linked warehouse that's gone falls back to the first one.
+    expect(mapTikTokProduct(product, new Map([["sku1", "w9"]]))[0]).toMatchObject({ availableStock: 10, warehouseId: "w1" });
   });
 });

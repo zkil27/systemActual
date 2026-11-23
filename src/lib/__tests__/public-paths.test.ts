@@ -32,10 +32,11 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/api/printer")).toBe(false);
   });
 
-  it("protects owner pages and owner APIs", () => {
-    for (const path of ["/", "/returns", "/settings", "/imports", "/api/dashboard", "/api/returns/abc"]) {
+  it("protects owner pages and raw /uploads/ paths while letting authenticated proof route pass Edge", () => {
+    for (const path of ["/", "/returns", "/settings", "/imports", "/api/dashboard", "/api/returns/abc", "/uploads/return-proof-1.jpg"]) {
       expect(isPublicPath(path), path).toBe(false);
     }
+    expect(isPublicPath("/api/proofs/return-proof-1.jpg")).toBe(true);
   });
 
   it("does not treat lookalike paths as the exact icon routes", () => {

@@ -8,7 +8,7 @@ const PUBLIC_PREFIXES = [
   // Staff screens: checked against the staff PIN session in the route.
   "/stock-in",
   "/api/stock-in",
-  "/uploads/",
+  "/api/proofs/",
   "/icons/",
   "/api/auth/",
   "/api/scan/",

@@ -4,6 +4,7 @@ import { shopeePost } from "@/lib/connectors/shopee";
 import { tiktokRequest } from "@/lib/connectors/tiktok";
 import { ensureFreshToken } from "@/lib/connectors/tokens";
 import { notifyOwnerTelegram } from "@/lib/telegram";
+import { effectiveBuffer } from "@/lib/catalog/garments";
 import { committedByVariant, onShelfByVariant } from "./ledger";
 import { availableToSell, planPushes, PUSH_ALERT_AFTER, type PushCandidate } from "./rules";
 
@@ -73,6 +74,7 @@ async function candidatesFor(
 ): Promise<PushCandidate[]> {
   const listings = await prisma.listingVariant.findMany({
     where: { shopConnectionId, garmentVariant: { startingStockSetAt: { not: null } } },
+    include: { garmentVariant: { select: { garment: { select: { safetyBuffer: true } } } } },
   });
   return listings.map((l) => ({
     listingVariantId: l.id,
@@ -84,7 +86,7 @@ async function candidatesFor(
     target: availableToSell(
       shared.onShelf.get(l.garmentVariantId!) ?? 0,
       shared.committed.get(l.garmentVariantId!) ?? 0,
-      shared.buffer
+      effectiveBuffer(l.garmentVariant?.garment.safetyBuffer, shared.buffer)
     ),
     pushedStock: l.pushedStock,
   }));

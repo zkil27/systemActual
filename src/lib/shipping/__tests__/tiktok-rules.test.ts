@@ -22,9 +22,10 @@ describe("tiktokShipDecision (on a freshly re-checked order)", () => {
     expect(tiktokShipDecision(order("AWAITING_SHIPMENT"), { status: "CANCELLED" }, true, now).kind).toBe("cancelled");
   });
 
-  it("waits until the order is 1 hour old", () => {
+  it("waits until the order is 1 hour old unless includeNewOrders is enabled", () => {
     const young = order("AWAITING_SHIPMENT", { platformCreatedAt: new Date(now.getTime() - 10 * 60_000) });
     expect(tiktokShipDecision(young, { status: "TO_FULFILL" }, false, now).kind).toBe("wait");
+    expect(tiktokShipDecision(young, { status: "TO_FULFILL" }, false, now, { includeNewOrders: true })).toEqual({ kind: "ship" });
   });
 
   it("after a lost reply: arranged now means it was us; still ready means ship again", () => {

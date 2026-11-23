@@ -2,14 +2,29 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Button, Group } from "@/components/ui/Button";
+import { useConfirm } from "@/components/ui/ConfirmSheet";
+import { Disclosure } from "@/components/ui/Disclosure";
 import { toast } from "@/components/ui/Toast";
 import { manilaDateTime } from "@/lib/ui/format";
 
 interface PrinterStatus {
-  device: { name: string; online: boolean; lastSeenAt: string | null; paused: boolean; printerName: string | null } | null;
+  device: {
+    name: string;
+    online: boolean;
+    lastSeenAt: string | null;
+    paused: boolean;
+    printerName: string | null;
+    agentVersion?: string | null;
+    printerStatus?: string | null;
+    lastBackupAt?: string | null;
+    lastBackupError?: string | null;
+    lastBackupBytes?: number | null;
+  } | null;
+  deviceCount?: number;
   queued: number;
   printing: number;
   failedToday: number;
+  failedJobs?: Array<{ id: string; title: string; error: string | null; createdAt: string }>;
   lastTest: { status: string; error: string | null; createdAt: string } | null;
 }
 
@@ -20,11 +35,11 @@ const TEST_LABEL: Record<string, string> = {
   FAILED: "failed",
 };
 
-async function call(action: string) {
+async function call(action: string, extra?: Record<string, unknown>) {
   const res = await fetch("/api/printer", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action }),
+    body: JSON.stringify({ action, ...(extra ?? {}) }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Something went wrong");
@@ -36,6 +51,7 @@ export function PrinterSettings() {
   const [status, setStatus] = useState<PrinterStatus | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const { confirm, sheet: confirmSheet } = useConfirm();
 
   const load = useCallback(async () => {
     const res = await fetch("/api/printer");
@@ -58,10 +74,10 @@ export function PrinterSettings() {
     };
   }, [load]);
 
-  async function run(action: string, done: string) {
+  async function run(action: string, done: string, extra?: Record<string, unknown>) {
     setBusy(true);
     try {
-      const data = await call(action);
+      const data = await call(action, extra);
       if (data.token) setToken(data.token);
       toast(done);
       await load();
@@ -111,6 +127,39 @@ export function PrinterSettings() {
               </p>
             )}
 
+            {d?.printerStatus && !/^normal|idle|ready$/i.test(d.printerStatus) && (
+              <p className="text-[15px] font-semibold text-missing-ink">Printer says: {d.printerStatus}</p>
+            )}
+
+            {d && (
+              <p
+                className={`text-[15px] ${d.lastBackupError ? "font-semibold text-missing-ink" : "text-ink-3"}`}
+              >
+                {d.lastBackupError
+                  ? `Backup failed: ${d.lastBackupError}`
+                  : d.lastBackupAt
+                    ? `Backup ${manilaDateTime(d.lastBackupAt)}${
+                        d.lastBackupBytes ? ` · ${(d.lastBackupBytes / 1_048_576).toFixed(1)} MB` : ""
+                      }`
+                    : "No backup reported yet"}
+                {d.agentVersion ? ` · agent ${d.agentVersion}` : ""}
+              </p>
+            )}
+
+            {(status?.deviceCount ?? 0) > 1 && (
+              <p className="text-[15px] text-ink-3">
+                {status!.deviceCount} PCs paired (one on standby).{" "}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => run("forget_others", "Kept only the active PC")}
+                  className="pressable inline-flex min-h-11 items-center font-semibold text-brand"
+                >
+                  Keep only this one
+                </button>
+              </p>
+            )}
+
             {status?.lastTest && (
               <p className={`text-[15px] ${status.lastTest.status === "FAILED" ? "text-missing-ink" : "text-ink-3"}`}>
                 Test print: {TEST_LABEL[status.lastTest.status] ?? status.lastTest.status}
@@ -155,14 +204,64 @@ export function PrinterSettings() {
           )}
         </div>
 
+        {d && (status?.failedJobs?.length ?? 0) > 0 && (
+          <Disclosure
+            summaryClassName={rowActionClass}
+            label={
+              <span className="flex w-full items-center justify-between pr-2">
+                <span className="text-[16px] font-semibold text-missing-ink">Failed print jobs</span>
+                <span className="text-[15px] font-semibold tabular-nums text-missing-ink">
+                  {status!.failedToday} failed today
+                </span>
+              </span>
+            }
+          >
+            <div className="space-y-3 px-4 pb-4">
+              <ul className="divide-y divide-hairline">
+                {status!.failedJobs!.map((fj) => (
+                  <li key={fj.id} className="flex items-center justify-between gap-3 py-2.5">
+                    <span className="min-w-0 text-[14px]">
+                      <span className="block truncate font-semibold text-ink">{fj.title}</span>
+                      <span className="block text-ink-3">{fj.error || "Couldn't print"}</span>
+                    </span>
+                    <Button
+                      variant="secondary"
+                      className="h-10 shrink-0 px-3"
+                      disabled={busy}
+                      onClick={() => run("retry_job", "Re-queued", { jobId: fj.id })}
+                    >
+                      Retry
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+              {status!.failedJobs!.length > 1 && (
+                <Button
+                  full
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => run("retry_failed", "Re-queued failed jobs")}
+                >
+                  Retry all failed
+                </Button>
+              )}
+            </div>
+          </Disclosure>
+        )}
+
         {d && pendingCount > 0 && (
           <button
             type="button"
             disabled={busy}
             className={rowActionClass}
-            onClick={() => {
-              if (!window.confirm(`Cancel ${pendingCount} pending print ${pendingCount === 1 ? "job" : "jobs"}?`)) return;
-              run("clear_queue", "Print queue cleared");
+            onClick={async () => {
+              const ok = await confirm({
+                title: `Cancel ${pendingCount} pending print ${pendingCount === 1 ? "job" : "jobs"}?`,
+                message: "Parcels in a running wave are marked failed so you can retry them.",
+                confirmLabel: "Clear queue",
+                danger: true,
+              });
+              if (ok) void run("clear_queue", "Print queue cleared");
             }}
           >
             <span className="text-[16px] font-semibold text-missing-ink">Clear print queue</span>
@@ -175,15 +274,21 @@ export function PrinterSettings() {
             type="button"
             disabled={busy}
             className={rowActionClass}
-            onClick={() => {
-              if (!window.confirm("Make a new code? The PC stops printing until you enter the new code there.")) return;
-              run("setup", "New code made");
+            onClick={async () => {
+              const ok = await confirm({
+                title: "Pair another PC?",
+                message:
+                  "Makes a code for a new or standby PC. The current PC keeps printing; only the two newest PCs stay paired.",
+                confirmLabel: "Make code",
+              });
+              if (ok) void run("setup", "New code made");
             }}
           >
-            <span className="text-[16px] font-semibold text-brand">New PC code</span>
+            <span className="text-[16px] font-semibold text-brand">Pair a PC (new code)</span>
           </button>
         )}
       </Group>
+      {confirmSheet}
     </section>
   );
 }

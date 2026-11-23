@@ -13,6 +13,7 @@ import {
   shipBlocker,
   summarizeWave,
   type WaveCandidate,
+  type WavePieceMode,
   type WaveSummary,
 } from "./plan";
 
@@ -103,10 +104,16 @@ export async function buildWavePreview(opts: {
   platform?: Platform;
   /** Optional filter to ship a single courier (e.g. "J&T Express"). */
   courier?: string;
+  /** Optional filter for single-piece or multi-item parcels only. */
+  pieceMode?: WavePieceMode;
+  /** Allow orders placed < 1 hour ago before a courier cutoff. */
+  includeNewOrders?: boolean;
 }) {
   const now = opts.now ?? new Date();
   const cutoff = new Date(now.getTime() - MIN_ORDER_AGE_MS);
   const targetCourier = opts.courier ? normalizeCourierName(opts.courier) : null;
+  const includeNewOrders = Boolean(opts.includeNewOrders);
+  const pieceMode: WavePieceMode = opts.pieceMode ?? "all";
 
   // Pull live ready-to-ship orders from the shops first so the wave stays
   // accurate even if the incremental ledger sync is still catching up.
@@ -114,9 +121,14 @@ export async function buildWavePreview(opts: {
   const { fresh: freshLiveKeys } = await syncReadyOrders(liveSyncDeadline, opts.platform);
 
   const [tooNew, rawCandidates] = await Promise.all([
-    prisma.order.count({ where: { ...readyWhere(opts.platform), platformCreatedAt: { gt: cutoff } } }),
+    includeNewOrders
+      ? Promise.resolve(0)
+      : prisma.order.count({ where: { ...readyWhere(opts.platform), platformCreatedAt: { gt: cutoff } } }),
     prisma.order.findMany({
-      where: { ...readyWhere(opts.platform), platformCreatedAt: { lte: cutoff } },
+      where: {
+        ...readyWhere(opts.platform),
+        ...(includeNewOrders ? {} : { platformCreatedAt: { lte: cutoff } }),
+      },
       select: {
         id: true,
         orderSn: true,
@@ -182,13 +194,17 @@ export async function buildWavePreview(opts: {
       const blocker = shipBlocker(
         { platform: o.platform, status: o.status, cancelRequested: o.cancelRequested, platformCreatedAt: o.platformCreatedAt, packageCount: o.packages.length },
         { status: pkg.status, trackingNumber: pkg.trackingNumber, inActiveWave: pkg.waveItems.length > 0 },
-        now
+        now,
+        { includeNewOrders }
       );
       if (blocker) {
         skipped[blocker]++;
         if (blocker === "split") break; // count the order once
         continue;
       }
+      const totalPieces = o.lines.reduce((sum, l) => sum + l.quantity, 0);
+      if (pieceMode === "singles" && totalPieces !== 1) continue;
+      if (pieceMode === "multis" && totalPieces <= 1) continue;
       ready.push({
         packageId: pkg.id,
         orderId: o.id,
@@ -211,7 +227,11 @@ export async function buildWavePreview(opts: {
   }
 
   const planned = planWave(ready).slice(0, opts.limit && opts.limit > 0 ? opts.limit : undefined);
-  const summary = summarizeWave(planned, skipped);
+  const summary: WaveSummary = {
+    ...summarizeWave(planned, skipped),
+    pieceMode,
+    includeNewOrders,
+  };
 
   await prisma.wave.deleteMany({
     where: { status: WaveStatus.PREVIEW, createdAt: { lt: new Date(now.getTime() - PREVIEW_KEEP_MS) } },

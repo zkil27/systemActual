@@ -1,9 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, Link2, Search, Sparkles, Star } from "lucide-react";
+import Link from "next/link";
+import { ChevronRight, Link2, PackagePlus, RotateCw, Search, Sparkles, Star } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Button, Group } from "@/components/ui/Button";
+import { useConfirm } from "@/components/ui/ConfirmSheet";
+import { Disclosure } from "@/components/ui/Disclosure";
 import { ItemThumb } from "@/components/ui/ItemThumb";
 import { ScrollChips } from "@/components/ui/ScrollChips";
 import { Sheet } from "@/components/ui/Sheet";
@@ -11,9 +14,11 @@ import { Switch } from "@/components/ui/Switch";
 import { toast } from "@/components/ui/Toast";
 import { useLiveRefresh } from "@/lib/ui/use-live-refresh";
 import type { CatalogGarment, CatalogVariant } from "@/lib/catalog/garments";
+import type { StockHistoryRow } from "@/lib/stock/history";
+import { manilaDateTime } from "@/lib/ui/format";
 
 type Platform = "SHOPEE" | "TIKTOK";
-type ItemFilter = "all" | "low" | "unlinked" | "check";
+type ItemFilter = "all" | "low" | "out" | "errors" | "unlinked" | "check" | "archived";
 
 interface ShopInfo {
   id: string;
@@ -82,10 +87,14 @@ function ShopTags({ platforms }: { platforms: Platform[] }) {
 function ItemFilterChips({
   value,
   needsCheck,
+  errors,
+  archived,
   onChange,
 }: {
   value: ItemFilter;
   needsCheck: number;
+  errors: number;
+  archived: number;
   onChange: (f: ItemFilter) => void;
 }) {
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -96,13 +105,16 @@ function ItemFilterChips({
     if (!el) return;
     setBox({ x: el.offsetLeft, w: el.offsetWidth });
     el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
-  }, [value, needsCheck]);
+  }, [value, needsCheck, errors, archived]);
 
   const options = [
     { id: "all", label: "All" },
-    { id: "low", label: "Low stock (≤5)" },
+    { id: "low", label: "Low stock" },
+    { id: "out", label: "Out of stock" },
+    ...(errors ? [{ id: "errors", label: `Sync errors (${errors})` } as const] : []),
     { id: "unlinked", label: "One shop only" },
     { id: "check", label: `To check${needsCheck ? ` (${needsCheck})` : ""}` },
+    ...(archived ? [{ id: "archived", label: `Archived (${archived})` } as const] : []),
   ] as const;
 
   return (
@@ -154,8 +166,14 @@ function StockRow({
   others: CatalogVariant[];
   onSaved: () => void;
 }) {
-  const [value, setValue] = useState(variant.startingStock !== null ? String(variant.startingStock) : "");
+  const serverCount = variant.onShelf ?? variant.startingStock;
+  const serverText = serverCount !== null ? String(serverCount) : "";
+  const [value, setValue] = useState(serverText);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setValue(serverText);
+  }, [variant.id, serverText]);
   const shops = (Object.keys(variant.stock.byPlatform) as Platform[]).map(
     (p) => `${SHOP_LABEL[p]} ${variant.stock.byPlatform[p]}`
   );
@@ -185,6 +203,27 @@ function StockRow({
     }
   }
 
+  async function retryPush(listingVariantId: string) {
+    try {
+      await post({ action: "retry_stock_push", listingVariantId });
+      toast("Sending stock again");
+      onSaved();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  }
+
+  async function split(listingVariantId: string) {
+    try {
+      await post({ action: "unmerge_variant", listingVariantId });
+      toast("Split off. Count its stock.");
+      onSaved();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  }
+
+  const failed = variant.listings.filter((l) => l.pushError);
   const singleShop = new Set(variant.listings.map((l) => l.platform)).size === 1;
   const partners = others.filter(
     (o) => o.id !== variant.id && !o.listings.some((l) => variant.listings.some((m) => m.platform === l.platform))
@@ -229,13 +268,46 @@ function StockRow({
           </Button>
         </span>
       </div>
+      {failed.map((l) => (
+        <div key={l.id} className="flex items-start justify-between gap-3 rounded-[var(--radius-control)] bg-missing-soft px-3 py-2">
+          <span className="min-w-0 text-[14px] text-missing-ink">
+            <span className="font-bold">{SHOP_LABEL[l.platform]}</span> not updated
+            {l.pushFailures > 1 ? ` (${l.pushFailures} tries)` : ""}: {l.pushError}
+          </span>
+          <button
+            type="button"
+            onClick={() => retryPush(l.id)}
+            className="pressable -my-1 inline-flex min-h-11 shrink-0 items-center gap-1 rounded-full px-2.5 text-[14px] font-bold text-missing-ink hover:bg-missing/10"
+          >
+            <RotateCw className="h-4 w-4" /> Retry
+          </button>
+        </div>
+      ))}
+      {variant.listings.length > 1 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-ink-3">
+          <span>Linked:</span>
+          {variant.listings.map((l) => (
+            <span key={l.id} className="inline-flex items-center gap-1">
+              {SHOP_LABEL[l.platform]} {l.variationName ?? ""}
+              <button
+                type="button"
+                onClick={() => split(l.id)}
+                className="pressable inline-flex min-h-11 items-center rounded-full px-1.5 font-semibold text-brand"
+                aria-label={`Split ${SHOP_LABEL[l.platform]} ${l.variationName ?? ""} into its own count`}
+              >
+                Split
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
       {singleShop && partners.length > 0 && (
         <label className="flex items-center gap-2 text-[14px] text-ink-3">
           Same as
           <select
             defaultValue=""
             onChange={(e) => e.target.value && mergeInto(e.target.value)}
-            className="h-10 min-w-0 flex-1 rounded-[var(--radius-control)] bg-surface-muted px-2 text-[15px] text-ink"
+            className="h-11 min-w-0 flex-1 rounded-[var(--radius-control)] bg-surface-muted px-2 text-[16px] text-ink"
           >
             <option value="">Pick the other shop&apos;s colour/size</option>
             {partners.map((p) => (
@@ -250,6 +322,192 @@ function StockRow({
   );
 }
 
+const summaryClass =
+  "pressable h-12 rounded-[var(--radius-control)] text-[16px] font-semibold text-ink";
+
+const REASON_LABEL: Record<string, string> = {
+  INITIAL: "Starting count",
+  SUPPLIER_IN: "Delivery in",
+  RETURN_GOOD: "Return back on shelf",
+  SHIPPED: "Shipped",
+  ADJUSTMENT: "Adjusted",
+};
+
+/** Every stock change for one garment, newest first. Loads when opened. */
+function StockHistory({ garmentId }: { garmentId: string }) {
+  const [rows, setRows] = useState<StockHistoryRow[] | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [error, setError] = useState(false);
+
+  const fetchPage = useCallback(
+    async (before?: string) => {
+      setError(false);
+      try {
+        const sp = new URLSearchParams({ garmentId, limit: "30" });
+        if (before) sp.set("before", before);
+        const res = await fetch(`/api/catalog/history?${sp.toString()}`, { cache: "no-store" });
+        if (!res.ok) throw new Error(String(res.status));
+        const data = await res.json();
+        setRows((prev) => (before && prev ? [...prev, ...data.rows] : data.rows));
+        setHasMore(Boolean(data.hasMore));
+      } catch {
+        setError(true);
+      }
+    },
+    [garmentId]
+  );
+
+  useEffect(() => {
+    void fetchPage();
+  }, [fetchPage]);
+
+  if (error && !rows) {
+    return (
+      <div className="py-3 text-center">
+        <Button variant="secondary" onClick={() => fetchPage()}>
+          Try again
+        </Button>
+      </div>
+    );
+  }
+  if (!rows) return <div className="h-24 animate-pulse rounded-[var(--radius-control)] bg-surface-muted" aria-busy="true" />;
+  if (!rows.length) return <p className="py-3 text-[15px] text-ink-3">No stock changes yet.</p>;
+  return (
+    <div className="pb-2">
+      <ul className="divide-y divide-hairline border-t border-hairline">
+        {rows.map((r) => (
+          <li key={r.id} className="flex items-start justify-between gap-3 py-2.5">
+            <span className="min-w-0">
+              <span className="block text-[15px] font-semibold text-ink">
+                {REASON_LABEL[r.reason] ?? r.reason} · {r.variantLabel}
+              </span>
+              <span className="block text-[13px] text-ink-3">
+                {manilaDateTime(r.createdAt)}
+                {r.staffName ? ` · ${r.staffName}` : ""}
+                {r.note ? ` · ${r.note}` : ""}
+              </span>
+            </span>
+            <span
+              className={`tabular-nums shrink-0 text-[16px] font-bold ${r.delta < 0 ? "text-ink-2" : "text-arrived"}`}
+            >
+              {r.delta > 0 ? `+${r.delta}` : r.delta}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {hasMore && (
+        <Button variant="plain" full onClick={() => fetchPage(rows[rows.length - 1]?.createdAt)}>
+          Show older
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function numOrNull(v: string): number | null {
+  if (v.trim() === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/** Optional per-item overrides. Blank = use the shop-wide default. */
+function GarmentSettings({ garment, onSaved }: { garment: CatalogGarment; onSaved: () => void }) {
+  const s = garment.settings;
+  const [name, setName] = useState(garment.name);
+  const [bin, setBin] = useState(s.binLocation ?? "");
+  const [low, setLow] = useState(s.lowStockThreshold?.toString() ?? "");
+  const [buffer, setBuffer] = useState(s.safetyBuffer?.toString() ?? "");
+  const [cost, setCost] = useState(s.unitCostPhp?.toString() ?? "");
+  const [price, setPrice] = useState(s.sellingPricePhp?.toString() ?? "");
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    try {
+      if (name.trim() && name.trim() !== garment.name) {
+        await post({ action: "rename_garment", garmentId: garment.id, name: name.trim() });
+      }
+      await post({
+        action: "update_garment_settings",
+        garmentId: garment.id,
+        binLocation: bin.trim() || null,
+        lowStockThreshold: numOrNull(low) === null ? null : Math.floor(numOrNull(low)!),
+        safetyBuffer: numOrNull(buffer) === null ? null : Math.floor(numOrNull(buffer)!),
+        unitCostPhp: numOrNull(cost),
+        sellingPricePhp: numOrNull(price),
+      });
+      toast("Saved");
+      onSaved();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const field =
+    "h-12 w-full rounded-[var(--radius-control)] bg-surface-muted px-3 text-[16px] text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none";
+  const label = "mb-1 block text-[13px] font-semibold text-ink-3";
+  return (
+    <div className="space-y-3 pb-2">
+      <label className="block">
+        <span className={label}>Name</span>
+        <input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} className={field} />
+      </label>
+      <div className="grid grid-cols-2 gap-3">
+        <label className="block">
+          <span className={label}>Shelf / bin</span>
+          <input value={bin} onChange={(e) => setBin(e.target.value)} maxLength={40} placeholder="e.g. A3" className={field} />
+        </label>
+        <label className="block">
+          <span className={label}>Low stock at</span>
+          <input
+            value={low}
+            onChange={(e) => setLow(e.target.value.replace(/[^0-9]/g, ""))}
+            inputMode="numeric"
+            placeholder="5"
+            className={`tabular-nums ${field}`}
+          />
+        </label>
+        <label className="block">
+          <span className={label}>Hold back from shops</span>
+          <input
+            value={buffer}
+            onChange={(e) => setBuffer(e.target.value.replace(/[^0-9]/g, ""))}
+            inputMode="numeric"
+            placeholder="Default"
+            className={`tabular-nums ${field}`}
+          />
+        </label>
+        <label className="block">
+          <span className={label}>Cost per piece (₱)</span>
+          <input
+            value={cost}
+            onChange={(e) => setCost(e.target.value.replace(/[^0-9.]/g, ""))}
+            inputMode="decimal"
+            placeholder="Default"
+            className={`tabular-nums ${field}`}
+          />
+        </label>
+        <label className="col-span-2 block">
+          <span className={label}>Selling price (₱)</span>
+          <input
+            value={price}
+            onChange={(e) => setPrice(e.target.value.replace(/[^0-9.]/g, ""))}
+            inputMode="decimal"
+            placeholder="Default"
+            className={`tabular-nums ${field}`}
+          />
+        </label>
+      </div>
+      <p className="text-[13px] text-ink-3">Leave blank to use the defaults in Settings.</p>
+      <Button full onClick={save} disabled={saving}>
+        {saving ? "Saving…" : "Save"}
+      </Button>
+    </div>
+  );
+}
+
 export default function ItemsPage() {
   const [garments, setGarments] = useState<CatalogGarment[] | null>(null);
   const [shops, setShops] = useState<ShopInfo[]>([]);
@@ -261,7 +519,9 @@ export default function ItemsPage() {
   const [linkTo, setLinkTo] = useState<CatalogGarment | null>(null);
   const [busy, setBusy] = useState(false);
   const [lastToggledPinId, setLastToggledPinId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const firstLoad = useRef(true);
+  const { confirm, sheet: confirmSheet } = useConfirm();
 
   useEffect(() => {
     if (garments !== null) {
@@ -271,12 +531,17 @@ export default function ItemsPage() {
   }, [garments]);
 
   const load = useCallback(async () => {
-    const res = await fetch("/api/catalog");
-    if (!res.ok) return;
-    const data = await res.json();
-    setGarments(data.garments);
-    setShops(data.shops);
-    setBump(data.bump ?? null);
+    try {
+      const res = await fetch("/api/catalog?archived=1", { cache: "no-store" });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = await res.json();
+      setGarments(data.garments);
+      setShops(data.shops);
+      setBump(data.bump ?? null);
+      setLoadError(false);
+    } catch {
+      setLoadError(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -304,8 +569,12 @@ export default function ItemsPage() {
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (garments ?? []).filter((g) => {
+      if (filter === "archived") return g.archived && (!q || g.name.toLowerCase().includes(q));
+      if (g.archived) return false;
       if (q && !g.name.toLowerCase().includes(q)) return false;
-      if (filter === "low") return g.variants.some((v) => v.available !== null && v.available <= 5);
+      if (filter === "low") return g.variants.some((v) => v.available !== null && v.available > 0 && v.available <= g.lowStockAt);
+      if (filter === "out") return g.variants.some((v) => v.available === 0);
+      if (filter === "errors") return g.variants.some((v) => v.listings.some((l) => l.pushError));
       if (filter === "unlinked") return g.platforms.length === 1;
       if (filter === "check") return g.variants.some(variantNeedsCheck);
       return true;
@@ -313,9 +582,12 @@ export default function ItemsPage() {
   }, [garments, query, filter]);
 
   const open = garments?.find((g) => g.id === openId) ?? null;
-  const unconfirmed = (garments ?? []).flatMap((g) => g.variants).filter((v) => v.startingStock === null && v.stock.suggested !== null);
-  const needsCheck = (garments ?? []).flatMap((g) => g.variants).filter(variantNeedsCheck).length;
-  const hasUnlinked = (garments ?? []).some((g) => g.platforms.length === 1);
+  const active = (garments ?? []).filter((g) => !g.archived);
+  const unconfirmed = active.flatMap((g) => g.variants).filter((v) => v.startingStock === null && v.stock.suggested !== null);
+  const needsCheck = active.flatMap((g) => g.variants).filter(variantNeedsCheck).length;
+  const syncErrors = active.filter((g) => g.variants.some((v) => v.listings.some((l) => l.pushError))).length;
+  const archivedCount = (garments ?? []).length - active.length;
+  const hasUnlinked = active.some((g) => g.platforms.length === 1);
   const bothConnected = shops.filter((s) => s.connected).length >= 2;
 
   async function run(body: Record<string, unknown>, done: string) {
@@ -347,7 +619,20 @@ export default function ItemsPage() {
   const pinnedSet = new Set(bump?.pinnedItemIds ?? []);
 
   return (
-    <AppShell title="Items & stock" onRefresh={load}>
+    <AppShell
+      title="Items & stock"
+      onRefresh={load}
+      headerRight={
+        <Link
+          href="/stock-in"
+          aria-label="Add a delivery"
+          title="Add a delivery"
+          className="pressable flex h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05]"
+        >
+          <PackagePlus className="h-[22px] w-[22px]" />
+        </Link>
+      }
+    >
       <div className="space-y-6">
         <Group className="p-4">
           {importing ? (
@@ -425,7 +710,7 @@ export default function ItemsPage() {
                 variant="secondary"
                 disabled={busy || bump.boosted.length >= bump.slotsTotal}
                 onClick={() => run({ action: "bump_now" }, "Bumped {n} items")}
-                className="h-10 shrink-0 px-3"
+                className="h-11 shrink-0 px-3"
               >
                 {bump.boosted.length >= bump.slotsTotal ? "Slots full" : "Bump now"}
               </Button>
@@ -445,7 +730,13 @@ export default function ItemsPage() {
         )}
 
         <div className="space-y-2.5">
-          <ItemFilterChips value={filter} needsCheck={needsCheck} onChange={setFilter} />
+          <ItemFilterChips
+            value={filter}
+            needsCheck={needsCheck}
+            errors={syncErrors}
+            archived={archivedCount}
+            onChange={setFilter}
+          />
 
           <label className="relative block">
             <span className="sr-only">Search items</span>
@@ -459,7 +750,14 @@ export default function ItemsPage() {
           </label>
         </div>
 
-        {garments === null ? (
+        {garments === null && loadError ? (
+          <div className="space-y-3 py-6 text-center">
+            <p className="text-[16px] text-ink-2">Couldn&apos;t load your items.</p>
+            <Button variant="secondary" onClick={load}>
+              Try again
+            </Button>
+          </div>
+        ) : garments === null ? (
           <div className="h-40 animate-pulse rounded-[var(--radius-card)] bg-surface-track/60" aria-busy="true" />
         ) : shown.length === 0 ? (
           <p className="px-1 text-[16px] text-ink-3">
@@ -594,18 +892,39 @@ export default function ItemsPage() {
             <p className="text-[14px] text-ink-3">
               Pieces on the shelf now, including ones packed for unshipped orders. The grey number is our guess from the shops.
             </p>
+            {open.settings.binLocation && (
+              <p className="text-[14px] font-semibold text-ink-2">Shelf {open.settings.binLocation}</p>
+            )}
             <ul className="divide-y divide-hairline">
               {open.variants.map((v) => (
                 <StockRow key={v.id} variant={v} others={open.variants} onSaved={load} />
               ))}
             </ul>
+            <Link
+              href="/stock-in"
+              className="pressable flex min-h-12 items-center justify-center gap-2 rounded-[var(--radius-control)] bg-surface-muted text-[16px] font-semibold text-ink hover:bg-surface-track"
+            >
+              <PackagePlus className="h-5 w-5" /> Add a supplier delivery
+            </Link>
+            <Disclosure label="History" summaryClassName={summaryClass}>
+              <StockHistory garmentId={open.id} />
+            </Disclosure>
+            <Disclosure label="Name, shelf & limits" summaryClassName={summaryClass}>
+              <GarmentSettings key={open.id} garment={open} onSaved={load} />
+            </Disclosure>
             {open.platforms.length > 1 && (
               <Button
                 variant="danger"
                 full
                 disabled={busy}
                 onClick={async () => {
-                  if (!window.confirm("Unlink this item? Each shop's listing goes back to its own stock count.")) return;
+                  const ok = await confirm({
+                    title: "Unlink shops?",
+                    message: "Each shop's listing goes back to its own stock count.",
+                    confirmLabel: "Unlink",
+                    danger: true,
+                  });
+                  if (!ok) return;
                   await run({ action: "unlink_garment", garmentId: open.id }, "Unlinked");
                   setOpenId(null);
                 }}
@@ -613,9 +932,32 @@ export default function ItemsPage() {
                 Unlink shops
               </Button>
             )}
+            <Button
+              variant="plain"
+              full
+              disabled={busy}
+              onClick={async () => {
+                if (!open.archived) {
+                  const ok = await confirm({
+                    title: "Archive this item?",
+                    message: "It leaves the list and stock alerts. Stock keeps syncing to the shops, and you can bring it back from the Archived filter.",
+                    confirmLabel: "Archive",
+                  });
+                  if (!ok) return;
+                }
+                await run(
+                  { action: "archive_garment", garmentId: open.id, archived: !open.archived },
+                  open.archived ? "Back in the list" : "Archived"
+                );
+                setOpenId(null);
+              }}
+            >
+              {open.archived ? "Unarchive" : "Archive item"}
+            </Button>
           </div>
         )}
       </Sheet>
+      {confirmSheet}
     </AppShell>
   );
 }

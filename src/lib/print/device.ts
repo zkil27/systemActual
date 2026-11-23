@@ -34,3 +34,21 @@ export async function deviceFromAuthHeader(header: string | null | undefined) {
 export function isOnline(lastSeenAt: Date | null, now: Date = new Date()): boolean {
   return Boolean(lastSeenAt && now.getTime() - lastSeenAt.getTime() < ONLINE_WINDOW_MS);
 }
+
+/** The agent's nightly pg_dump result. Null when the agent doesn't report backups. */
+export function parseBackupReport(raw: unknown): {
+  lastBackupAt: Date | null;
+  lastBackupError: string | null;
+  lastBackupBytes: number | null;
+} | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (r.enabled === false) return null;
+  const at = typeof r.lastBackupAt === "string" ? new Date(r.lastBackupAt) : null;
+  const bytes = Number(r.lastBackupBytes);
+  return {
+    lastBackupAt: at && !Number.isNaN(at.getTime()) ? at : null,
+    lastBackupError: typeof r.lastBackupError === "string" ? r.lastBackupError.slice(0, 300) : null,
+    lastBackupBytes: Number.isFinite(bytes) && bytes > 0 ? Math.min(2_000_000_000, Math.floor(bytes)) : null,
+  };
+}

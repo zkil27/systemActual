@@ -1,4 +1,4 @@
-import { DigitalStatus, Prisma, ReturnCategory } from "@prisma/client";
+import { DigitalStatus, DisputeStatus, Prisma, ReturnCategory } from "@prisma/client";
 import { daysSince } from "@/lib/time";
 
 /**
@@ -15,6 +15,8 @@ export interface ParcelRuleInput {
   digitalReturnTaggedAt: Date | null;
   courierReturnedToSellerAt: Date | null;
   physicallyReceivedAt: Date | null;
+  /** Owner closed the case by hand ("Found" / "Settled"). Optional so older selects still type-check. */
+  resolvedAt?: Date | null;
 }
 
 export function isExpectedAtDoor(p: Pick<ParcelRuleInput, "expectsPhysicalReturn" | "digitalStatus">): boolean {
@@ -76,7 +78,7 @@ export function activeSinceWhere(startAt?: Date | null): Prisma.ReturnParcelWher
 
 /** The courier says it was delivered back, but nobody scanned it in (since `missingSinceAt` if set). */
 export function isMissingDiscrepancy(p: ParcelRuleInput, missingSinceAt?: Date | null): boolean {
-  if (!isExpectedAtDoor(p) || !p.courierReturnedToSellerAt || p.physicallyReceivedAt) {
+  if (!isExpectedAtDoor(p) || !p.courierReturnedToSellerAt || p.physicallyReceivedAt || p.resolvedAt) {
     return false;
   }
   if (missingSinceAt && p.courierReturnedToSellerAt.getTime() < missingSinceAt.getTime()) {
@@ -97,6 +99,7 @@ export function isOverdueRts(
   }
   return (
     isExpectedAtDoor(p) &&
+    !p.resolvedAt &&
     p.category === ReturnCategory.FAILED_DELIVERY &&
     !p.physicallyReceivedAt &&
     !p.courierReturnedToSellerAt &&
@@ -125,6 +128,7 @@ export function missingWhere(missingSinceAt?: Date | null): Prisma.ReturnParcelW
     ...expectedWhere,
     courierReturnedToSellerAt: missingSinceAt ? { gte: missingSinceAt } : { not: null },
     physicallyReceivedAt: null,
+    resolvedAt: null,
   };
 }
 
@@ -139,6 +143,7 @@ export function overdueWhere(
     category: ReturnCategory.FAILED_DELIVERY,
     physicallyReceivedAt: null,
     courierReturnedToSellerAt: null,
+    resolvedAt: null,
     digitalReturnTaggedAt: startAt ? { lte: cutoff, gte: startAt } : { lte: cutoff },
   };
 }
@@ -153,4 +158,40 @@ export function costAtRiskPhp(
   returnShippingEstimatePhp: number
 ): number {
   return p.estimatedUnitCostPhp + (p.expectsPhysicalReturn ? returnShippingEstimatePhp : 0);
+}
+
+/** Dispute deadlines inside this window count as "due soon" on Home, Returns and Telegram. */
+export const URGENT_DEADLINE_WINDOW_MS = 24 * 3600_000;
+/** A deadline that passed less than this long ago still shows, so the owner sees it slipped. */
+export const URGENT_DEADLINE_GRACE_MS = 2 * 3600_000;
+
+/** Open disputes whose platform deadline is within the next 24h (or just passed). */
+export function urgentDeadlineWhere(now: Date = new Date()): Prisma.ReturnParcelWhereInput {
+  return {
+    disputeDeadlineAt: {
+      gt: new Date(now.getTime() - URGENT_DEADLINE_GRACE_MS),
+      lte: new Date(now.getTime() + URGENT_DEADLINE_WINDOW_MS),
+    },
+    resolvedAt: null,
+    disputeStatus: DisputeStatus.NONE,
+    digitalStatus: { notIn: [DigitalStatus.CANCELLED_RETURN, DigitalStatus.RESOLVED_REFUNDED] },
+  };
+}
+
+export function isUrgentDeadline(
+  p: {
+    disputeDeadlineAt: Date | null;
+    resolvedAt?: Date | null;
+    disputeStatus?: string | null;
+    digitalStatus?: DigitalStatus;
+  },
+  now: Date = new Date()
+): boolean {
+  if (!p.disputeDeadlineAt || p.resolvedAt) return false;
+  if (p.disputeStatus && p.disputeStatus !== "NONE") return false;
+  if (p.digitalStatus === DigitalStatus.CANCELLED_RETURN || p.digitalStatus === DigitalStatus.RESOLVED_REFUNDED) {
+    return false;
+  }
+  const t = p.disputeDeadlineAt.getTime();
+  return t > now.getTime() - URGENT_DEADLINE_GRACE_MS && t <= now.getTime() + URGENT_DEADLINE_WINDOW_MS;
 }

@@ -1,4 +1,4 @@
-import { Platform, type ListingVariant } from "@prisma/client";
+import { Platform, Prisma, type ListingVariant } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
   COMMITTED_ORDER_STATUSES,
@@ -64,6 +64,44 @@ async function computeMergedShelfCount(intoId: string, fromId: string): Promise<
   return Math.min(...started);
 }
 
+/** Default "low stock" line when a garment has no override. */
+export const DEFAULT_LOW_STOCK = 5;
+
+export function effectiveBuffer(garmentBuffer: number | null | undefined, globalBuffer: number): number {
+  return garmentBuffer === null || garmentBuffer === undefined ? globalBuffer : Math.max(0, garmentBuffer);
+}
+
+export function effectiveLowStock(threshold: number | null | undefined): number {
+  return threshold === null || threshold === undefined ? DEFAULT_LOW_STOCK : Math.max(0, threshold);
+}
+
+/**
+ * Fold one garment variant into another inside a transaction, keeping its
+ * stock history: movements are moved, not deleted, and a started count
+ * carries over when the survivor had none.
+ */
+async function absorbVariant(tx: Prisma.TransactionClient, intoId: string, fromId: string) {
+  const [into, from] = await Promise.all([
+    tx.garmentVariant.findUniqueOrThrow({ where: { id: intoId }, select: { startingStockSetAt: true } }),
+    tx.garmentVariant.findUniqueOrThrow({
+      where: { id: fromId },
+      select: { startingStock: true, startingStockSetAt: true },
+    }),
+  ]);
+  if (!into.startingStockSetAt && from.startingStockSetAt) {
+    await tx.garmentVariant.update({
+      where: { id: intoId },
+      data: { startingStock: from.startingStock, startingStockSetAt: from.startingStockSetAt },
+    });
+  } else if (into.startingStockSetAt && !from.startingStockSetAt) {
+    // An uncounted variant's movements (if any) mean nothing against a real count.
+    await tx.stockMovement.deleteMany({ where: { garmentVariantId: fromId } });
+  }
+  await tx.stockMovement.updateMany({ where: { garmentVariantId: fromId }, data: { garmentVariantId: intoId } });
+  await tx.listingVariant.updateMany({ where: { garmentVariantId: fromId }, data: { garmentVariantId: intoId } });
+  await tx.garmentVariant.delete({ where: { id: fromId } });
+}
+
 /**
  * "This Shopee listing is that TikTok listing." Variations with the same
  * colour/size are merged into one garment variant; the rest are moved under
@@ -102,8 +140,7 @@ export async function linkListings(a: ListingKey, b: ListingKey) {
   await prisma.$transaction(async (tx) => {
     for (const [into, from] of pairs) {
       if (into === from) continue;
-      await tx.listingVariant.updateMany({ where: { garmentVariantId: from }, data: { garmentVariantId: into } });
-      await tx.garmentVariant.delete({ where: { id: from } }); // its movements cascade
+      await absorbVariant(tx, into, from);
     }
     await tx.garmentVariant.updateMany({
       where: { id: { in: leftoverB.map((v) => v.id) } },
@@ -112,7 +149,7 @@ export async function linkListings(a: ListingKey, b: ListingKey) {
   });
 
   for (const [into, count] of mergedCounts) {
-    await setShelfCount(into, count);
+    await setShelfCount(into, count, new Date(), { note: "Linked shops, kept the lower count" });
   }
 
   await deleteEmptyGarments(sourceGarments.map((g) => g.garmentId).filter((id) => id !== target.garmentId));
@@ -124,14 +161,86 @@ export async function mergeVariants(intoId: string, fromId: string) {
   if (intoId === fromId) return;
   const from = await prisma.garmentVariant.findUniqueOrThrow({ where: { id: fromId }, select: { garmentId: true } });
   const count = await computeMergedShelfCount(intoId, fromId);
-  await prisma.$transaction([
-    prisma.listingVariant.updateMany({ where: { garmentVariantId: fromId }, data: { garmentVariantId: intoId } }),
-    prisma.garmentVariant.delete({ where: { id: fromId } }),
-  ]);
+  await prisma.$transaction((tx) => absorbVariant(tx, intoId, fromId));
   if (count !== null) {
-    await setShelfCount(intoId, count);
+    await setShelfCount(intoId, count, new Date(), { note: "Merged variants, kept the lower count" });
   }
   await deleteEmptyGarments([from.garmentId]);
+}
+
+/**
+ * Undo a wrong merge for one listing variation: it moves to a new variant of
+ * the same garment and starts uncounted. The old variant keeps all history.
+ */
+export async function unmergeVariant(listingVariantId: string) {
+  const lv = await prisma.listingVariant.findUniqueOrThrow({
+    where: { id: listingVariantId },
+    select: { id: true, variationName: true, garmentVariantId: true, garmentVariant: { select: { garmentId: true } } },
+  });
+  if (!lv.garmentVariantId || !lv.garmentVariant) throw new Error("This listing is not linked to anything.");
+  const siblings = await prisma.listingVariant.count({ where: { garmentVariantId: lv.garmentVariantId } });
+  if (siblings < 2) throw new Error("Only one listing uses this variant, so there is nothing to split.");
+  const variant = await prisma.garmentVariant.create({
+    data: { garmentId: lv.garmentVariant.garmentId, label: lv.variationName ?? "One size" },
+    select: { id: true },
+  });
+  await prisma.listingVariant.update({
+    where: { id: lv.id },
+    data: { garmentVariantId: variant.id, pushedStock: null },
+  });
+  return { variantId: variant.id };
+}
+
+export async function renameGarment(garmentId: string, name: string) {
+  const clean = name.trim().replace(/\s+/g, " ");
+  if (!clean) throw new Error("Give it a name.");
+  await prisma.garment.update({ where: { id: garmentId }, data: { name: clean.slice(0, 120) } });
+}
+
+export async function archiveGarment(garmentId: string, archived: boolean) {
+  await prisma.garment.update({ where: { id: garmentId }, data: { archivedAt: archived ? new Date() : null } });
+}
+
+export interface GarmentSettingsInput {
+  unitCostPhp?: number | null;
+  sellingPricePhp?: number | null;
+  lowStockThreshold?: number | null;
+  safetyBuffer?: number | null;
+  binLocation?: string | null;
+}
+
+export async function updateGarmentSettings(garmentId: string, input: GarmentSettingsInput) {
+  const data: Prisma.GarmentUpdateInput = {};
+  if (input.unitCostPhp !== undefined) data.unitCostPhp = input.unitCostPhp;
+  if (input.sellingPricePhp !== undefined) data.sellingPricePhp = input.sellingPricePhp;
+  if (input.lowStockThreshold !== undefined) data.lowStockThreshold = input.lowStockThreshold;
+  if (input.safetyBuffer !== undefined) data.safetyBuffer = input.safetyBuffer;
+  if (input.binLocation !== undefined) data.binLocation = input.binLocation?.trim().slice(0, 40) || null;
+  await prisma.garment.update({ where: { id: garmentId }, data });
+  // A new buffer changes what the shops should show; make the next push resend.
+  if (input.safetyBuffer !== undefined) {
+    await prisma.listingVariant.updateMany({
+      where: { garmentVariant: { garmentId } },
+      data: { pushedStock: null },
+    });
+  }
+}
+
+/**
+ * Clear a failed push so the next stock push retries it now. Forgetting the
+ * last pushed number forces a fresh send even if the target did not change.
+ */
+export async function retryStockPush(target: { listingVariantId?: string; variantId?: string }) {
+  const where: Prisma.ListingVariantWhereInput = target.listingVariantId
+    ? { id: target.listingVariantId }
+    : target.variantId
+      ? { garmentVariantId: target.variantId }
+      : { pushError: { not: null } };
+  const res = await prisma.listingVariant.updateMany({
+    where,
+    data: { pushError: null, pushFailures: 0, pushedStock: null },
+  });
+  return { reset: res.count };
 }
 
 /** Auto-initializes starting stock using the safer (lower) shop count for every uncounted variant. */
@@ -237,10 +346,12 @@ export async function getStockOperationsSummary(
 }> {
   const [variants, committed, onShelf] = await Promise.all([
     prisma.garmentVariant.findMany({
+      where: { garment: { archivedAt: null } },
       select: {
         id: true,
         garmentId: true,
         startingStockSetAt: true,
+        garment: { select: { lowStockThreshold: true, safetyBuffer: true } },
         listings: {
           select: {
             platform: true,
@@ -278,9 +389,9 @@ export async function getStockOperationsSummary(
     if (hasPushError) stockPushFailedCount++;
 
     if (v.startingStockSetAt) {
-      const avail = availableToSell(onShelf.get(v.id) ?? 0, units, buffer);
+      const avail = availableToSell(onShelf.get(v.id) ?? 0, units, effectiveBuffer(v.garment.safetyBuffer, buffer));
       if (avail === 0) outOfStockCount++;
-      else if (avail > 0 && avail <= 5) lowStockCount++;
+      else if (avail > 0 && avail <= effectiveLowStock(v.garment.lowStockThreshold)) lowStockCount++;
     }
   }
 
@@ -311,7 +422,10 @@ export interface CatalogVariant {
     variationName: string | null;
     availableStock: number | null;
     pushedStock: number | null;
+    pushedAt: string | null;
     pushError: string | null;
+    pushFailures: number;
+    shopName: string;
   }>;
 }
 
@@ -322,16 +436,28 @@ export interface CatalogGarment {
   platforms: Platform[];
   listings: Array<{ shopConnectionId: string; listingId: string; platform: Platform; name: string; variations: number }>;
   variants: CatalogVariant[];
+  archived: boolean;
+  settings: {
+    unitCostPhp: number | null;
+    sellingPricePhp: number | null;
+    lowStockThreshold: number | null;
+    safetyBuffer: number | null;
+    binLocation: string | null;
+  };
+  /** Effective numbers after defaults. */
+  lowStockAt: number;
+  buffer: number;
 }
 
-export async function getCatalog(): Promise<CatalogGarment[]> {
+export async function getCatalog(opts: { includeArchived?: boolean } = {}): Promise<CatalogGarment[]> {
   const [garments, committed, onShelf, settings] = await Promise.all([
     prisma.garment.findMany({
+      where: opts.includeArchived ? undefined : { archivedAt: null },
       orderBy: { name: "asc" },
       include: {
         variants: {
           orderBy: { label: "asc" },
-          include: { listings: { include: { shopConnection: { select: { platform: true } } } } },
+          include: { listings: { include: { shopConnection: { select: { platform: true, shopName: true } } } } },
         },
       },
     }),
@@ -342,6 +468,7 @@ export async function getCatalog(): Promise<CatalogGarment[]> {
   const buffer = settings?.stockSafetyBuffer ?? 0;
 
   return garments.map((g) => {
+    const gBuffer = effectiveBuffer(g.safetyBuffer, buffer);
     const listingMap = new Map<string, CatalogGarment["listings"][number]>();
     const variants: CatalogVariant[] = g.variants.map((v) => {
       const ls = v.listings.map((l) => ({
@@ -352,7 +479,10 @@ export async function getCatalog(): Promise<CatalogGarment[]> {
         variationName: l.variationName,
         availableStock: l.availableStock,
         pushedStock: l.pushedStock,
+        pushedAt: l.pushedAt?.toISOString() ?? null,
         pushError: l.pushError,
+        pushFailures: l.pushFailures,
+        shopName: l.shopConnection.shopName,
       }));
       for (const l of v.listings) {
         const key = `${l.shopConnectionId}:${l.listingId}`;
@@ -374,7 +504,7 @@ export async function getCatalog(): Promise<CatalogGarment[]> {
         committed: units,
         stock: computeStartingStock(ls, units),
         onShelf: v.startingStockSetAt ? onShelf.get(v.id) ?? 0 : null,
-        available: v.startingStockSetAt ? availableToSell(onShelf.get(v.id) ?? 0, units, buffer) : null,
+        available: v.startingStockSetAt ? availableToSell(onShelf.get(v.id) ?? 0, units, gBuffer) : null,
         listings: ls,
       };
     });
@@ -386,6 +516,16 @@ export async function getCatalog(): Promise<CatalogGarment[]> {
       platforms: [...new Set(listings.map((l) => l.platform))],
       listings,
       variants,
+      archived: g.archivedAt !== null,
+      settings: {
+        unitCostPhp: g.unitCostPhp === null ? null : Number(g.unitCostPhp),
+        sellingPricePhp: g.sellingPricePhp === null ? null : Number(g.sellingPricePhp),
+        lowStockThreshold: g.lowStockThreshold,
+        safetyBuffer: g.safetyBuffer,
+        binLocation: g.binLocation,
+      },
+      lowStockAt: effectiveLowStock(g.lowStockThreshold),
+      buffer: gBuffer,
     };
   });
 }

@@ -86,6 +86,7 @@ export async function POST(req: NextRequest) {
       role: "staff",
       staffId: member.id,
       name: member.name,
+      tv: member.tokenVersion,
     });
 
     const res = NextResponse.json({

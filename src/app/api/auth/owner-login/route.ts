@@ -6,6 +6,7 @@ import {
   OWNER_COOKIE,
   verifySecret,
 } from "@/lib/auth";
+import { pinFailureUpdate, pinLockRemainingMs } from "@/lib/pin-lockout";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -33,12 +34,46 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const now = new Date();
+    const lockRemaining = pinLockRemainingMs(user.loginLockedUntil, now);
+    if (lockRemaining > 0) {
+      const minutes = Math.max(1, Math.ceil(lockRemaining / 60_000));
+      return NextResponse.json(
+        { error: `Too many wrong password tries. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.` },
+        { status: 429 }
+      );
+    }
+
     const valid = await verifySecret(parsed.data.password, user.passwordHash);
     if (!valid) {
+      const bumped = await prisma.ownerUser.update({
+        where: { id: user.id },
+        data: { failedLoginAttempts: { increment: 1 } },
+        select: { failedLoginAttempts: true },
+      });
+      const next = pinFailureUpdate(bumped.failedLoginAttempts, now);
+      if (next.locked) {
+        await prisma.ownerUser.update({
+          where: { id: user.id },
+          data: { failedLoginAttempts: next.failedPinAttempts, loginLockedUntil: next.pinLockedUntil },
+        });
+        const minutes = Math.max(1, Math.ceil((next.pinLockedUntil!.getTime() - now.getTime()) / 60_000));
+        return NextResponse.json(
+          { error: `Too many wrong password tries. Try again in ${minutes} minutes.` },
+          { status: 429 }
+        );
+      }
       return NextResponse.json(
         { error: "Incorrect email or password." },
         { status: 401 }
       );
+    }
+
+    if (user.failedLoginAttempts > 0 || user.loginLockedUntil) {
+      await prisma.ownerUser.update({
+        where: { id: user.id },
+        data: { failedLoginAttempts: 0, loginLockedUntil: null },
+      });
     }
 
     const token = await createOwnerToken({

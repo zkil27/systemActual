@@ -48,12 +48,13 @@ export type SkipReason = "tooNew" | "cancelled" | "notReady" | "split" | "alread
 export function shipBlocker(
   order: { platform: Platform; status: string; cancelRequested: boolean; platformCreatedAt: Date; packageCount: number },
   pkg: { status: string | null; trackingNumber: string | null; inActiveWave: boolean },
-  now: Date
+  now: Date,
+  opts?: { includeNewOrders?: boolean }
 ): SkipReason | null {
   if (order.cancelRequested || order.status === "CANCELLED" || order.status === "IN_CANCEL") return "cancelled";
   if (!READY_ORDER_STATUSES[order.platform].includes(order.status)) return "notReady";
   if (pkg.status && !READY_PACKAGE_STATUSES[order.platform].has(pkg.status.toUpperCase())) return "notReady";
-  if (now.getTime() - order.platformCreatedAt.getTime() < MIN_ORDER_AGE_MS) return "tooNew";
+  if (!opts?.includeNewOrders && now.getTime() - order.platformCreatedAt.getTime() < MIN_ORDER_AGE_MS) return "tooNew";
   // We don't know which items are in which package of a split order: pack those by hand.
   if (order.packageCount > 1) return "split";
   if (pkg.inActiveWave) return "alreadyInWave";
@@ -126,12 +127,17 @@ export function planWave(candidates: WaveCandidate[]): PlannedItem[] {
   });
 }
 
+export type WavePieceMode = "all" | "singles" | "multis";
+
 export interface WaveSummary {
   total: number;
   singles: number;
   multis: number;
   groups: Array<{ key: string; title: string; count: number; items: Array<{ label: string; qty: number }> }>;
   skipped: Record<SkipReason | "notRechecked", number>;
+  pieceMode?: WavePieceMode;
+  includeNewOrders?: boolean;
+  checkedKeys?: Record<string, boolean>;
 }
 
 /** Pick totals per group, in label order (first appearance). */

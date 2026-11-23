@@ -14,15 +14,31 @@ export function availableToSell(onShelf: number, committed: number, buffer: numb
   return Math.max(0, onShelf - committed - Math.max(0, buffer));
 }
 
+const TIKTOK_TRANSIT_PACKAGE_STATUSES = new Set(["IN_TRANSIT", "DELIVERED", "COMPLETED"]);
+
 /**
  * An order has left the warehouse once it's out of the unshipped statuses,
  * except a cancellation before pickup (the parcel never left).
- * A cancellation with a ship time is treated as shipped. For TikTok that time
- * is when shipment was arranged, so this can undercount stock, never overcount it.
+ * - Shopee sets `shippedAt` from `pickup_done_time` (actual rider scan).
+ * - TikTok sets `shippedAt` from `rts_time` (when shipment was arranged, BEFORE
+ *   pickup), so a TikTok CANCELLED order only counts as having left the warehouse
+ *   if a package reached transit/delivered status.
  */
-export function hasLeftWarehouse(platform: Platform, status: string, shippedAt: Date | null): boolean {
+export function hasLeftWarehouse(
+  platform: Platform,
+  status: string,
+  shippedAt: Date | null,
+  packages?: Array<{ status: string | null }>
+): boolean {
   if (COMMITTED_ORDER_STATUSES[platform].includes(status)) return false;
-  if (status === "CANCELLED") return shippedAt !== null;
+  if (status === "CANCELLED") {
+    if (platform === Platform.TIKTOK) {
+      return Boolean(
+        packages?.some((p) => p.status && TIKTOK_TRANSIT_PACKAGE_STATUSES.has(p.status.trim().toUpperCase()))
+      );
+    }
+    return shippedAt !== null;
+  }
   return true;
 }
 

@@ -18,7 +18,13 @@ const existingSelect = {
   status: true,
   cancelRequested: true,
   shippedAt: true,
-  _count: { select: { lines: true } },
+  lines: {
+    select: {
+      listingId: true,
+      variationId: true,
+      quantity: true,
+    },
+  },
   packages: {
     select: {
       packageNumber: true,
@@ -33,7 +39,11 @@ const existingSelect = {
 export type ExistingOrderSnapshot = Omit<OrderComparisonSnapshot, "packages"> & {
   id: string;
   orderSn: string;
-  _count: { lines: number };
+  lines: Array<{
+    listingId: string;
+    variationId: string;
+    quantity: number;
+  }>;
   packages: Array<{
     packageNumber: string;
     status: string | null;
@@ -42,6 +52,21 @@ export type ExistingOrderSnapshot = Omit<OrderComparisonSnapshot, "packages"> & 
     channelId: string | null;
   }>;
 };
+
+function lineSignature(lines: Array<{ listingId: string; variationId: string; quantity: number }>): string {
+  return lines
+    .map((l) => `${l.listingId}:${l.variationId}:${l.quantity}`)
+    .sort()
+    .join("|");
+}
+
+function areLinesUnchanged(
+  existing: ExistingOrderSnapshot["lines"],
+  incoming: NormalizedOrder["lines"]
+): boolean {
+  if (existing.length !== incoming.length) return false;
+  return lineSignature(existing) === lineSignature(incoming);
+}
 
 function arePackagesUnchanged(
   existing: ExistingOrderSnapshot["packages"],
@@ -173,7 +198,7 @@ export async function saveOrder(
     cancelRequested: n.cancelRequested,
   };
 
-  const linesAlreadySaved = Boolean(existing && existing._count.lines === n.lines.length && n.lines.length > 0);
+  const linesAlreadySaved = Boolean(existing && existing.lines.length > 0 && areLinesUnchanged(existing.lines, n.lines));
   const packagesUnchanged = Boolean(existing && arePackagesUnchanged(existing.packages, n.packages));
 
   if (existing && linesAlreadySaved && packagesUnchanged) {

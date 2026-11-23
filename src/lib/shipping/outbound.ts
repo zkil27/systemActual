@@ -164,7 +164,7 @@ export async function resolveActorStaffMemberId(
 
 /**
  * Printed/queued wave parcels from the last 48h that were cancelled after
- * printing and have NOT yet been tapped "Pulled" (`package.packedAt` is null).
+ * printing and have NOT yet been tapped "Pulled" (moved to SKIPPED_CANCELLED).
  */
 export function cancelledToPullWhere(now: Date = new Date()): Prisma.WaveItemWhereInput {
   const cutoff = new Date(now.getTime() - 48 * 60 * 60_000);
@@ -173,7 +173,6 @@ export function cancelledToPullWhere(now: Date = new Date()): Prisma.WaveItemWhe
     updatedAt: { gte: cutoff },
     wave: { status: { in: [WaveStatus.RUNNING, WaveStatus.DONE] } },
     package: {
-      packedAt: null,
       order: {
         OR: [
           { cancelRequested: true },
@@ -185,21 +184,21 @@ export function cancelledToPullWhere(now: Date = new Date()): Prisma.WaveItemWhe
 }
 
 /**
- * Printed wave parcels from today (printed >= `minAgeMs` ago) that are still
- * awaiting rider pickup on Shopee (`PROCESSED`, `shippedAt: null`) or TikTok
- * (`AWAITING_COLLECTION`), catching forgotten pouches or jammed sticker rolls.
+ * Printed wave parcels from the last 3 days (printed >= `minAgeMs` ago) that
+ * are still awaiting rider pickup on Shopee (`PROCESSED`, `shippedAt: null`)
+ * or TikTok (`AWAITING_COLLECTION`), catching forgotten pouches across midnight.
  */
 export function unpickedPrintedWhere(
   now: Date = new Date(),
   minAgeMs: number = UNPICKED_ALERT_AGE_MS
 ): Prisma.WaveItemWhereInput {
-  const { start, end } = getManilaDayBounds(getManilaTodayStr());
+  const lookback = new Date(now.getTime() - 3 * 24 * 60 * 60_000);
   const olderThan = new Date(now.getTime() - minAgeMs);
   return {
     status: WaveItemStatus.PRINTED,
     updatedAt: { lte: olderThan },
     wave: {
-      createdAt: { gte: start, lt: end },
+      createdAt: { gte: lookback },
       status: { in: [WaveStatus.RUNNING, WaveStatus.DONE] },
     },
     package: {
@@ -290,7 +289,6 @@ export async function notifyCancelledPrintedOrder(
       platform,
       status: { in: [WaveItemStatus.LABEL_READY, WaveItemStatus.PRINTED] },
       package: {
-        packedAt: null,
         order: { orderSn },
       },
     },
@@ -303,19 +301,33 @@ export async function notifyCancelledPrintedOrder(
 
   if (waveItems.length === 0) return false;
 
-  // Cancel any still-queued single-parcel label jobs before the PC claims them.
+  // Cancel any still-queued single-parcel label jobs before the PC claims them,
+  // and transition matching LABEL_READY wave items to SKIPPED_CANCELLED so the wave never deadlocks.
   const pkgIds = waveItems.map((w) => w.packageId);
-  await prisma.printJob.updateMany({
-    where: {
-      status: PrintJobStatus.QUEUED,
-      packageId: { in: pkgIds },
-      batchPackageIds: { isEmpty: true },
-    },
-    data: {
-      status: PrintJobStatus.FAILED,
-      error: "Buyer cancelled before printing",
-    },
-  });
+  await prisma.$transaction([
+    prisma.printJob.updateMany({
+      where: {
+        status: PrintJobStatus.QUEUED,
+        packageId: { in: pkgIds },
+        batchPackageIds: { isEmpty: true },
+      },
+      data: {
+        status: PrintJobStatus.FAILED,
+        error: "Buyer cancelled before printing",
+      },
+    }),
+    prisma.waveItem.updateMany({
+      where: {
+        packageId: { in: pkgIds },
+        status: WaveItemStatus.LABEL_READY,
+      },
+      data: {
+        status: WaveItemStatus.SKIPPED_CANCELLED,
+        error: "Cancelled before printing",
+        activePackageId: null,
+      },
+    }),
+  ]);
 
   const first = waveItems[0];
   const pkg = first.package;

@@ -1,11 +1,13 @@
-import { PrintJobKind, PrintJobStatus, WaveItemStatus, WaveStatus } from "@prisma/client";
+import { PrintJobStatus, WaveItemStatus, WaveStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getDailyTruthReport } from "@/lib/analytics/daily-returns";
 import { getCatalog } from "@/lib/catalog/garments";
 import { getShopeeBumpStatus } from "@/lib/catalog/shopee-bump";
 import { getMoneySummary } from "@/lib/money/summary";
 import { isOnline } from "@/lib/print/device";
+import { countPrintedLabels } from "@/lib/print/jobs";
 import { formatTelegramDailyBrief } from "@/lib/reports/brief";
+import { getRealShopWhere } from "@/lib/shops";
 import { formatManilaDateTime, getManilaRangeBounds } from "@/lib/time";
 import { missingWhere, overdueWhere } from "@/lib/returns/rules";
 import { getReadyCounts } from "@/lib/waves/build";
@@ -42,23 +44,35 @@ export async function notifyOwnerTelegram(text: string): Promise<boolean> {
  * Supports /today, /failed, /returns, /missing, /overdue plus simple English/Taglish keywords.
  */
 export async function buildTelegramReply(rawInput: string): Promise<string> {
+  // Exact commands first, so "/order failed-item" isn't caught by the "failed" keyword.
+  const { buildOpsCommandReply } = await import("@/lib/telegram-commands");
+  const ops = await buildOpsCommandReply(rawInput);
+  if (ops !== null) return ops;
+
   const text = rawInput.trim().toLowerCase();
 
   if (text.startsWith("/missing") || text.includes("missing") || text.includes("kulang") || text.includes("wala pa")) {
-    const settings = await prisma.appSettings.findUnique({
-      where: { id: "default" },
-      select: { missingSinceAt: true },
-    });
-    const missing = await prisma.returnParcel.findMany({
-      where: missingWhere(settings?.missingSinceAt ?? null),
-      orderBy: { courierReturnedToSellerAt: "desc" },
-      take: 15,
-    });
+    const [settings, realFilter] = await Promise.all([
+      prisma.appSettings.findUnique({
+        where: { id: "default" },
+        select: { missingSinceAt: true },
+      }),
+      getRealShopWhere(),
+    ]);
+    const where = { ...realFilter, ...missingWhere(settings?.missingSinceAt ?? null) };
+    const [totalMissing, missing] = await Promise.all([
+      prisma.returnParcel.count({ where }),
+      prisma.returnParcel.findMany({
+        where,
+        orderBy: { courierReturnedToSellerAt: "desc" },
+        take: 15,
+      }),
+    ]);
     if (missing.length === 0) {
       return "ALL CLEAR — 0 missing parcels right now. Every parcel marked returned by couriers has been scanned at your warehouse.";
     }
     const lines = [
-      `MISSING PARCELS (${missing.length})`,
+      `MISSING PARCELS (${totalMissing})`,
       `Driver marked returned, NOT scanned at warehouse yet:`,
       ``,
     ];
@@ -69,26 +83,39 @@ export async function buildTelegramReply(rawInput: string): Promise<string> {
         `• ${track} (${p.courier})\n  ${typeLabel} — ${p.itemSummary}${p.variationName ? ` (${p.variationName})` : ""}\n  Driver marked back: ${formatManilaDateTime(p.courierReturnedToSellerAt)}`
       );
     }
+    if (totalMissing > missing.length) {
+      lines.push(`…and ${totalMissing - missing.length} more in Kyna Ops → Returns.`);
+    }
     return lines.join("\n");
   }
 
   if (text.startsWith("/overdue") || text.includes("overdue") || text.includes("stuck")) {
-    const settings = await prisma.appSettings.findUnique({ where: { id: "default" } });
+    const [settings, realFilter] = await Promise.all([
+      prisma.appSettings.findUnique({ where: { id: "default" } }),
+      getRealShopWhere(),
+    ]);
     const days = settings?.overdueRtsDays ?? 10;
-    const overdue = await prisma.returnParcel.findMany({
-      where: overdueWhere(days, new Date(), settings?.missingSinceAt ?? null),
-      orderBy: { digitalReturnTaggedAt: "asc" },
-      take: 15,
-    });
+    const where = { ...realFilter, ...overdueWhere(days, new Date(), settings?.missingSinceAt ?? null) };
+    const [totalOverdue, overdue] = await Promise.all([
+      prisma.returnParcel.count({ where }),
+      prisma.returnParcel.findMany({
+        where,
+        orderBy: { digitalReturnTaggedAt: "asc" },
+        take: 15,
+      }),
+    ]);
     if (overdue.length === 0) {
       return `No overdue Failed Delivery parcels (> ${days} days in transit).`;
     }
-    const lines = [`OVERDUE FAILED DELIVERIES (> ${days} days, ${overdue.length} total)`, ``];
+    const lines = [`OVERDUE FAILED DELIVERIES (> ${days} days, ${totalOverdue} total)`, ``];
     for (const p of overdue) {
       const track = p.rtsTrackingNumber || p.forwardTrackingNumber || p.orderSn;
       lines.push(
         `• ${track} (${p.courier}) — ${p.itemSummary}\n  Tagged: ${formatManilaDateTime(p.digitalReturnTaggedAt)}`
       );
+    }
+    if (totalOverdue > overdue.length) {
+      lines.push(`…and ${totalOverdue - overdue.length} more in Kyna Ops → Returns.`);
     }
     return lines.join("\n");
   }
@@ -132,13 +159,7 @@ export async function buildTelegramReply(rawInput: string): Promise<string> {
     const [ready, printedTodayCount, printDevice, printerQueuedCount, waveNeedAttentionCount] =
       await Promise.all([
         getReadyCounts(now, { live: true }),
-        prisma.printJob.count({
-          where: {
-            kind: PrintJobKind.LABEL,
-            status: PrintJobStatus.PRINTED,
-            printedAt: { gte: start, lt: end },
-          },
-        }),
+        countPrintedLabels(start, end),
         prisma.printDevice.findFirst({ orderBy: { createdAt: "desc" } }),
         prisma.printJob.count({
           where: { status: { in: [PrintJobStatus.QUEUED, PrintJobStatus.PRINTING] } },
@@ -182,12 +203,12 @@ export async function buildTelegramReply(rawInput: string): Promise<string> {
     const low = catalog
       .flatMap((g) =>
         g.variants
-          .filter((v) => v.available !== null && v.available <= 5)
+          .filter((v) => v.available !== null && v.available <= g.lowStockAt)
           .map((v) => ({ name: g.name, label: v.label, available: v.available! }))
       )
       .sort((a, b) => a.available - b.available);
     if (!low.length) {
-      return `ALL STOCKED — No items at 5 pieces or below right now.`;
+      return `ALL STOCKED — Nothing at or below its low-stock line right now.`;
     }
     const lines = [`LOW / OUT OF STOCK (${low.length} variants)`, ``];
     for (const item of low.slice(0, 15)) {

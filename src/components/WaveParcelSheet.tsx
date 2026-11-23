@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, Package2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Package2, Printer, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/Button";
 import { ItemThumb } from "@/components/ui/ItemThumb";
 import { Sheet } from "@/components/ui/Sheet";
 import { StatusPill } from "@/components/ui/StatusPill";
@@ -53,16 +54,25 @@ function SingleParcelView({
   parcel,
   selection,
   showFullNames,
+  canExclude,
+  actionBusy,
+  onReprintParcel,
+  onExcludeParcel,
   onBack,
 }: {
   parcel: WaveParcel;
   selection: WaveParcelSelection;
   showFullNames: boolean;
+  canExclude?: boolean;
+  actionBusy?: boolean;
+  onReprintParcel?: (orderSn: string) => Promise<void> | void;
+  onExcludeParcel?: (waveItemId: string) => Promise<void> | void;
   onBack?: () => void;
 }) {
   const statusInfo = WAVE_ITEM_STATUS[parcel.status] ?? { label: parcel.status, tone: "neutral" as const };
   const isMulti = parcel.totalPieces > 1 || parcel.lines.length > 1;
   const shopPlatform = parcel.platform === "SHOPEE" ? "Shopee" : "TikTok Shop";
+  const canPrintLabel = parcel.status === "LABEL_READY" || parcel.status === "PRINTED";
 
   return (
     <div className="anim-fade-in space-y-5 pt-1">
@@ -201,6 +211,46 @@ function SingleParcelView({
           <DetailRow label="Ordered" value={manilaDateTime(parcel.createdAt)} />
         </dl>
       </div>
+
+      {(canPrintLabel || (canExclude && onExcludeParcel)) && (
+        <div className="space-y-2.5 border-t border-hairline pt-4">
+          {canPrintLabel && (
+            <div className="grid grid-cols-2 gap-2.5">
+              {onReprintParcel && (
+                <Button
+                  full
+                  variant="secondary"
+                  disabled={actionBusy}
+                  onClick={() => void onReprintParcel(parcel.orderSn)}
+                >
+                  <Printer className="mr-1.5 h-4 w-4" />
+                  Reprint
+                </Button>
+              )}
+              <a
+                href={`/api/waves/label?packageId=${encodeURIComponent(parcel.packageId)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="pressable inline-flex h-12 w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] bg-surface-muted px-4 text-[16px] font-semibold text-ink hover:bg-surface-track"
+              >
+                <Download className="h-4 w-4" />
+                PDF
+              </a>
+            </div>
+          )}
+          {canExclude && onExcludeParcel && (
+            <Button
+              full
+              variant="danger"
+              disabled={actionBusy}
+              onClick={() => void onExcludeParcel(parcel.id)}
+            >
+              <Trash2 className="mr-1.5 h-4 w-4" />
+              Leave out of this wave
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -298,10 +348,18 @@ function MultiParcelListView({
 export function WaveParcelSheet({
   selection,
   showFullNames = false,
+  canExclude = false,
+  actionBusy = false,
+  onReprintParcel,
+  onExcludeParcel,
   onClose,
 }: {
   selection: WaveParcelSelection | null;
   showFullNames?: boolean;
+  canExclude?: boolean;
+  actionBusy?: boolean;
+  onReprintParcel?: (orderSn: string) => Promise<void> | void;
+  onExcludeParcel?: (waveItemId: string) => Promise<void> | void;
   onClose: () => void;
 }) {
   // Keep last selection while the sheet animates out.
@@ -339,6 +397,10 @@ export function WaveParcelSheet({
           parcel={activeParcel}
           selection={current}
           showFullNames={showFullNames}
+          canExclude={canExclude}
+          actionBusy={actionBusy}
+          onReprintParcel={onReprintParcel}
+          onExcludeParcel={onExcludeParcel}
           onBack={
             current.parcels.length > 1 && !current.initialParcelId
               ? () => setActiveParcelId(null)

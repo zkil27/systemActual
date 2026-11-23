@@ -10,7 +10,14 @@ import {
   StockNotStartedError,
 } from "@/lib/stock/ledger";
 import { pushStock } from "@/lib/stock/push";
+import { getStockHistory, undoSupplierDelivery } from "@/lib/stock/history";
 import { notifyOwnerTelegram } from "@/lib/telegram";
+import { getManilaDayBounds, getManilaTodayStr } from "@/lib/time";
+import { StockReason } from "@prisma/client";
+
+function pushSoon() {
+  after(() => pushStock(Date.now() + 25_000).catch((err) => console.error("[stock-in] immediate pushStock", err)));
+}
 
 /** Staff search for the garment they're updating on the shelf. No peso values here. */
 export async function GET(req: NextRequest) {
@@ -19,6 +26,29 @@ export async function GET(req: NextRequest) {
 
   const variantId = (req.nextUrl.searchParams.get("variantId") || "").trim();
   const q = (req.nextUrl.searchParams.get("q") || "").trim();
+
+  // Today's deliveries by this person (owner sees everyone's), newest first, for the Undo list.
+  if (req.nextUrl.searchParams.get("today") === "1") {
+    const staffMemberId = session.actorType === "owner" ? null : await resolveActorStaffMemberId(session);
+    const { rows } = await getStockHistory({
+      reasons: [StockReason.SUPPLIER_IN],
+      since: getManilaDayBounds(getManilaTodayStr()).start,
+      staffMemberId,
+      limit: 30,
+    });
+    return NextResponse.json({
+      entries: rows.map((r) => ({
+        id: r.id,
+        name: r.garmentName,
+        label: r.variantLabel,
+        quantity: r.delta,
+        note: r.note,
+        staffName: r.staffName,
+        createdAt: r.createdAt,
+        undoable: r.undoable,
+      })),
+    });
+  }
 
   if (!variantId && q.length < 2) {
     return NextResponse.json({ variants: [] });
@@ -83,7 +113,9 @@ export async function POST(req: NextRequest) {
         quantity: parsed.data.quantity,
         staffMemberId,
         clientKey: parsed.data.clientKey,
+        note: parsed.data.note,
       });
+      if (!res.duplicate) pushSoon();
       return NextResponse.json({ ok: true, duplicate: res.duplicate });
     }
 
@@ -144,4 +176,20 @@ export async function POST(req: NextRequest) {
     console.error("[stock-in]", err);
     return NextResponse.json({ error: "Couldn't save. Try again." }, { status: 500 });
   }
+}
+
+const undoSchema = z.object({ movementId: z.string().min(1) });
+
+/** Undo a supplier delivery within 5 minutes (the person who added it, or the owner). */
+export async function DELETE(req: NextRequest) {
+  const session = await getScannerSession();
+  if (!session) return NextResponse.json({ error: "Unlock with your PIN first." }, { status: 401 });
+  const parsed = undoSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "Pick an entry." }, { status: 400 });
+  const isOwner = session.actorType === "owner";
+  const staffMemberId = await resolveActorStaffMemberId(session);
+  const res = await undoSupplierDelivery(parsed.data.movementId, { staffMemberId, isOwner });
+  if (!res.ok) return NextResponse.json({ error: res.error }, { status: res.status });
+  pushSoon();
+  return NextResponse.json({ ok: true, delta: res.delta });
 }

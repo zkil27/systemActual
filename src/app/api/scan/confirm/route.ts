@@ -1,10 +1,12 @@
 import { after, NextRequest, NextResponse } from "next/server";
-import { PhysicalCondition } from "@prisma/client";
+import { DigitalStatus, PhysicalCondition, Platform, ReturnCategory } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getScannerSession, redactParcelForStaff } from "@/lib/auth";
-import { saveProofPhoto } from "@/lib/storage";
+import { upsertNormalizedReturn } from "@/lib/connectors/normalizer";
+import { InvalidProofPhotoError, saveProofPhoto } from "@/lib/storage";
 import { notifyOwnerTelegram } from "@/lib/telegram";
 import { recordGoodReturn } from "@/lib/stock/ledger";
+import { pushStock } from "@/lib/stock/push";
 import { RESTOCK_CONDITIONS } from "@/lib/stock/rules";
 import { resolveActorStaffMemberId } from "@/lib/shipping/outbound";
 import { missingWhere } from "@/lib/returns/rules";
@@ -28,6 +30,26 @@ export async function POST(req: NextRequest) {
     const scannedBarcode = String(formData.get("scannedBarcode") || "").trim();
     const conditionRaw = String(formData.get("condition") || "").trim();
     const notes = String(formData.get("notes") || "").trim() || null;
+    const clientKeyRaw = String(formData.get("clientKey") || "").trim();
+    const clientKey = /^[A-Za-z0-9_-]{8,64}$/.test(clientKeyRaw) ? clientKeyRaw : null;
+
+    // Retry of a save that already went through (flaky Wi-Fi): answer as saved, record nothing.
+    if (clientKey) {
+      const existing = await prisma.physicalScan.findUnique({
+        where: { clientKey },
+        include: { parcel: true },
+      });
+      if (existing) {
+        return NextResponse.json({
+          ok: true,
+          duplicate: true,
+          scanId: existing.id,
+          photoCount: existing.photoUrls.length,
+          restocked: RESTOCK_CONDITIONS.has(existing.condition),
+          parcel: redactParcelForStaff(existing.parcel),
+        });
+      }
+    }
 
     if (!parcelId || !VALID_CONDITIONS.has(conditionRaw)) {
       return NextResponse.json(
@@ -37,7 +59,60 @@ export async function POST(req: NextRequest) {
     }
 
     const condition = conditionRaw as PhysicalCondition;
-    const parcel = await prisma.returnParcel.findUnique({ where: { id: parcelId } });
+    let parcel = parcelId.startsWith("early:")
+      ? null
+      : await prisma.returnParcel.findUnique({ where: { id: parcelId } });
+
+    if (!parcel && parcelId.startsWith("early:")) {
+      const pkgId = parcelId.slice("early:".length);
+      const pkg = await prisma.package.findUnique({
+        where: { id: pkgId },
+        include: { order: { include: { lines: true } } },
+      });
+      if (pkg) {
+        const ord = pkg.order;
+        const firstLine = ord.lines[0];
+        const now = new Date();
+        parcel = await upsertNormalizedReturn({
+          shopConnectionId: ord.shopConnectionId,
+          platform: ord.platform,
+          orderSn: ord.orderSn,
+          forwardTrackingNumber: pkg.trackingNumber ?? null,
+          courier:
+            pkg.carrier ??
+            (ord.platform === Platform.SHOPEE ? "SPX Express" : "J&T Express"),
+          category: ReturnCategory.FAILED_DELIVERY,
+          digitalStatus: DigitalStatus.RETURNING_TO_SELLER,
+          returnReason: "Arrived at warehouse (scanned early)",
+          itemSummary: firstLine
+            ? ord.lines.length > 1
+              ? `${firstLine.name} +${ord.lines.length - 1} more`
+              : firstLine.name
+            : "Fashion Item",
+          variationName: firstLine?.variationName ?? null,
+          quantity: Math.max(1, ord.lines.reduce((n, l) => n + l.quantity, 0)),
+          itemImageUrl: firstLine?.imageUrl ?? null,
+          items: ord.lines.map((l) => ({
+            name: l.name,
+            variationName: l.variationName,
+            quantity: l.quantity,
+            imageUrl: l.imageUrl,
+            listingId: l.listingId,
+            variationId: l.variationId,
+          })),
+          orderTotalPhp: Number(ord.totalPhp),
+          orderCreatedAt: ord.platformCreatedAt,
+          digitalReturnTaggedAt: now,
+          courierReturnedToSellerAt: null,
+          expectsPhysicalReturn: true,
+          source: "WAREHOUSE_SCAN",
+          rawStatus: "EARLY_ARRIVAL",
+          eventDescription: "Scanned physically before platform return sync",
+          eventTimestamp: now,
+        });
+      }
+    }
+
     if (!parcel) {
       return NextResponse.json({ error: "Parcel not found." }, { status: 404 });
     }
@@ -85,6 +160,7 @@ export async function POST(req: NextRequest) {
             notes,
             photoUrls,
             scannedAt: now,
+            clientKey,
           },
         }),
         prisma.returnParcel.update({
@@ -98,12 +174,17 @@ export async function POST(req: NextRequest) {
     );
 
     // Sellable returns go back on the shelf (once per parcel item) in parallel with missing count.
-    const [, settings] = await Promise.all([
+    const [restockedCount, settings] = await Promise.all([
       recordGoodReturn(parcel.id).catch((err) => {
         console.error("[scan] restock", err);
+        return 0;
       }),
       prisma.appSettings.findUnique({ where: { id: "default" }, select: { missingSinceAt: true } }),
     ]);
+    if (restockedCount > 0) {
+      // Pieces back on the shelf: tell the shops now, not on the next tick.
+      after(() => pushStock(Date.now() + 25_000).catch((err) => console.error("[scan] immediate pushStock", err)));
+    }
     const pendingMissingCount = await prisma.returnParcel.count({
       where: missingWhere(settings?.missingSinceAt ?? null),
     });
@@ -145,7 +226,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       scanId: scan.id,
       photoCount: photoUrls.length,
-      restocked: RESTOCK_CONDITIONS.has(condition),
+      restocked: RESTOCK_CONDITIONS.has(condition) && restockedCount > 0,
       parcel: redactParcelForStaff(updatedParcel),
       pendingMissingCount,
       recentScan: {
@@ -167,6 +248,9 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (err) {
+    if (err instanceof InvalidProofPhotoError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
     console.error("[Scan confirm error]", err);
     return NextResponse.json(
       { error: "Could not save scan. Please try again." },

@@ -1,7 +1,9 @@
+import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { hashSecret } from "@/lib/auth";
+import { getOwnerSession, hashSecret, verifySecret } from "@/lib/auth";
+import { manilaToUtcHm, utcToManilaHm } from "@/lib/reports/brief-time";
 import { isShopeeConfigured } from "@/lib/connectors/shopee";
 import { isTikTokConfigured } from "@/lib/connectors/tiktok";
 import { getDailyTruthReport } from "@/lib/analytics/daily-returns";
@@ -16,20 +18,24 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ telegramPreview: formatTelegramDailyBrief(report) });
   }
 
-  const [settings, staff, shops] = await Promise.all([
+  const owner = await getOwnerSession();
+  const [settings, staff, shops, ownerUser] = await Promise.all([
     prisma.appSettings.upsert({
       where: { id: "default" },
       create: { id: "default" },
       update: {},
     }),
     prisma.staffMember.findMany({
-      select: { id: true, name: true, active: true, createdAt: true },
+      select: { id: true, name: true, active: true, createdAt: true, pinLockedUntil: true, failedPinAttempts: true },
       orderBy: { name: "asc" },
     }),
     prisma.shopConnection.findMany({ orderBy: { platform: "asc" } }),
+    owner ? prisma.ownerUser.findUnique({ where: { id: owner.userId }, select: { email: true, name: true } }) : null,
   ]);
+  const now = Date.now();
 
   return NextResponse.json({
+    hasDemoData: shops.some((s) => s.isDemo),
     settings: {
       defaultUnitCostPhp: Number(settings.defaultUnitCostPhp),
       defaultSellingPrice: Number(settings.defaultSellingPrice),
@@ -38,6 +44,7 @@ export async function GET(req: NextRequest) {
       stockSafetyBuffer: settings.stockSafetyBuffer,
       telegramChatId: settings.telegramChatId || "",
       telegramDailyBriefUtc: settings.telegramDailyBriefUtc,
+      telegramDailyBriefManila: utcToManilaHm(settings.telegramDailyBriefUtc),
       missingSinceDate: settings.missingSinceAt ? getManilaDateString(settings.missingSinceAt) : "",
       customWaybillEnabled: settings.customWaybillEnabled,
     },
@@ -46,7 +53,15 @@ export async function GET(req: NextRequest) {
       tiktokEnvReady: isTikTokConfigured(),
       telegramBotReady: Boolean(process.env.TELEGRAM_BOT_TOKEN?.trim()),
     },
-    staff,
+    owner: ownerUser,
+    staff: staff.map((s) => ({
+      id: s.id,
+      name: s.name,
+      active: s.active,
+      locked: Boolean(s.pinLockedUntil && s.pinLockedUntil.getTime() > now),
+      lockedUntil: s.pinLockedUntil && s.pinLockedUntil.getTime() > now ? s.pinLockedUntil.toISOString() : null,
+      failedPinAttempts: s.failedPinAttempts,
+    })),
     shops: shops.map((s) => ({
       id: s.id,
       platform: s.platform,
@@ -57,6 +72,7 @@ export async function GET(req: NextRequest) {
       lastSyncedAt: s.lastSyncedAt?.toISOString() ?? null,
       tokenExpiresAt: s.tokenExpiresAt?.toISOString() ?? null,
       needsReconnect: Boolean(s.tokenErrorAt),
+      tokenError: s.tokenErrorAt ? s.tokenError : null,
       writesEnabled: s.writesEnabled,
     })),
   });
@@ -70,8 +86,19 @@ const updateSettingsSchema = z.object({
     "update_staff_pin",
     "toggle_staff",
     "send_test_telegram",
+    "generate_telegram_pair_code",
+    "clear_demo",
     "set_shop_writes",
+    "rename_staff",
+    "clear_staff_lockout",
+    "disconnect_shop",
+    "update_owner_password",
+    "update_owner_email",
   ]),
+  telegramDailyBriefManila: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  currentPassword: z.string().min(1).max(200).optional(),
+  newPassword: z.string().min(8).max(200).optional(),
+  email: z.string().trim().toLowerCase().email().max(200).optional(),
   shopConnectionId: z.string().optional(),
   stockSafetyBuffer: z.number().int().min(0).max(1000).optional(),
   waveTimes: z.string().max(120).optional(),
@@ -147,9 +174,69 @@ export async function POST(req: NextRequest) {
             ? { telegramChatId: data.telegramChatId.trim() || null }
             : {}),
           ...(missingSinceAt !== undefined ? { missingSinceAt } : {}),
+          ...(data.telegramDailyBriefManila !== undefined
+            ? { telegramDailyBriefUtc: manilaToUtcHm(data.telegramDailyBriefManila) }
+            : {}),
         },
       });
       return NextResponse.json({ ok: true });
+    }
+
+    if (data.action === "rename_staff" && data.staffId && data.staffName) {
+      try {
+        await prisma.staffMember.update({ where: { id: data.staffId }, data: { name: data.staffName.trim() } });
+      } catch {
+        return NextResponse.json({ error: "That name is already used." }, { status: 409 });
+      }
+      return NextResponse.json({ ok: true });
+    }
+
+    if (data.action === "clear_staff_lockout" && data.staffId) {
+      await prisma.staffMember.update({
+        where: { id: data.staffId },
+        data: { failedPinAttempts: 0, pinLockedUntil: null },
+      });
+      return NextResponse.json({ ok: true });
+    }
+
+    if (data.action === "disconnect_shop" && data.shopConnectionId) {
+      // Keeps orders, returns and stock history; only forgets the keys and stops changes to the shop.
+      await prisma.shopConnection.update({
+        where: { id: data.shopConnectionId },
+        data: {
+          accessToken: null,
+          refreshToken: null,
+          tokenExpiresAt: null,
+          tokenError: null,
+          tokenErrorAt: null,
+          writesEnabled: false,
+        },
+      });
+      return NextResponse.json({ ok: true });
+    }
+
+    if (data.action === "update_owner_password" || data.action === "update_owner_email") {
+      const owner = await getOwnerSession();
+      if (!owner) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
+      const user = await prisma.ownerUser.findUnique({ where: { id: owner.userId } });
+      if (!user || !data.currentPassword || !(await verifySecret(data.currentPassword, user.passwordHash))) {
+        return NextResponse.json({ error: "Current password is wrong." }, { status: 403 });
+      }
+      if (data.action === "update_owner_password") {
+        if (!data.newPassword) return NextResponse.json({ error: "New password must be at least 8 characters." }, { status: 400 });
+        await prisma.ownerUser.update({
+          where: { id: user.id },
+          data: { passwordHash: await hashSecret(data.newPassword), failedLoginAttempts: 0, loginLockedUntil: null },
+        });
+        return NextResponse.json({ ok: true });
+      }
+      if (!data.email) return NextResponse.json({ error: "Enter a valid email." }, { status: 400 });
+      try {
+        await prisma.ownerUser.update({ where: { id: user.id }, data: { email: data.email } });
+      } catch {
+        return NextResponse.json({ error: "That email is already used." }, { status: 409 });
+      }
+      return NextResponse.json({ ok: true, email: data.email });
     }
 
     if (data.action === "reset_missing_baseline") {
@@ -176,8 +263,8 @@ export async function POST(req: NextRequest) {
       const pinHash = await hashSecret(data.pin);
       await prisma.staffMember.update({
         where: { id: data.staffId },
-        // A new PIN from the owner also clears any lockout.
-        data: { pinHash, failedPinAttempts: 0, pinLockedUntil: null },
+        // A new PIN from the owner also clears any lockout and revokes old staff tokens.
+        data: { pinHash, failedPinAttempts: 0, pinLockedUntil: null, tokenVersion: { increment: 1 } },
       });
       return NextResponse.json({ ok: true });
     }
@@ -194,9 +281,28 @@ export async function POST(req: NextRequest) {
     if (data.action === "toggle_staff" && data.staffId && data.active !== undefined) {
       await prisma.staffMember.update({
         where: { id: data.staffId },
-        data: { active: data.active },
+        data: {
+          active: data.active,
+          ...(!data.active ? { tokenVersion: { increment: 1 } } : {}),
+        },
       });
       return NextResponse.json({ ok: true });
+    }
+
+    if (data.action === "generate_telegram_pair_code") {
+      const code = crypto.randomBytes(4).toString("hex").toUpperCase();
+      const expiresAt = new Date(Date.now() + 10 * 60_000);
+      await prisma.workerLock.upsert({
+        where: { id: "telegram-pair" },
+        create: { id: "telegram-pair", lockedUntil: expiresAt, holder: code },
+        update: { lockedUntil: expiresAt, holder: code },
+      });
+      return NextResponse.json({ ok: true, code, expiresAt: expiresAt.toISOString() });
+    }
+
+    if (data.action === "clear_demo") {
+      const deleted = await prisma.shopConnection.deleteMany({ where: { isDemo: true } });
+      return NextResponse.json({ ok: true, deleted: deleted.count });
     }
 
     if (data.action === "send_test_telegram") {

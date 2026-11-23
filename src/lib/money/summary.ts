@@ -1,5 +1,6 @@
 import { MoneyKind, Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { hasRealConnectedShop } from "@/lib/shops";
 
 export interface MoneySummary {
   /** The owner's main number: order income credited in the range. */
@@ -47,14 +48,20 @@ export async function getMoneySummary(
   end: Date,
   shopsOverride?: Array<{ isDemo: boolean; accessToken: string | null; walletCheckedAt: Date | null }>
 ): Promise<MoneySummary> {
+  const hasReal =
+    shopsOverride !== undefined
+      ? shopsOverride.some((s) => !s.isDemo && Boolean(s.accessToken))
+      : await hasRealConnectedShop();
+  const realShopFilter = hasReal ? { shopConnection: { isDemo: false } } : {};
+
   const [grouped, orders, shops] = await Promise.all([
     prisma.walletTransaction.groupBy({
       by: ["platform", "kind"],
-      where: { occurredAt: { gte: start, lt: end } },
+      where: { ...realShopFilter, occurredAt: { gte: start, lt: end } },
       _sum: { amountPhp: true },
     }),
     prisma.order.aggregate({
-      where: { platformCreatedAt: { gte: start, lt: end }, status: { notIn: ["UNPAID", "CANCELLED"] } },
+      where: { ...realShopFilter, platformCreatedAt: { gte: start, lt: end }, status: { notIn: ["UNPAID", "CANCELLED"] } },
       _count: { _all: true },
       _sum: { totalPhp: true },
     }),

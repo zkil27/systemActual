@@ -1,15 +1,18 @@
-import { PrintJobKind, type PrintJob } from "@prisma/client";
+import { PrintJobKind, WaveItemStatus, type PrintJob } from "@prisma/client";
 import { formatManilaDateTime } from "@/lib/time";
 import { buildPdf } from "./pdf";
 import { prisma } from "@/lib/prisma";
 import { pickListPages, type WaveSummary } from "@/lib/waves/plan";
 import { fetchBatchLabelPdf, fetchLabelPdf } from "@/lib/shipping/labels";
+import { isOrderCancelledForPacking } from "@/lib/shipping/outbound";
+import { buildHandoverManifestLines, getDailyHandoverSummary } from "./handover";
 import { assembleWaybillSources, composeWaybills, type WaybillParcel } from "./waybill";
 import { buildTestLabelPdf } from "./test-label";
 
 export class NotPrintableError extends Error {}
 
 export const DIVIDER_PREFIX = "DIVIDER:";
+export const HANDOVER_PREFIX = "HANDOVER:";
 
 /** Encodes a courier divider slip title inside PrintJob.title (no schema change). */
 export function formatCourierDividerTitle(groupTitle: string, count: number): string {
@@ -58,19 +61,56 @@ export async function renderJobPdf(
       if (job.title.startsWith(DIVIDER_PREFIX)) {
         return buildPdf([buildCourierDividerLines(job.title, job.createdAt)], { fontSize: 13 });
       }
+      if (job.title.startsWith(HANDOVER_PREFIX)) {
+        const courier = job.title.slice(HANDOVER_PREFIX.length).trim();
+        const all = await getDailyHandoverSummary(job.createdAt);
+        const match = all.find((c) => c.courier.toLowerCase() === courier.toLowerCase()) ?? {
+          courier,
+          totalPrinted: 0,
+          packedCount: 0,
+          handedOverCount: 0,
+          awaitingPickupCount: 0,
+          cancelledCount: 0,
+          trackingNumbers: [],
+        };
+        return buildPdf(buildHandoverManifestLines(match, formatManilaDateTime(job.createdAt)), { fontSize: 10 });
+      }
       if (!job.waveId) throw new NotPrintableError("Pick list has no wave.");
       const wave = await prisma.wave.findUnique({ where: { id: job.waveId } });
       if (!wave) throw new NotPrintableError("That wave was deleted.");
       return buildPdf(pickListPages(wave.summaryJson as unknown as WaveSummary, wave.createdAt), { fontSize: 10 });
     }
     case PrintJobKind.LABEL: {
-      const packageIds =
+      const rawPackageIds =
         job.batchPackageIds && job.batchPackageIds.length > 1
           ? job.batchPackageIds
           : job.packageId
             ? [job.packageId]
             : [];
-      if (!packageIds.length) throw new NotPrintableError("Label has no parcel.");
+      if (!rawPackageIds.length) throw new NotPrintableError("Label has no parcel.");
+
+      let packageIds = rawPackageIds;
+      // For batched Shopee wave jobs, exclude any parcel cancelled after queueing so we never waste stickers.
+      if (rawPackageIds.length > 1 && job.waveId) {
+        const pkgs = await prisma.package.findMany({
+          where: { id: { in: rawPackageIds } },
+          select: { id: true, order: { select: { status: true, cancelRequested: true } } },
+        });
+        const cancelledIds = new Set(
+          pkgs.filter((p) => isOrderCancelledForPacking(p.order)).map((p) => p.id)
+        );
+        if (cancelledIds.size > 0) {
+          await prisma.waveItem.updateMany({
+            where: { waveId: job.waveId, packageId: { in: [...cancelledIds] }, status: WaveItemStatus.LABEL_READY },
+            data: { status: WaveItemStatus.SKIPPED_CANCELLED, error: "Cancelled before printing", activePackageId: null },
+          });
+          packageIds = rawPackageIds.filter((id) => !cancelledIds.has(id));
+          if (!packageIds.length) {
+            throw new NotPrintableError("All parcels in this batch were cancelled before printing.");
+          }
+        }
+      }
+
       const platformPdf =
         packageIds.length > 1 ? await fetchBatchLabelPdf(packageIds) : await fetchLabelPdf(packageIds[0]);
       return withCustomWaybill(packageIds, platformPdf);

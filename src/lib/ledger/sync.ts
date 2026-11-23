@@ -5,7 +5,24 @@ import { tiktokRequest } from "@/lib/connectors/tiktok";
 import { ensureFreshToken } from "@/lib/connectors/tokens";
 import { mapShopeeOrder, mapTikTokOrder, type NormalizedOrder } from "./normalize";
 import { saveOrder, saveOrderBatch } from "./store";
-import { nextSyncWindow, type SyncWindow } from "./window";
+import { adaptWindowMs, INITIAL_LOOKBACK_MS, MAX_WINDOW_MS, nextSyncWindow, type SyncWindow } from "./window";
+
+/** Per-shop Shopee window size, kept in a WorkerLock row (holder = milliseconds). */
+const windowKey = (shopId: string) => `order-window:${shopId}`;
+
+async function loadWindowMs(shopConnectionId: string): Promise<number> {
+  const row = await prisma.workerLock.findUnique({ where: { id: windowKey(shopConnectionId) } });
+  const ms = Number(row?.holder);
+  return Number.isFinite(ms) && ms > 0 ? ms : MAX_WINDOW_MS;
+}
+
+async function saveWindowMs(shopConnectionId: string, ms: number) {
+  await prisma.workerLock.upsert({
+    where: { id: windowKey(shopConnectionId) },
+    create: { id: windowKey(shopConnectionId), lockedUntil: new Date(0), holder: String(ms) },
+    update: { holder: String(ms) },
+  });
+}
 
 export interface OrderSyncResult {
   saved: number;
@@ -112,10 +129,17 @@ export async function syncOrders(conn: ShopConnection, deadline: number): Promis
   const canResumeMidWindow = conn.platform === Platform.TIKTOK;
   const seenListings = new Set<string>();
   const progress: { lastProcessedAt: Date | null } = { lastProcessedAt: null };
+  // TikTok resumes inside a window; Shopee needs a window small enough to finish.
+  const windowMs = canResumeMidWindow ? MAX_WINDOW_MS : await loadWindowMs(conn.id);
+  const adapt = async (ranOutOfTime: boolean) => {
+    if (canResumeMidWindow) return;
+    const next = adaptWindowMs(windowMs, { windowsFinished: windows, ranOutOfTime });
+    if (next !== windowMs) await saveWindowMs(conn.id, next);
+  };
 
   try {
     for (;;) {
-      const w = nextSyncWindow(cursor, new Date());
+      const w = nextSyncWindow(cursor, new Date(), INITIAL_LOOKBACK_MS, windowMs);
       for await (const batch of pages(conn, accessToken, w, deadline)) {
         if (!batch.length) continue;
         const res = await saveOrderBatch(conn.id, conn.platform, batch, {
@@ -135,11 +159,15 @@ export async function syncOrders(conn: ShopConnection, deadline: number): Promis
         where: { id: conn.id },
         data: { ordersSyncedTo: cursor },
       });
-      if (w.last) return { saved, windows, caughtUp: true };
+      if (w.last) {
+        await adapt(false);
+        return { saved, windows, caughtUp: true };
+      }
       checkDeadline(deadline);
     }
   } catch (err) {
     if (err instanceof OutOfTime) {
+      await adapt(true);
       const { lastProcessedAt } = progress;
       if (canResumeMidWindow && lastProcessedAt && (!cursor || lastProcessedAt > cursor)) {
         await prisma.shopConnection.update({

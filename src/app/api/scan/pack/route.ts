@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { WaveItemStatus } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getScannerSession, redactOutboundPackageForStaff } from "@/lib/auth";
@@ -79,11 +80,15 @@ export async function POST(req: NextRequest) {
   }
 
   if (parsed.data.action === "mark_cancelled_pulled") {
-    await prisma.package.update({
-      where: { id: pkg.id },
+    await prisma.waveItem.updateMany({
+      where: {
+        packageId: pkg.id,
+        status: { in: [WaveItemStatus.LABEL_READY, WaveItemStatus.PRINTED] },
+      },
       data: {
-        packedAt: pkg.packedAt ?? new Date(),
-        packedByStaffId: pkg.packedByStaffId ?? staffMemberId,
+        status: WaveItemStatus.SKIPPED_CANCELLED,
+        error: "Pulled cancelled label",
+        activePackageId: null,
       },
     });
     const stats = await getPackerStats(session);

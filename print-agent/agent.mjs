@@ -7,11 +7,11 @@
 import pdfToPrinter from "pdf-to-printer";
 const { print, getDefaultPrinter } = pdfToPrinter;
 import { execFile } from "node:child_process";
-import { mkdir, readdir, rm, unlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, open, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-const VERSION = "1.1.1";
+const VERSION = "1.2.0";
 const BASE = (process.env.KYNA_URL || "").replace(/\/$/, "");
 const TOKEN = (process.env.DEVICE_TOKEN || "").trim();
 const PRINTER = (process.env.PRINTER_NAME || "").trim() || undefined;
@@ -35,8 +35,72 @@ if (!TOKEN.startsWith("kpd_")) {
   process.exit(1);
 }
 
-const log = (...a) => console.log(new Date().toLocaleString(), ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ------------------------------------------------------------------ logs
+// One file per day in LOG_DIR (default: the backup folder), last LOG_KEEP days kept,
+// so "what happened at 2 PM yesterday?" has an answer even after a restart.
+const LOG_DIR = process.env.LOG_DIR || process.env.BACKUP_DIR || "C:\\KynaBackups";
+const LOG_KEEP = Number(process.env.LOG_KEEP ?? 14);
+let logDirReady = null;
+let lastLogPrune = "";
+
+function localDay(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+async function writeLogLine(line) {
+  try {
+    logDirReady ??= mkdir(LOG_DIR, { recursive: true });
+    await logDirReady;
+    const day = localDay();
+    await appendFile(path.join(LOG_DIR, `agent-${day}.log`), line + "\r\n");
+    if (lastLogPrune !== day) {
+      lastLogPrune = day;
+      const files = (await readdir(LOG_DIR)).filter((f) => /^agent-\d{4}-\d{2}-\d{2}\.log$/.test(f)).sort();
+      for (const old of files.slice(0, Math.max(0, files.length - LOG_KEEP))) await rm(path.join(LOG_DIR, old)).catch(() => {});
+    }
+  } catch {
+    // Logging must never stop printing.
+  }
+}
+
+const log = (...a) => {
+  const line = [new Date().toLocaleString(), ...a].join(" ");
+  console.log(line);
+  void writeLogLine(line);
+};
+
+// ------------------------------------------------------------------ printer status (Windows)
+// Asks Windows what the printer says (Get-Printer). A label sent to an offline or
+// out-of-paper printer just sits in the spooler, so we stop before sending it.
+const TROUBLE = /offline|error|paper|jam|door|toner|stopped|paused|notavailable|problem/i;
+let statusCache = { at: 0, value: null };
+
+function readPrinterStatus(name) {
+  if (process.platform !== "win32" || !name) return Promise.resolve(null);
+  if (Date.now() - statusCache.at < 20_000) return Promise.resolve(statusCache.value);
+  // The name goes in through an environment variable, never into the command text.
+  const script =
+    "$p = Get-Printer -Name $env:KYNA_PRINTER -ErrorAction Stop; " +
+    "if ($p.WorkOffline) { 'Offline' } else { [string]$p.PrinterStatus }";
+  return new Promise((resolve) => {
+    execFile(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      { timeout: 10_000, env: { ...process.env, KYNA_PRINTER: name }, windowsHide: true },
+      (err, stdout) => {
+        const value = err ? null : String(stdout).trim().split(/\r?\n/).pop() || null;
+        statusCache = { at: Date.now(), value };
+        resolve(value);
+      }
+    );
+  });
+}
+
+function printerTrouble(status) {
+  return Boolean(status && TROUBLE.test(status) && !/^normal$/i.test(status));
+}
 
 async function api(pathname, { method = "GET", body, raw = false, timeoutMs = 60_000 } = {}) {
   const res = await fetch(`${BASE}${pathname}`, {
@@ -96,14 +160,22 @@ async function reportBatch(results) {
 async function printLoop() {
   let printerName = PRINTER;
   if (!printerName) printerName = (await getDefaultPrinter().catch(() => null))?.name ?? "default printer";
+  let lastTrouble = null;
   log(`Printing to: ${printerName} (${PAPER}, scale: ${SCALE})`);
   if (PRINT_ONLY.length) log(`Only printing: ${PRINT_ONLY.join(", ")}. Real labels are left for the warehouse PC.`);
 
   for (;;) {
     try {
+      const printerStatus = await readPrinterStatus(printerName);
       const { ok, data } = await api("/api/agent/poll", {
         method: "POST",
-        body: { version: VERSION, printer: printerName, ...(PRINT_ONLY.length ? { kinds: PRINT_ONLY } : {}) },
+        body: {
+          version: VERSION,
+          printer: printerName,
+          printerStatus,
+          backup: backupState,
+          ...(PRINT_ONLY.length ? { kinds: PRINT_ONLY } : {}),
+        },
       });
       let jobs = ok && !data.paused ? data.jobs ?? [] : [];
       if (PRINT_ONLY.length && jobs.some((j) => !PRINT_ONLY.includes(j.kind))) {
@@ -112,27 +184,45 @@ async function printLoop() {
         await api("/api/agent/release", { method: "POST" }).catch(() => {});
         jobs = [];
       }
-      const results = [];
+      let pausedMidChunk = false;
       for (let i = 0; i < jobs.length; i++) {
         const job = jobs[i];
+        // Check the printer (cached 20s) before each label: never mark PRINTED what can't come out.
+        const status = await readPrinterStatus(printerName);
+        if (printerTrouble(status)) {
+          if (lastTrouble !== status) log(`Printer says "${status}". Holding ${jobs.length - i} job(s) until it's fixed.`);
+          lastTrouble = status;
+          await api("/api/agent/release", { method: "POST" }).catch(() => {});
+          pausedMidChunk = true;
+          break;
+        }
+        if (lastTrouble) {
+          log("Printer is back. Printing again.");
+          lastTrouble = null;
+        }
+        let outcome;
         try {
           await printOne(job);
-          results.push({ id: job.id, status: "PRINTED" });
+          outcome = { id: job.id, status: "PRINTED" };
           log(`Printed: ${job.title}`);
         } catch (err) {
           if (err.fatal) throw err;
           log(`FAILED: ${job.title}: ${err.message}`);
-          results.push({ id: job.id, status: "FAILED", error: String(err.message || err) });
+          outcome = { id: job.id, status: "FAILED", error: String(err.message || err) };
         }
-      }
-      if (results.length) {
-        const paused = await reportBatch(results).catch(() => false);
+        // Report after each job so heartbeat stays fresh, pause stops within 1 job,
+        // and large label waves never risk stale-claim timeouts.
+        const paused = await reportBatch([outcome]).catch(() => false);
         if (paused) {
+          pausedMidChunk = true;
           await api("/api/agent/release", { method: "POST" }).catch(() => {});
           log("Paused from the phone.");
+          break;
         }
       }
-      if (!jobs.length) await sleep(typeof data?.nextPollMs === "number" ? data.nextPollMs : DEFAULT_POLL_MS);
+      if (!jobs.length || pausedMidChunk) {
+        await sleep(typeof data?.nextPollMs === "number" ? data.nextPollMs : DEFAULT_POLL_MS);
+      }
     } catch (err) {
       if (err.fatal) {
         log(err.message);
@@ -167,6 +257,38 @@ const BACKUP_URL = (process.env.BACKUP_DATABASE_URL || "").trim();
 const BACKUP_DIR = process.env.BACKUP_DIR || "C:\\KynaBackups";
 const BACKUP_HOUR = Number(process.env.BACKUP_HOUR ?? 18);
 const BACKUP_KEEP = Number(process.env.BACKUP_KEEP ?? 7);
+/** Reported to the app on every poll, so the owner sees a failed backup on the phone. */
+const backupState = { enabled: Boolean(BACKUP_URL), lastBackupAt: null, lastBackupError: null, lastBackupBytes: null };
+/** A real custom-format dump starts with "PGDMP" and is never tiny. */
+const MIN_DUMP_BYTES = 10 * 1024;
+
+async function verifyDump(file) {
+  const info = await stat(file);
+  if (info.size < MIN_DUMP_BYTES) throw new Error(`Backup file is only ${info.size} bytes`);
+  const fh = await open(file, "r");
+  try {
+    const head = Buffer.alloc(5);
+    await fh.read(head, 0, 5, 0);
+    if (head.toString("latin1") !== "PGDMP") throw new Error("Backup file is not a pg_dump archive");
+  } finally {
+    await fh.close();
+  }
+  return info;
+}
+
+/** On start, report the newest existing backup so a restart doesn't look like "never backed up". */
+async function loadLastBackup() {
+  const files = (await readdir(BACKUP_DIR).catch(() => [])).filter((f) => /^kyna-\d{4}-\d{2}-\d{2}\.dump$/.test(f)).sort();
+  const newest = files[files.length - 1];
+  if (!newest) return;
+  try {
+    const info = await verifyDump(path.join(BACKUP_DIR, newest));
+    backupState.lastBackupAt = info.mtime.toISOString();
+    backupState.lastBackupBytes = info.size;
+  } catch (err) {
+    backupState.lastBackupError = `${newest}: ${err.message}`;
+  }
+}
 
 function runPgDump(file) {
   return new Promise((resolve, reject) => {
@@ -180,6 +302,7 @@ function runPgDump(file) {
 async function backupLoop() {
   if (!BACKUP_URL) return;
   await mkdir(BACKUP_DIR, { recursive: true });
+  await loadLastBackup();
   for (;;) {
     const now = new Date();
     const day = now.toISOString().slice(0, 10);
@@ -188,11 +311,17 @@ async function backupLoop() {
     if (now.getHours() >= BACKUP_HOUR && !files.includes(path.basename(file))) {
       try {
         await runPgDump(file);
-        log(`Backup saved: ${file}`);
+        const info = await verifyDump(file);
+        backupState.lastBackupAt = new Date().toISOString();
+        backupState.lastBackupBytes = info.size;
+        backupState.lastBackupError = null;
+        log(`Backup saved: ${file} (${(info.size / 1_048_576).toFixed(1)} MB)`);
+        // Only rotate old backups once today's is known good.
         for (const old of [...files, path.basename(file)].sort().slice(0, -BACKUP_KEEP)) {
           await rm(path.join(BACKUP_DIR, old)).catch(() => {});
         }
       } catch (err) {
+        backupState.lastBackupError = String(err.message || err).slice(0, 300);
         log(`Backup failed: ${err.message}`);
         await rm(file).catch(() => {});
       }

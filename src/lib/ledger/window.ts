@@ -29,3 +29,23 @@ export function nextSyncWindow(
   const end = Math.min(start.getTime() + maxWindowMs, now.getTime());
   return { from: start, to: new Date(end), last: end >= now.getTime() };
 }
+
+/** Smallest Shopee window when a flash sale floods one: 10 minutes. */
+export const MIN_WINDOW_MS = 10 * 60_000;
+
+/**
+ * Shopee lists can't resume mid-window, so a window too busy to finish in one
+ * tick would be redone forever. Halve it after a tick that finished no window;
+ * grow it back (doubling, up to the max) once windows finish again.
+ */
+export function adaptWindowMs(
+  current: number,
+  outcome: { windowsFinished: number; ranOutOfTime: boolean },
+  min: number = MIN_WINDOW_MS,
+  max: number = MAX_WINDOW_MS
+): number {
+  const cur = Math.min(max, Math.max(min, Math.round(current) || max));
+  if (outcome.ranOutOfTime && outcome.windowsFinished === 0) return Math.max(min, Math.floor(cur / 2));
+  if (!outcome.ranOutOfTime || outcome.windowsFinished >= 2) return Math.min(max, cur * 2);
+  return cur;
+}

@@ -36,7 +36,12 @@ export async function committedByVariant(): Promise<Map<string, number>> {
  * The owner sets how many pieces are on the shelf. The first time it's the
  * starting count; after that it's a recount, recorded as the difference.
  */
-export async function setShelfCount(variantId: string, count: number, now: Date = new Date()) {
+export async function setShelfCount(
+  variantId: string,
+  count: number,
+  now: Date = new Date(),
+  opts: { note?: string; staffMemberId?: string | null } = {}
+) {
   const n = Math.max(0, Math.floor(count));
   const variant = await prisma.garmentVariant.findUniqueOrThrow({ where: { id: variantId } });
   if (!variant.startingStockSetAt) {
@@ -57,7 +62,8 @@ export async function setShelfCount(variantId: string, count: number, now: Date 
       delta: n - current,
       reason: StockReason.ADJUSTMENT,
       sourceKey: `adjust:${variantId}:${crypto.randomUUID()}`,
-      note: `Recount: ${current} → ${n}`,
+      note: opts.note ? `${opts.note}: ${current} → ${n}` : `Recount: ${current} → ${n}`,
+      staffMemberId: opts.staffMemberId ?? null,
     },
   });
 }
@@ -127,6 +133,8 @@ export async function recordSupplierDelivery(opts: {
   quantity: number;
   staffMemberId: string;
   clientKey: string;
+  /** Supplier name / receipt number, optional. */
+  note?: string | null;
 }) {
   const variant = await prisma.garmentVariant.findUniqueOrThrow({
     where: { id: opts.variantId },
@@ -141,6 +149,7 @@ export async function recordSupplierDelivery(opts: {
         reason: StockReason.SUPPLIER_IN,
         sourceKey: `in:${opts.clientKey}`,
         staffMemberId: opts.staffMemberId,
+        note: opts.note?.trim().slice(0, 200) || null,
       },
     });
     return { duplicate: false };
@@ -258,9 +267,16 @@ export async function recordGoodReturn(parcelId: string) {
           variationId: item.variationId,
         },
       },
-      include: { garmentVariant: true },
+      include: {
+        garmentVariant: {
+          include: {
+            listings: { select: { platform: true, listingId: true, variationId: true, availableStock: true } },
+          },
+        },
+      },
     });
-    if (!lv?.garmentVariant?.startingStockSetAt) continue;
+    if (!lv?.garmentVariant) continue;
+    await ensureVariantStartingStock(lv.garmentVariant);
     const res = await prisma.stockMovement.createMany({
       data: [
         {
@@ -278,6 +294,88 @@ export async function recordGoodReturn(parcelId: string) {
 }
 
 /**
+ * Pieces a return should have put back per variant: its items when the
+ * condition is restockable, otherwise nothing.
+ */
+export function desiredReturnRestock(
+  condition: string | null,
+  items: Array<{ variantId: string; quantity: number }>
+): Map<string, number> {
+  const out = new Map<string, number>();
+  if (!condition || !RESTOCK_CONDITIONS.has(condition)) return out;
+  for (const it of items) out.set(it.variantId, (out.get(it.variantId) ?? 0) + Math.max(1, it.quantity));
+  return out;
+}
+
+/**
+ * After the owner corrects a scanned return's condition, make the shelf match:
+ * good → damaged takes the pieces back off, damaged → good puts them on.
+ * Earlier movements are kept; one balancing movement is added per variant.
+ * Returns the net pieces changed.
+ */
+export async function syncReturnRestock(parcelId: string, staffMemberId?: string | null): Promise<number> {
+  const parcel = await prisma.returnParcel.findUnique({ where: { id: parcelId } });
+  if (!parcel) return 0;
+  const rawItems = Array.isArray(parcel.itemsJson)
+    ? (parcel.itemsJson as Array<{ listingId?: string | null; variationId?: string | null; quantity?: number }>)
+    : [];
+  const items: Array<{ variantId: string; quantity: number }> = [];
+  for (const item of rawItems) {
+    if (!item.listingId || !item.variationId) continue;
+    const lv = await prisma.listingVariant.findUnique({
+      where: {
+        shopConnectionId_listingId_variationId: {
+          shopConnectionId: parcel.shopConnectionId,
+          listingId: item.listingId,
+          variationId: item.variationId,
+        },
+      },
+      select: { garmentVariantId: true },
+    });
+    if (lv?.garmentVariantId) items.push({ variantId: lv.garmentVariantId, quantity: item.quantity ?? 1 });
+  }
+  if (!items.length) return 0;
+
+  const desired = desiredReturnRestock(parcel.physicalCondition, items);
+  const existing = await prisma.stockMovement.findMany({
+    where: {
+      OR: [{ sourceKey: { startsWith: `return:${parcel.id}:` } }, { sourceKey: { startsWith: `returnfix:${parcel.id}:` } }],
+    },
+    select: { garmentVariantId: true, delta: true },
+  });
+  const current = new Map<string, number>();
+  for (const m of existing) current.set(m.garmentVariantId, (current.get(m.garmentVariantId) ?? 0) + m.delta);
+
+  const variantIds = new Set([...items.map((i) => i.variantId), ...current.keys()]);
+  let net = 0;
+  for (const variantId of variantIds) {
+    const want = desired.get(variantId) ?? 0;
+    const have = current.get(variantId) ?? 0;
+    const delta = want - have;
+    if (!delta) continue;
+    if (delta > 0) {
+      const v = await prisma.garmentVariant.findUnique({
+        where: { id: variantId },
+        include: { listings: { select: { platform: true, listingId: true, variationId: true, availableStock: true } } },
+      });
+      if (v) await ensureVariantStartingStock(v);
+    }
+    await prisma.stockMovement.create({
+      data: {
+        garmentVariantId: variantId,
+        delta,
+        reason: StockReason.ADJUSTMENT,
+        sourceKey: `returnfix:${parcel.id}:${variantId}:${crypto.randomUUID()}`,
+        note: `Return ${parcel.orderSn} condition corrected to ${parcel.physicalCondition ?? "none"}`,
+        staffMemberId: staffMemberId ?? null,
+      },
+    });
+    net += delta;
+  }
+  return net;
+}
+
+/**
  * Subtracts stock for orders that left the warehouse since the last tick.
  * Each order is processed once; cancellations before pickup only clear it.
  */
@@ -285,13 +383,13 @@ export async function recordShipments(deadline: number, batch = 200) {
   const COMMITTED = [...new Set(Object.values(COMMITTED_ORDER_STATUSES).flat())];
   const orders = await prisma.order.findMany({
     where: { stockRecordedAt: null, status: { notIn: COMMITTED } },
-    include: { lines: true },
+    include: { lines: true, packages: { select: { status: true } } },
     orderBy: { platformUpdatedAt: "asc" },
     take: batch,
   });
   if (!orders.length) return { orders: 0, movements: 0 };
 
-  const shippedOrders = orders.filter((o) => hasLeftWarehouse(o.platform, o.status, o.shippedAt));
+  const shippedOrders = orders.filter((o) => hasLeftWarehouse(o.platform, o.status, o.shippedAt, o.packages));
   const byKey = new Map<string, { id: string; startingStockSetAt: Date | null } | null>();
   if (shippedOrders.length > 0) {
     const shopIds = [...new Set(shippedOrders.map((o) => o.shopConnectionId))];
@@ -326,7 +424,7 @@ export async function recordShipments(deadline: number, batch = 200) {
 
   for (const order of orders) {
     if (Date.now() >= deadline) break;
-    if (hasLeftWarehouse(order.platform, order.status, order.shippedAt)) {
+    if (hasLeftWarehouse(order.platform, order.status, order.shippedAt, order.packages)) {
       const data = shipMovements(
         order,
         order.lines.map((l) => ({

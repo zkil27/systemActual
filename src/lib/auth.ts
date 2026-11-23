@@ -1,6 +1,7 @@
 import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
+import { prisma } from "@/lib/prisma";
 import { getAuthSecretKey as getSecretKey } from "./auth-secret";
 import { normalizeCourierName } from "@/lib/connectors/normalizer";
 import { isOrderCancelledForPacking } from "@/lib/shipping/outbound";
@@ -20,6 +21,7 @@ export interface StaffSessionPayload {
   role: "staff";
   staffId: string;
   name: string;
+  tv?: number;
 }
 
 export async function hashSecret(plain: string): Promise<string> {
@@ -71,10 +73,12 @@ export async function verifyStaffToken(
   try {
     const { payload } = await jwtVerify(token, getSecretKey());
     if (payload.role !== "staff" || typeof payload.staffId !== "string") return null;
+    const tv = typeof payload.tv === "number" ? payload.tv : undefined;
     return {
       role: "staff",
       staffId: payload.staffId,
       name: String(payload.name ?? ""),
+      ...(tv !== undefined ? { tv } : {}),
     };
   } catch {
     return null;
@@ -88,7 +92,15 @@ export async function getOwnerSession(): Promise<OwnerSessionPayload | null> {
 
 export async function getStaffSession(): Promise<StaffSessionPayload | null> {
   const store = await cookies();
-  return verifyStaffToken(store.get(STAFF_COOKIE)?.value);
+  const payload = await verifyStaffToken(store.get(STAFF_COOKIE)?.value);
+  if (!payload) return null;
+  const member = await prisma.staffMember.findUnique({
+    where: { id: payload.staffId },
+    select: { active: true, tokenVersion: true, name: true },
+  });
+  if (!member || !member.active) return null;
+  if ((payload.tv ?? 1) !== member.tokenVersion) return null;
+  return { ...payload, name: member.name };
 }
 
 export async function getScannerSession(): Promise<

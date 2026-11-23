@@ -1,0 +1,8 @@
+-- AlterTable
+ALTER TABLE "OwnerUser"
+  ADD COLUMN IF NOT EXISTS "failedLoginAttempts" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS "loginLockedUntil" TIMESTAMP(3);
+
+-- AlterTable
+ALTER TABLE "StaffMember"
+  ADD COLUMN IF NOT EXISTS "tokenVersion" INTEGER NOT NULL DEFAULT 1;

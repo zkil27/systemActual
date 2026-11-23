@@ -89,8 +89,13 @@ async function tiktokPage(conn: ShopConnection, token: string, pageToken: string
         })
       )
     );
+    const known = await prisma.listingVariant.findMany({
+      where: { shopConnectionId: conn.id, listingId: { in: chunk.map((p) => String(p.id)) }, warehouseId: { not: null } },
+      select: { variationId: true, warehouseId: true },
+    });
+    const warehouses = new Map(known.map((k) => [k.variationId, k.warehouseId!]));
     for (const product of details) {
-      await saveImported(conn, mapTikTokProduct(product));
+      await saveImported(conn, mapTikTokProduct(product, warehouses));
     }
   }
   const next = data?.next_page_token ? String(data.next_page_token) : null;
@@ -98,9 +103,11 @@ async function tiktokPage(conn: ShopConnection, token: string, pageToken: string
 }
 
 /**
- * Automatically schedules a catalog/stock discovery import when a shop has
- * never been imported or has new listings discovered from orders without shop
- * stock or TikTok warehouse IDs.
+ * Schedules a read-only catalog/stock discovery import when a shop has never
+ * been imported, and again every CATALOG_REFRESH_MS. It runs even when every
+ * known listing has stock data, so a brand-new listing is found before its
+ * first order. Listings seen on orders but missing stock or a TikTok
+ * warehouse are picked up by the same pass.
  */
 export async function maybeQueueCatalogDiscovery(conn: ShopConnection, now: Date = new Date()): Promise<boolean> {
   if (conn.isDemo || !conn.accessToken || conn.stockImportStatus === IMPORT_RUNNING) return false;
@@ -109,19 +116,6 @@ export async function maybeQueueCatalogDiscovery(conn: ShopConnection, now: Date
   const stale = !conn.stockImportedAt || now.getTime() - conn.stockImportedAt.getTime() >= CATALOG_REFRESH_MS;
   if (!stale) return false;
 
-  const needsDiscovery =
-    !conn.stockImportedAt ||
-    (await prisma.listingVariant.count({
-      where: {
-        shopConnectionId: conn.id,
-        OR: [
-          { availableStock: null },
-          ...(conn.platform === Platform.TIKTOK ? [{ warehouseId: null }] : []),
-        ],
-      },
-    })) > 0;
-
-  if (!needsDiscovery) return false;
   await prisma.shopConnection.update({
     where: { id: conn.id },
     data: { stockImportStatus: IMPORT_RUNNING, stockImportCursor: null },

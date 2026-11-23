@@ -1,15 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Check, Copy, X } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { AlarmClock, Check, Copy, RotateCcw, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Disclosure } from "@/components/ui/Disclosure";
 import { ItemThumb } from "@/components/ui/ItemThumb";
+import { PhotoLightbox } from "@/components/ui/PhotoLightbox";
 import { Sheet } from "@/components/ui/Sheet";
 import { StatusPill } from "@/components/ui/StatusPill";
+import { toast } from "@/components/ui/Toast";
 import { formatPeso, manilaDateTime } from "@/lib/ui/format";
 import { categoryLabel, getParcelStatus } from "@/lib/ui/parcel-status";
-import { conditionLabel } from "@/lib/ui/conditions";
+import { CONDITIONS, conditionLabel } from "@/lib/ui/conditions";
+import { deadlineCountdown, DISPUTE_STATUSES, eventSourceLabel, humanizeStatus, type DisputeStatusId } from "@/lib/ui/dispute";
 
 interface ParcelScan {
   id: string;
@@ -20,14 +23,25 @@ interface ParcelScan {
   staffMember: { name: string };
 }
 
+interface ParcelEvent {
+  id: string;
+  source: string;
+  rawStatus: string;
+  description: string | null;
+  eventTimestamp: string;
+}
+
 interface ParcelDetailData {
   id: string;
   platform: "SHOPEE" | "TIKTOK";
   orderSn: string;
+  returnSn: string | null;
   forwardTrackingNumber: string | null;
   rtsTrackingNumber: string | null;
   courier: string;
   category: "FAILED_DELIVERY" | "RETURN_REFUND";
+  digitalStatus: string;
+  expectsPhysicalReturn: boolean;
   returnReason: string | null;
   itemSummary: string;
   variationName: string | null;
@@ -40,9 +54,25 @@ interface ParcelDetailData {
   physicallyReceivedAt: string | null;
   physicalCondition: string | null;
   disputeDraft: string | null;
+  disputeDeadlineAt: string | null;
+  disputeStatus: DisputeStatusId;
+  disputeFiledAt: string | null;
+  disputeRef: string | null;
+  reimbursedPhp: number | null;
+  resolvedAt: string | null;
+  resolvedNote: string | null;
   isMissingDiscrepancy: boolean;
+  isOverdueRts: boolean;
+  isUrgentDeadline: boolean;
+  events: ParcelEvent[];
   scans: ParcelScan[];
 }
+
+type ParcelPatch =
+  | { action: "set_dispute"; status: DisputeStatusId; ref?: string | null; reimbursedPhp?: number | null }
+  | { action: "resolve"; outcome: "FOUND" | "SETTLED"; note?: string | null }
+  | { action: "reopen" }
+  | { action: "correct_condition"; condition: string };
 
 function Stage({
   label,
@@ -95,6 +125,9 @@ function Stage({
 const summaryClass =
   "pressable h-12 rounded-[var(--radius-control)] text-[16px] font-semibold text-ink";
 
+const inputClass =
+  "h-12 w-full rounded-[var(--radius-control)] bg-surface-subtle px-3.5 text-[16px] text-ink ring-1 ring-hairline focus:outline-none focus:ring-2 focus:ring-brand";
+
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-4 py-3">
@@ -106,29 +139,54 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
   );
 }
 
-function ParcelDetailBody({ parcelId }: { parcelId: string | null }) {
+function ParcelDetailBody({
+  parcelId,
+  onChanged,
+}: {
+  parcelId: string | null;
+  onChanged?: () => void;
+}) {
   // Kept after close so the sheet still has content while it slides away.
   const [parcel, setParcel] = useState<ParcelDetailData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [draft, setDraft] = useState<string | null>(null);
   const [drafting, setDrafting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [photoIndex, setPhotoIndex] = useState<number | null>(null);
+  const [disputeRef, setDisputeRef] = useState("");
+  const [reimbursed, setReimbursed] = useState("");
+
+  // A different parcel starts clean; a reload after an action keeps the content on screen.
+  useEffect(() => {
+    setParcel(null);
+    setPhotoIndex(null);
+    setReloadKey(0);
+  }, [parcelId]);
 
   useEffect(() => {
     if (!parcelId) return;
     let active = true;
-    setLoading(true);
-    setParcel(null);
+    if (reloadKey === 0) setLoading(true);
+    setLoadError(false);
     setCopied(false);
-    fetch(`/api/returns/${parcelId}`)
-      .then((r) => r.json())
+    fetch(`/api/returns/${parcelId}`, { cache: "no-store" })
+      .then(async (r) => {
+        if (!r.ok) throw new Error(String(r.status));
+        return r.json();
+      })
       .then((d) => {
         if (!active) return;
-        setParcel(d.parcel ?? null);
-        setDraft(d.parcel?.disputeDraft ?? null);
+        const p: ParcelDetailData | null = d.parcel ?? null;
+        setParcel(p);
+        setDraft(p?.disputeDraft ?? null);
+        setDisputeRef(p?.disputeRef ?? "");
+        setReimbursed(p?.reimbursedPhp != null ? String(p.reimbursedPhp) : "");
       })
       .catch(() => {
-        if (active) setParcel(null);
+        if (active) setLoadError(true);
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -136,7 +194,41 @@ function ParcelDetailBody({ parcelId }: { parcelId: string | null }) {
     return () => {
       active = false;
     };
-  }, [parcelId]);
+  }, [parcelId, reloadKey]);
+
+  const patch = useCallback(
+    async (body: ParcelPatch, success: string) => {
+      if (!parcel) return;
+      setSaving(true);
+      try {
+        const res = await fetch(`/api/returns/${parcel.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast(data.error || "Couldn't save", "error");
+          return;
+        }
+        const delta = Number(data.restockDelta ?? 0);
+        toast(
+          delta > 0
+            ? `${success} · ${delta} back on shelf`
+            : delta < 0
+              ? `${success} · ${-delta} off shelf`
+              : success
+        );
+        setReloadKey((k) => k + 1);
+        onChanged?.();
+      } catch {
+        toast("No connection", "error");
+      } finally {
+        setSaving(false);
+      }
+    },
+    [parcel, onChanged]
+  );
 
   async function handleGenerateDraft() {
     if (!parcel) return;
@@ -145,6 +237,8 @@ function ParcelDetailBody({ parcelId }: { parcelId: string | null }) {
       const res = await fetch(`/api/returns/${parcel.id}`, { method: "POST" });
       const data = await res.json();
       if (data.draft) setDraft(data.draft);
+    } catch {
+      toast("No connection", "error");
     } finally {
       setDrafting(false);
     }
@@ -157,12 +251,16 @@ function ParcelDetailBody({ parcelId }: { parcelId: string | null }) {
     setTimeout(() => setCopied(false), 1800);
   }
 
-  const status = parcel ? getParcelStatus(parcel) : null;
-  const scan = parcel?.scans[0];
-  const photos = parcel?.scans.flatMap((s) => s.photoUrls) ?? [];
-  const store = parcel?.platform === "SHOPEE" ? "Shopee" : "TikTok Shop";
-  // Missing or problem parcels are the ones worth disputing; lead with the action there.
-  const needsDispute = status?.tone === "missing" || status?.tone === "issue";
+  if (loadError && !parcel) {
+    return (
+      <div className="space-y-4 pt-4 text-center">
+        <p className="text-[16px] text-ink-2">Couldn&apos;t load this parcel.</p>
+        <Button variant="secondary" onClick={() => setReloadKey((k) => k + 1)}>
+          Try again
+        </Button>
+      </div>
+    );
+  }
 
   if (loading || !parcel) {
     return (
@@ -178,6 +276,26 @@ function ParcelDetailBody({ parcelId }: { parcelId: string | null }) {
       </div>
     );
   }
+
+  const status = getParcelStatus(parcel);
+  const scan = parcel.scans[0];
+  const photos = parcel.scans.flatMap((s) => s.photoUrls);
+  const store = parcel.platform === "SHOPEE" ? "Shopee" : "TikTok Shop";
+  // Missing or problem parcels are the ones worth disputing; lead with the action there.
+  const needsDispute = status.tone === "missing" || status.tone === "issue";
+  const deadline =
+    !parcel.resolvedAt && parcel.disputeStatus === "NONE" ? deadlineCountdown(parcel.disputeDeadlineAt) : null;
+  const showDispute =
+    needsDispute ||
+    parcel.isOverdueRts ||
+    Boolean(parcel.disputeDeadlineAt) ||
+    parcel.disputeStatus !== "NONE" ||
+    Boolean(parcel.resolvedAt);
+  const reimbursedSaved = parcel.reimbursedPhp != null ? String(parcel.reimbursedPhp) : "";
+  const disputeDirty =
+    disputeRef.trim() !== (parcel.disputeRef ?? "") ||
+    (parcel.disputeStatus === "WON" && reimbursed !== reimbursedSaved);
+  const reimbursedNumber = reimbursed && Number.isFinite(Number(reimbursed)) ? Number(reimbursed) : null;
 
   return (
     <div key={parcel.id} className="anim-fade-in space-y-7 pt-2">
@@ -200,16 +318,14 @@ function ParcelDetailBody({ parcelId }: { parcelId: string | null }) {
         </div>
       </div>
 
-      {status && (
-        <div className="flex items-center justify-between gap-3">
-          <StatusPill label={status.label} tone={status.tone} />
-          {scan && (
-            <span className="text-[15px] text-ink-2">
-              {conditionLabel(scan.condition)} · {scan.staffMember.name}
-            </span>
-          )}
-        </div>
-      )}
+      <div className="flex items-center justify-between gap-3">
+        <StatusPill label={status.label} tone={status.tone} />
+        {scan && (
+          <span className="text-[15px] text-ink-2">
+            {conditionLabel(scan.condition)} · {scan.staffMember.name}
+          </span>
+        )}
+      </div>
 
       <ol aria-label="Parcel timeline">
         <Stage
@@ -217,31 +333,85 @@ function ParcelDetailBody({ parcelId }: { parcelId: string | null }) {
           at={parcel.digitalReturnTaggedAt}
         />
         <Stage label="Returned to seller" at={parcel.courierReturnedToSellerAt} />
-        <Stage
-          label="Arrived"
-          at={parcel.physicallyReceivedAt}
-          last
-          alert={parcel.isMissingDiscrepancy}
-        />
+        <Stage label="Arrived" at={parcel.physicallyReceivedAt} last alert={parcel.isMissingDiscrepancy} />
       </ol>
 
       {scan?.notes && <p className="text-[15px] text-ink-2">“{scan.notes}”</p>}
 
       {photos.length > 0 && (
         <div className="grid grid-cols-3 gap-2">
-          {photos.map((url) => (
-            <a
+          {photos.map((url, i) => (
+            <button
               key={url}
-              href={url}
-              target="_blank"
-              rel="noreferrer"
+              type="button"
+              onClick={() => setPhotoIndex(i)}
+              aria-label={`Open proof photo ${i + 1}`}
               className="pressable block overflow-hidden rounded-[var(--radius-control)]"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={url} alt="Proof photo from the warehouse" className="aspect-square w-full object-cover" />
-            </a>
+            </button>
           ))}
         </div>
+      )}
+      <PhotoLightbox
+        photos={photos}
+        index={photoIndex}
+        onIndexChange={setPhotoIndex}
+        onClose={() => setPhotoIndex(null)}
+        fileBaseName={`proof-${parcel.orderSn}`}
+      />
+
+      {deadline && (
+        <div
+          className={`flex items-center gap-2.5 rounded-[var(--radius-control)] px-4 py-3 text-[15px] font-semibold ${
+            deadline.tone === "urgent"
+              ? "bg-missing-soft text-missing-ink"
+              : deadline.tone === "past"
+                ? "bg-surface-muted text-ink-2"
+                : "bg-failed-soft text-failed-ink"
+          }`}
+        >
+          <AlarmClock className="h-5 w-5 shrink-0" />
+          <span className="tabular-nums">
+            {deadline.label} · {manilaDateTime(parcel.disputeDeadlineAt)}
+          </span>
+        </div>
+      )}
+
+      {parcel.resolvedAt ? (
+        <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] bg-arrived-soft px-4 py-2">
+          <span className="min-w-0 text-[15px] font-semibold text-arrived">
+            {parcel.resolvedNote || "Settled"} · {manilaDateTime(parcel.resolvedAt)}
+          </span>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => patch({ action: "reopen" }, "Reopened")}
+            className="pressable inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full px-3 text-[15px] font-semibold text-brand hover:bg-brand/10"
+          >
+            <RotateCcw className="h-4 w-4" /> Reopen
+          </button>
+        </div>
+      ) : (
+        (parcel.isMissingDiscrepancy || parcel.isOverdueRts) && (
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="secondary"
+              disabled={saving}
+              onClick={() => patch({ action: "resolve", outcome: "FOUND" }, "Marked found")}
+            >
+              Found it
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={saving}
+              onClick={() => patch({ action: "resolve", outcome: "SETTLED" }, "Marked settled")}
+            >
+              Settled
+            </Button>
+          </div>
+        )
       )}
 
       {/* Dispute message: one tap to copy; the text itself stays folded. */}
@@ -269,7 +439,7 @@ function ParcelDetailBody({ parcelId }: { parcelId: string | null }) {
                 rows={8}
                 value={draft}
                 aria-label="Dispute message"
-                className="w-full rounded-[var(--radius-control)] bg-surface-subtle p-3.5 text-[14px] leading-relaxed text-ink ring-1 ring-hairline focus:outline-none"
+                className="w-full rounded-[var(--radius-control)] bg-surface-subtle p-3.5 text-[16px] leading-relaxed text-ink ring-1 ring-hairline focus:outline-none"
               />
               <Button variant="plain" onClick={handleGenerateDraft} disabled={drafting} full>
                 {drafting ? "Writing…" : "Write again"}
@@ -288,9 +458,97 @@ function ParcelDetailBody({ parcelId }: { parcelId: string | null }) {
         </Button>
       )}
 
+      {showDispute && (
+        <section aria-label="Dispute status" className="space-y-3">
+          <div className="flex items-baseline justify-between gap-3">
+            <h3 className="text-[17px] font-bold text-ink">Dispute</h3>
+            {parcel.disputeFiledAt && (
+              <span className="text-[14px] text-ink-3">Filed {manilaDateTime(parcel.disputeFiledAt)}</span>
+            )}
+          </div>
+          <div role="radiogroup" aria-label="Dispute status" className="grid grid-cols-4 gap-1.5">
+            {DISPUTE_STATUSES.map((d) => {
+              const active = parcel.disputeStatus === d.id;
+              return (
+                <button
+                  key={d.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  disabled={saving}
+                  onClick={() => {
+                    if (active) return;
+                    patch(
+                      {
+                        action: "set_dispute",
+                        status: d.id,
+                        ref: disputeRef.trim() || null,
+                        reimbursedPhp: d.id === "WON" ? reimbursedNumber : null,
+                      },
+                      d.toast
+                    );
+                  }}
+                  className={`pressable min-h-11 rounded-[var(--radius-control)] px-1 text-[14px] font-bold ${
+                    active ? d.activeClass : "bg-surface-muted text-ink-2 hover:bg-surface-track"
+                  }`}
+                >
+                  {d.label}
+                </button>
+              );
+            })}
+          </div>
+          {parcel.disputeStatus !== "NONE" && (
+            <div className="space-y-2.5">
+              <label className="block">
+                <span className="mb-1 block text-[14px] font-semibold text-ink-3">Case / ticket number</span>
+                <input
+                  value={disputeRef}
+                  onChange={(e) => setDisputeRef(e.target.value)}
+                  maxLength={120}
+                  placeholder="From Seller Center"
+                  className={inputClass}
+                />
+              </label>
+              {parcel.disputeStatus === "WON" && (
+                <label className="block">
+                  <span className="mb-1 block text-[14px] font-semibold text-ink-3">Money back (₱)</span>
+                  <input
+                    value={reimbursed}
+                    onChange={(e) => setReimbursed(e.target.value.replace(/[^0-9.]/g, ""))}
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    className={`tabular-nums ${inputClass}`}
+                  />
+                </label>
+              )}
+              {disputeDirty && (
+                <Button
+                  full
+                  disabled={saving}
+                  onClick={() =>
+                    patch(
+                      {
+                        action: "set_dispute",
+                        status: parcel.disputeStatus,
+                        ref: disputeRef.trim() || null,
+                        reimbursedPhp: parcel.disputeStatus === "WON" ? reimbursedNumber : null,
+                      },
+                      "Saved"
+                    )
+                  }
+                >
+                  {saving ? "Saving…" : "Save"}
+                </Button>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
       <Disclosure label="Order details" summaryClassName={summaryClass} className="-mt-4">
         <dl className="divide-y divide-hairline border-t border-hairline">
           <DetailRow label="Order" value={parcel.orderSn} />
+          {parcel.returnSn && <DetailRow label="Return" value={parcel.returnSn} />}
           <DetailRow
             label="Tracking"
             value={parcel.rtsTrackingNumber || parcel.forwardTrackingNumber || "None"}
@@ -303,6 +561,55 @@ function ParcelDetailBody({ parcelId }: { parcelId: string | null }) {
           <DetailRow label="Reason" value={parcel.returnReason || "None given"} />
         </dl>
       </Disclosure>
+
+      {parcel.events.length > 0 && (
+        <Disclosure label={`History (${parcel.events.length})`} summaryClassName={summaryClass} className="-mt-4">
+          <ol className="divide-y divide-hairline border-t border-hairline">
+            {parcel.events.map((e) => (
+              <li key={e.id} className="flex items-start justify-between gap-4 py-3">
+                <span className="min-w-0">
+                  <span className="block text-[15px] font-semibold text-ink">
+                    {e.description || humanizeStatus(e.rawStatus)}
+                  </span>
+                  <span className="block text-[13px] text-ink-3">{eventSourceLabel(e.source)}</span>
+                </span>
+                <span className="tabular-nums shrink-0 text-[14px] text-ink-2">
+                  {manilaDateTime(e.eventTimestamp)}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </Disclosure>
+      )}
+
+      {parcel.physicallyReceivedAt && (
+        <Disclosure label="Fix scanned condition" summaryClassName={summaryClass} className="-mt-4">
+          <div className="space-y-1.5 pb-2">
+            <p className="pb-1 text-[14px] text-ink-3">
+              Staff picked the wrong one? Changing it also fixes the shelf count.
+            </p>
+            {CONDITIONS.map((c) => {
+              const active = parcel.physicalCondition === c.id;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  disabled={saving || active}
+                  onClick={() => patch({ action: "correct_condition", condition: c.id }, `Changed to “${c.label}”`)}
+                  className={`pressable flex min-h-12 w-full items-center justify-between rounded-[var(--radius-control)] px-4 text-left text-[16px] ${
+                    active
+                      ? "bg-brand-soft font-bold text-brand"
+                      : "bg-surface-subtle font-semibold text-ink hover:bg-surface-muted"
+                  }`}
+                >
+                  {c.label}
+                  {active && <Check className="h-5 w-5" strokeWidth={2.6} />}
+                </button>
+              );
+            })}
+          </div>
+        </Disclosure>
+      )}
     </div>
   );
 }
@@ -310,13 +617,16 @@ function ParcelDetailBody({ parcelId }: { parcelId: string | null }) {
 export function ParcelDetailSheet({
   parcelId,
   onClose,
+  onChanged,
 }: {
   parcelId: string | null;
   onClose: () => void;
+  /** Called after an owner action so the list behind can refresh. */
+  onChanged?: () => void;
 }) {
   return (
     <Sheet open={parcelId !== null} onClose={onClose} title="Parcel">
-      <ParcelDetailBody parcelId={parcelId} />
+      <ParcelDetailBody parcelId={parcelId} onChanged={onChanged} />
     </Sheet>
   );
 }
@@ -324,9 +634,11 @@ export function ParcelDetailSheet({
 export function ParcelDetailPanel({
   parcelId,
   onClose,
+  onChanged,
 }: {
   parcelId: string;
   onClose: () => void;
+  onChanged?: () => void;
 }) {
   return (
     <div>
@@ -344,7 +656,7 @@ export function ParcelDetailPanel({
         </button>
       </div>
       <div className="px-5 pb-6">
-        <ParcelDetailBody parcelId={parcelId} />
+        <ParcelDetailBody parcelId={parcelId} onChanged={onChanged} />
       </div>
     </div>
   );

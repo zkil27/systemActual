@@ -11,7 +11,10 @@ import { MAX_ATTEMPTS } from "./shopee-rules";
  *    shop clearly did NOT ship.
  *  - anything that may have shipped keeps its lock forever.
  */
-export const itemInclude = { package: { include: { order: true } } } satisfies Prisma.WaveItemInclude;
+export const itemInclude = {
+  package: { include: { order: true } },
+  wave: { select: { summaryJson: true } },
+} satisfies Prisma.WaveItemInclude;
 export type Item = Prisma.WaveItemGetPayload<{ include: typeof itemInclude }>;
 
 export const BATCH = 50;

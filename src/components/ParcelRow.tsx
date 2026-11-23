@@ -3,6 +3,7 @@ import { ItemThumb } from "@/components/ui/ItemThumb";
 import { StatusText } from "@/components/ui/StatusPill";
 import { manilaDateTime } from "@/lib/ui/format";
 import { categoryLabel, getParcelStatus } from "@/lib/ui/parcel-status";
+import { deadlineCountdown, disputeLabel } from "@/lib/ui/dispute";
 
 export interface ParcelRowData {
   id: string;
@@ -18,6 +19,10 @@ export interface ParcelRowData {
   isOverdueRts?: boolean;
   expectsPhysicalReturn?: boolean;
   digitalStatus?: string;
+  disputeStatus?: string;
+  disputeDeadlineAt?: string | null;
+  isUrgentDeadline?: boolean;
+  resolvedAt?: string | null;
 }
 
 /**
@@ -36,7 +41,10 @@ export function ParcelRow({
   onOpen: (id: string) => void;
 }) {
   const status = getParcelStatus(parcel);
+  const dispute = disputeLabel(parcel.disputeStatus);
+  const due = parcel.isUrgentDeadline ? deadlineCountdown(parcel.disputeDeadlineAt)?.label : null;
   const meta = [
+    dispute ? `Dispute ${dispute.toLowerCase()}` : due,
     categoryLabel(parcel.category),
     parcel.variationName,
     parcel.courierReturnedToSellerAt ? `Returned ${manilaDateTime(parcel.courierReturnedToSellerAt)}` : null,

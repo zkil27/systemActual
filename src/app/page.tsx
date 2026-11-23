@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { CalendarDays, Check, CheckCircle2, ChevronRight, RefreshCw, X } from "lucide-react";
+import { CalendarDays, Check, CheckCircle2, ChevronRight, RefreshCw, Search, X } from "lucide-react";
 import { AppShell, BarButton } from "@/components/AppShell";
 import { CATEGORY_META, CategorySheet, type CategoryKey } from "@/components/CategorySheet";
 import { ParcelDetailSheet } from "@/components/ParcelDetailSheet";
+import { MoneyBreakdownSheet } from "@/components/MoneyBreakdownSheet";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { Group, SectionHeader } from "@/components/ui/Button";
 import { ItemThumb } from "@/components/ui/ItemThumb";
@@ -83,21 +84,26 @@ function CategoryCard({
  * The owner's main number: money actually credited (Shopee wallet / TikTok
  * statement paid). Orders placed sit underneath, muted, because they aren't money yet.
  */
-function MoneyCard({ money }: { money: MoneySummary }) {
+function MoneyCard({ money, onOpen }: { money: MoneySummary; onOpen: () => void }) {
   const extras = [
     money.adsPhp ? `Ads ${formatSignedPeso(money.adsPhp)}` : null,
     money.adjustmentsPhp ? `Adjustments ${formatSignedPeso(money.adjustmentsPhp)}` : null,
   ].filter(Boolean);
   return (
-    <section
-      aria-label={`Money credited ${formatPeso(money.creditedPhp)}`}
-      className="rounded-[var(--radius-card)] bg-surface p-5 shadow-[var(--shadow-card)] lg:h-full"
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label={`Money credited ${formatPeso(money.creditedPhp)}. Show transactions`}
+      className="group pressable hover-lift block w-full rounded-[var(--radius-card)] bg-surface p-5 text-left shadow-[var(--shadow-card)] lg:h-full"
     >
       <span className="flex items-baseline justify-between gap-3">
         <span className="text-[17px] font-bold text-ink">Money credited</span>
-        {money.updatedAt && (
-          <span className="text-[13px] text-ink-3">as of {manilaTime(money.updatedAt)}</span>
-        )}
+        <span className="flex items-center gap-1">
+          {money.updatedAt && (
+            <span className="text-[13px] text-ink-3">as of {manilaTime(money.updatedAt)}</span>
+          )}
+          <ChevronRight className="chevron-nudge h-5 w-5 self-center text-ink-3" />
+        </span>
       </span>
       <AnimatedNumber
         value={Math.round(money.creditedPhp)}
@@ -113,7 +119,7 @@ function MoneyCard({ money }: { money: MoneySummary }) {
       <span className="mt-4 block border-t border-hairline pt-3 text-[14px] text-ink-3 tabular-nums">
         {money.ordersPlacedCount} orders placed · {formatPeso(money.ordersPlacedPhp)}, not money yet
       </span>
-    </section>
+    </button>
   );
 }
 
@@ -229,7 +235,7 @@ function MissingStatus({
           )}
           {urgentDeadlineCount > 0 && (
             <Link
-              href="/returns?filter=refund"
+              href="/returns?filter=urgent"
               className="group pressable inline-flex h-10 items-center gap-1.5 rounded-full bg-missing-soft px-3.5 text-[14px] font-bold text-missing-ink"
             >
               <span className="tabular-nums">{urgentDeadlineCount}</span> dispute
@@ -350,7 +356,13 @@ function TopItemRow({
   className?: string;
   style?: React.CSSProperties;
 }) {
-  const detail = [item.variationName, `${item.failedCount} failed · ${item.returnCount} returned`]
+  const detail = [
+    item.variationName,
+    `${item.failedCount} failed · ${item.returnCount} returned`,
+    item.returnRatePct !== null && item.returnRatePct !== undefined
+      ? `${item.returnRatePct}% of ${item.shipped30d} shipped (30d)`
+      : null,
+  ]
     .filter(Boolean)
     .join(" · ");
   return (
@@ -448,13 +460,14 @@ export default function DashboardPage() {
   const [customDate, setCustomDate] = useState("");
   const [report, setReport] = useState<DailyTruthReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [syncState, setSyncState] = useState<"idle" | "syncing" | "done">("idle");
   const [bgSyncHint, setBgSyncHint] = useState(false);
   const [selectedParcelId, setSelectedParcelId] = useState<string | null>(null);
   const [openCategory, setOpenCategory] = useState<CategoryKey | null>(null);
   const [topOpen, setTopOpen] = useState(false);
+  const [moneyOpen, setMoneyOpen] = useState(false);
   const cacheRef = useRef<Map<string, { report: DailyTruthReport; fetchedAt: number }>>(new Map());
-  const dateInputRef = useRef<HTMLInputElement>(null);
 
   const loadReport = useCallback(
     async (opts?: { force?: boolean; silent?: boolean }) => {
@@ -474,8 +487,12 @@ export default function DashboardPage() {
           cacheRef.current.set(cacheKey, { report: data, fetchedAt: Date.now() });
           setReport(data);
           setBgSyncHint(Boolean(data.syncing));
+          setLoadError(false);
+        } else {
+          setLoadError(true);
         }
       } catch {
+        setLoadError(true);
         if (!opts?.silent) toast("No connection", "error");
       } finally {
         setLoading(false);
@@ -517,7 +534,7 @@ export default function DashboardPage() {
       await loadReport({ force: true });
       haptic(8);
       setSyncState("done");
-      toast(data.totalSynced > 0 ? `${data.totalSynced} updates` : "Up to date");
+      if (data.totalSynced > 0) toast(`${data.totalSynced} updates`);
       setTimeout(() => setSyncState("idle"), 1400);
     } catch {
       setSyncState("idle");
@@ -566,21 +583,14 @@ export default function DashboardPage() {
       }
       headerRight={
         <>
-          <label
-            title="Pick a date"
-            className="pressable relative hidden h-11 w-11 lg:flex cursor-pointer items-center justify-center rounded-full text-brand hover:bg-ink/[0.05]"
+          <Link
+            href="/orders"
+            aria-label="Find an order"
+            title="Find an order"
+            className="pressable flex h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05]"
           >
-            <CalendarDays className="h-[22px] w-[22px]" />
-            <input
-              ref={dateInputRef}
-              type="date"
-              aria-label="Pick a date"
-              value={customDate}
-              onClick={(e) => triggerDateInput(e.currentTarget)}
-              onChange={(e) => setCustomDate(e.target.value)}
-              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-            />
-          </label>
+            <Search className="h-[22px] w-[22px]" />
+          </Link>
           <BarButton
             label={customDate ? `Sync ${manilaDayLabel(customDate)}` : "Sync stores"}
             onClick={handleSync}
@@ -646,12 +656,27 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {loading || !report ? (
+        {!report && loadError ? (
+          <div className="space-y-3 py-10 text-center">
+            <p className="text-[17px] font-semibold text-ink">Couldn&apos;t load today&apos;s numbers.</p>
+            <p className="text-[15px] text-ink-3">Check the connection, then try again.</p>
+            <button
+              type="button"
+              onClick={() => {
+                setLoading(true);
+                void loadReport({ force: true });
+              }}
+              className="pressable inline-flex h-12 items-center rounded-[var(--radius-control)] bg-surface-muted px-5 text-[16px] font-bold text-ink hover:bg-surface-track"
+            >
+              Try again
+            </button>
+          </div>
+        ) : loading || !report ? (
           <HomeSkeleton />
         ) : (
           <div className="anim-fade-in grid grid-cols-1 gap-8 lg:grid-cols-12 lg:gap-6">
             <div className="lg:col-span-5">
-              <MoneyCard money={report.money} />
+              <MoneyCard money={report.money} onOpen={() => setMoneyOpen(true)} />
             </div>
 
             <div className="lg:col-span-7">
@@ -760,6 +785,7 @@ export default function DashboardPage() {
               : null
         }
         dateFilter={customDate ? { date: customDate } : { range }}
+        courierRates={report?.courierRates ?? []}
         onClose={() => setOpenCategory(null)}
       />
 
@@ -772,6 +798,8 @@ export default function DashboardPage() {
       </Sheet>
 
       <ParcelDetailSheet parcelId={selectedParcelId} onClose={() => setSelectedParcelId(null)} />
+
+      <MoneyBreakdownSheet open={moneyOpen} onClose={() => setMoneyOpen(false)} initialRange={range} />
     </AppShell>
   );
 }

@@ -29,9 +29,10 @@ describe("shopeeShipDecision (always on a freshly re-checked order)", () => {
     expect(shopeeShipDecision(order("CANCELLED"), { status: null }, true, now).kind).toBe("cancelled");
   });
 
-  it("waits until the order is 1 hour old", () => {
+  it("waits until the order is 1 hour old unless includeNewOrders is enabled", () => {
     const fresh = order("READY_TO_SHIP", { platformCreatedAt: new Date(now.getTime() - 30 * 60_000) });
     expect(shopeeShipDecision(fresh, { status: null }, false, now).kind).toBe("wait");
+    expect(shopeeShipDecision(fresh, { status: null }, false, now, { includeNewOrders: true })).toEqual({ kind: "ship" });
   });
 
   describe("crash or lost reply after asking Shopee to ship (shipRequested = true)", () => {

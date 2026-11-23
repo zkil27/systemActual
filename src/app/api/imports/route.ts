@@ -8,6 +8,7 @@ import { autoLinkAndInitCatalog, ensureGarmentFor } from "@/lib/catalog/garments
 import { saveOrder } from "@/lib/ledger/store";
 
 export const maxDuration = 60;
+const MAX_IMPORT_BYTES = 10 * 1024 * 1024; // 10 MB
 
 export async function GET() {
   const jobs = await prisma.importJob.findMany({
@@ -29,6 +30,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "Please select a CSV or Excel (.xlsx) file to upload." },
         { status: 400 }
+      );
+    }
+    if (file.size > MAX_IMPORT_BYTES) {
+      return NextResponse.json(
+        { error: "File must be 10 MB or smaller." },
+        { status: 413 }
       );
     }
 

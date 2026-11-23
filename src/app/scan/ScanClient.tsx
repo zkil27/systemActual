@@ -9,13 +9,18 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  CloudOff,
   Copy,
   Delete,
+  Flashlight,
+  FlashlightOff,
   Lock,
   OctagonAlert,
   Printer,
+  Repeat,
   ScanBarcode,
   Search,
+  Undo2,
   X,
 } from "lucide-react";
 import { Button, Group } from "@/components/ui/Button";
@@ -27,12 +32,13 @@ import { Toaster, toast } from "@/components/ui/Toast";
 import type { StaffSafeOutboundPackage, StaffSafeParcel } from "@/lib/auth";
 import { CONDITIONS, DEFAULT_CONDITION, findCondition, type ConditionTone } from "@/lib/ui/conditions";
 import { compressImageFile } from "@/lib/ui/compress-image";
+import { decodeBarcodeFromFile } from "@/lib/ui/decode-barcode";
 import { shortCourier } from "@/lib/ui/format";
 import { haptic } from "@/lib/ui/motion";
 import { categoryLabel } from "@/lib/ui/parcel-status";
 import { PIN_LENGTH, applyPinKey, keyFromKeyboard } from "@/lib/ui/pin";
 import { usePullToRefresh } from "@/lib/ui/use-pull-to-refresh";
-import { PickListSection, type StaffWaveData } from "./PickListSection";
+import { PickListSection, type StaffRecentWave, type StaffWaveData } from "./PickListSection";
 
 export interface StaffOption {
   id: string;
@@ -140,6 +146,27 @@ function last6(trackingNumber: string | null, orderSn: string): string {
   return raw.length > 6 ? raw.slice(-6) : raw;
 }
 
+function newClientKey(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+/** A return scan that couldn't reach the server yet. Kept in memory and retried. */
+interface PendingScan {
+  clientKey: string;
+  parcelId: string;
+  scannedBarcode: string;
+  condition: string;
+  notes: string;
+  photos: File[];
+  text: string;
+  tries: number;
+}
+
+const UNDO_MS = 5 * 60_000;
+const AUTO_NEXT_KEY = "kyna_scan_autonext";
+
 function CheckDraw() {
   return (
     <svg viewBox="0 0 24 24" className="h-7 w-7 shrink-0" aria-hidden="true">
@@ -194,11 +221,36 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
   const [selectedCondition, setSelectedCondition] = useState<string>(DEFAULT_CONDITION);
   const [notes, setNotes] = useState("");
   const [photos, setPhotos] = useState<File[]>([]);
+  const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [savingScan, setSavingScan] = useState(false);
+  const scanKeyRef = useRef<string>(newClientKey());
+  const [pendingScans, setPendingScans] = useState<PendingScan[]>([]);
+  const pendingRef = useRef<PendingScan[]>([]);
+  pendingRef.current = pendingScans;
+  const flushingRef = useRef(false);
+  const [lastUndo, setLastUndo] = useState<{ scanId: string; text: string; until: number } | null>(null);
+  const [undoing, setUndoing] = useState(false);
+  const [autoNext, setAutoNext] = useState(false);
+  const [torchSupported, setTorchSupported] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
+  const [waitingOpen, setWaitingOpen] = useState(false);
+  const [waitingList, setWaitingList] = useState<StaffSafeParcel[] | null>(null);
+  const [waitingTotal, setWaitingTotal] = useState(0);
+  const [decodingPhoto, setDecodingPhoto] = useState(false);
+
+  useEffect(() => {
+    const urls = photos.map((f) => URL.createObjectURL(f));
+    setPhotoPreviews(urls);
+    return () => {
+      for (const u of urls) URL.revokeObjectURL(u);
+    };
+  }, [photos]);
   const [saved, setSaved] = useState<{ id: number; text: string; restocked: boolean } | null>(null);
 
   // Wave Pick list & zero-friction alert sheets
   const [waveData, setWaveData] = useState<StaffWaveData | null>(null);
+  const [recentWaves, setRecentWaves] = useState<StaffRecentWave[]>([]);
+  const [selectedWaveId, setSelectedWaveId] = useState<string | null>(null);
   const [cancelledToPull, setCancelledToPull] = useState<StaffSafeOutboundPackage[]>([]);
   const [unpickedParcels, setUnpickedParcels] = useState<StaffSafeOutboundPackage[]>([]);
   const [waveLoading, setWaveLoading] = useState(false);
@@ -207,6 +259,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
   const [pullSheetOpen, setPullSheetOpen] = useState(false);
   const [unpickedSheetOpen, setUnpickedSheetOpen] = useState(false);
   const [pullingId, setPullingId] = useState<string | null>(null);
+  const [packingId, setPackingId] = useState<string | null>(null);
   const [reprintingSn, setReprintingSn] = useState<string | null>(null);
 
   // Optional Check / Reprint sheet (for torn/jammed labels or tricky multi-item lookup)
@@ -216,7 +269,12 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
   const [checkError, setCheckError] = useState("");
   const [checkResults, setCheckResults] = useState<StaffSafeOutboundPackage[]>([]);
 
-  const scannerRef = useRef<{ stop: () => Promise<void>; clear: () => void } | null>(null);
+  const scannerRef = useRef<{
+    stop: () => Promise<void>;
+    clear: () => void;
+    applyVideoConstraints?: (c: MediaTrackConstraints) => Promise<void>;
+    getRunningTrackCapabilities?: () => MediaTrackCapabilities;
+  } | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -245,30 +303,52 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
     }
   }, []);
 
-  const loadWave = useCallback(async () => {
+  const selectedWaveIdRef = useRef<string | null>(null);
+  selectedWaveIdRef.current = selectedWaveId;
+
+  const loadWave = useCallback(async (waveIdOverride?: string | null) => {
     setWaveLoading(true);
     setWaveError("");
     try {
-      const res = await fetch("/api/scan/wave");
+      const targetId = waveIdOverride !== undefined ? waveIdOverride : selectedWaveIdRef.current;
+      const qs = targetId ? `?waveId=${encodeURIComponent(targetId)}` : "";
+      const res = await fetch(`/api/scan/wave${qs}`);
       const data = await res.json();
       if (!res.ok) {
         setWaveError(data.error || "Couldn't load pick list.");
         return;
       }
       setWaveData(data.wave ?? null);
+      setRecentWaves(data.recentWaves ?? []);
+      if (data.wave?.id && (waveIdOverride === undefined || waveIdOverride === data.wave.id)) {
+        selectedWaveIdRef.current = data.wave.id;
+        setSelectedWaveId(data.wave.id);
+      }
       const nextCancelled: StaffSafeOutboundPackage[] = data.cancelledToPull ?? [];
       const nextUnpicked: StaffSafeOutboundPackage[] = data.unpickedParcels ?? [];
       setCancelledToPull(nextCancelled);
       setUnpickedParcels(nextUnpicked);
       setCancelledToPullCount(nextCancelled.length);
       setUnpickedOverdueCount(nextUnpicked.length);
-      if (data.wave?.id && typeof window !== "undefined") {
-        try {
-          const raw = window.localStorage.getItem(`kyna_pick_checked_${data.wave.id}`);
-          setCheckedPickKeys(raw ? (JSON.parse(raw) as Record<string, boolean>) : {});
-        } catch {
-          setCheckedPickKeys({});
+      if (data.wave?.id) {
+        const serverKeys: Record<string, boolean> =
+          data.wave.checkedKeys && typeof data.wave.checkedKeys === "object"
+            ? data.wave.checkedKeys
+            : {};
+        let merged = serverKeys;
+        if (typeof window !== "undefined") {
+          try {
+            const raw = window.localStorage.getItem(`kyna_pick_checked_${data.wave.id}`);
+            const localKeys = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+            if (Object.keys(serverKeys).length === 0 && Object.keys(localKeys).length > 0) {
+              merged = localKeys;
+            }
+            window.localStorage.setItem(`kyna_pick_checked_${data.wave.id}`, JSON.stringify(merged));
+          } catch {
+            // Ignore storage errors
+          }
         }
+        setCheckedPickKeys(merged);
       }
     } catch {
       setWaveError("No connection. Try again.");
@@ -327,7 +407,56 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
       }
       scannerRef.current = null;
     }
+    setTorchOn(false);
+    setTorchSupported(false);
     setCameraOpen(false);
+  }, []);
+
+  /** Warehouse shelves are dim: turn the phone light on while scanning, when the camera allows it. */
+  async function toggleTorch() {
+    const next = !torchOn;
+    try {
+      const track = streamRef.current?.getVideoTracks()[0];
+      const constraints = { advanced: [{ torch: next } as MediaTrackConstraintSet] };
+      if (track) await track.applyConstraints(constraints);
+      else if (scannerRef.current?.applyVideoConstraints) await scannerRef.current.applyVideoConstraints(constraints);
+      else return;
+      setTorchOn(next);
+    } catch {
+      setTorchSupported(false);
+      toast("This camera has no light", "error");
+    }
+  }
+
+  function detectTorch(caps: MediaTrackCapabilities | undefined) {
+    setTorchSupported(Boolean(caps && (caps as MediaTrackCapabilities & { torch?: boolean }).torch));
+  }
+
+  // Remember the auto-next choice on this phone.
+  useEffect(() => {
+    try {
+      setAutoNext(window.localStorage.getItem(AUTO_NEXT_KEY) === "1");
+    } catch {
+      // Private mode: default off.
+    }
+  }, []);
+
+  function toggleAutoNext() {
+    setAutoNext((v) => {
+      const next = !v;
+      try {
+        window.localStorage.setItem(AUTO_NEXT_KEY, next ? "1" : "0");
+      } catch {
+        // Ignore storage errors
+      }
+      return next;
+    });
+  }
+
+  // Open the tab the person came from (e.g. back from Shelf & stock).
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t === "pick" || t === "returns") setTab(t);
   }, []);
 
   useEffect(() => {
@@ -337,6 +466,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
   }, [stopCamera]);
 
   const openParcel = useCallback((parcel: StaffSafeParcel) => {
+    scanKeyRef.current = newClientKey();
     setChoices([]);
     setMatchedParcel(parcel);
     setSelectedCondition(DEFAULT_CONDITION);
@@ -420,6 +550,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
           }
           video.srcObject = stream;
           await video.play();
+          detectTorch(stream.getVideoTracks()[0]?.getCapabilities?.());
 
           detectTimerRef.current = setInterval(async () => {
             if (detectBusyRef.current || lookupInFlightRef.current) return;
@@ -461,6 +592,11 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
           },
           () => {}
         );
+        try {
+          detectTorch(qr.getRunningTrackCapabilities());
+        } catch {
+          // Older browsers: no light control.
+        }
       } catch {
         await stopCamera();
         setCameraError("Camera didn't open. Type the tracking number instead.");
@@ -574,7 +710,32 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
 
   async function handleCheckSearch(e: React.FormEvent) {
     e.preventDefault();
-    const q = checkQuery.trim();
+    await runCheckSearch(checkQuery);
+  }
+
+  async function handleCheckPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setDecodingPhoto(true);
+    setCheckError("");
+    try {
+      const code = await decodeBarcodeFromFile(file);
+      if (!code) {
+        playBeep("error");
+        setCheckError("Couldn't read a barcode in that photo. Get closer, or type the last 6 digits.");
+        return;
+      }
+      setCheckQuery(code);
+      playBeep("ok");
+      await runCheckSearch(code);
+    } finally {
+      setDecodingPhoto(false);
+    }
+  }
+
+  async function runCheckSearch(raw: string) {
+    const q = raw.trim();
     if (q.length < 3) return;
     setCheckSearching(true);
     setCheckError("");
@@ -600,12 +761,41 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
     }
   }
 
+  async function handleConfirmPack(pkg: StaffSafeOutboundPackage) {
+    setPackingId(pkg.packageId);
+    try {
+      const res = await fetch("/api/scan/pack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "confirm_pack", packageId: pkg.packageId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast(data.error || "Couldn't mark packed.", "error");
+        return;
+      }
+      playBeep("ok");
+      haptic(12);
+      if (data.outbound) {
+        setCheckResults((prev) =>
+          prev.map((item) => (item.packageId === pkg.packageId ? (data.outbound as StaffSafeOutboundPackage) : item))
+        );
+      }
+      toast(`Packed ···${last6(pkg.trackingNumber, pkg.orderSn)}`);
+    } catch {
+      toast("No connection. Try again.", "error");
+    } finally {
+      setPackingId(null);
+    }
+  }
+
   function togglePickChecked(key: string) {
     if (!waveData) return;
     haptic(8);
+    const nextVal = !checkedPickKeys[key];
     setCheckedPickKeys((prev) => {
-      const next = { ...prev, [key]: !prev[key] };
-      if (!next[key]) delete next[key];
+      const next = { ...prev, [key]: nextVal };
+      if (!nextVal) delete next[key];
       try {
         window.localStorage.setItem(`kyna_pick_checked_${waveData.id}`, JSON.stringify(next));
       } catch {
@@ -613,58 +803,210 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
       }
       return next;
     });
+
+    void fetch("/api/scan/wave", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ waveId: waveData.id, key, checked: nextVal }),
+    })
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (data?.checkedKeys && typeof data.checkedKeys === "object") {
+          setCheckedPickKeys(data.checkedKeys);
+          try {
+            window.localStorage.setItem(
+              `kyna_pick_checked_${waveData.id}`,
+              JSON.stringify(data.checkedKeys)
+            );
+          } catch {
+            // Ignore storage errors
+          }
+        }
+      })
+      .catch(() => {
+        // Keep optimistic local checkoff; next poll reconciles
+      });
+  }
+
+  function buildScanForm(p: Omit<PendingScan, "text" | "tries">): FormData {
+    const formData = new FormData();
+    formData.append("parcelId", p.parcelId);
+    formData.append("scannedBarcode", p.scannedBarcode);
+    formData.append("condition", p.condition);
+    formData.append("clientKey", p.clientKey);
+    if (p.notes) formData.append("notes", p.notes);
+    for (const file of p.photos) formData.append("photos", file);
+    return formData;
+  }
+
+  /** Apply a successful save to the counters and the "your returns today" list. */
+  function applySaved(data: Record<string, unknown>, text: string) {
+    if (data.duplicate) return;
+    setTodayCount((n) => n + 1);
+    if (typeof data.pendingMissingCount === "number") setPendingMissing(data.pendingMissingCount);
+    if (data.recentScan) setRecentScans((prev) => [data.recentScan as RecentScanItem, ...prev]);
+    if (typeof data.scanId === "string") setLastUndo({ scanId: data.scanId, text, until: Date.now() + UNDO_MS });
+  }
+
+  function finishScanForm() {
+    setMatchedParcel(null);
+    setManualCode("");
+    setNotes("");
+    setPhotos([]);
+    scanKeyRef.current = newClientKey();
+    // Continuous mode: straight back to the camera for the next parcel in the sack.
+    if (autoNext) setTimeout(() => void startCamera(), 450);
   }
 
   async function handleConfirmScan() {
     if (!matchedParcel) return;
     setSavingScan(true);
     setLookupError("");
+    const text = [matchedParcel.itemSummary, matchedParcel.variationName].filter(Boolean).join(" · ");
+    let compressedPhotos: File[] = [];
     try {
-      const compressedPhotos = await Promise.all(photos.map(compressImageFile));
-      const formData = new FormData();
-      formData.append("parcelId", matchedParcel.id);
-      formData.append("scannedBarcode", lastScannedCode);
-      formData.append("condition", selectedCondition);
-      if (notes.trim()) formData.append("notes", notes.trim());
-      for (const file of compressedPhotos) {
-        formData.append("photos", file);
-      }
-
-      const res = await fetch("/api/scan/confirm", { method: "POST", body: formData });
-      const data = await res.json();
+      compressedPhotos = await Promise.all(photos.map(compressImageFile));
+    } catch {
+      compressedPhotos = photos;
+    }
+    const entry = {
+      clientKey: scanKeyRef.current,
+      parcelId: matchedParcel.id,
+      scannedBarcode: lastScannedCode,
+      condition: selectedCondition,
+      notes: notes.trim(),
+      photos: compressedPhotos,
+    };
+    try {
+      const res = await fetch("/api/scan/confirm", { method: "POST", body: buildScanForm(entry) });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setLookupError(data.error || "Couldn't save. Try again.");
         return;
       }
-
       playBeep("ok");
       haptic(18);
-      setSaved({
-        id: Date.now(),
-        text: [matchedParcel.itemSummary, matchedParcel.variationName].filter(Boolean).join(" · "),
-        restocked: Boolean(data.restocked),
-      });
-      setMatchedParcel(null);
-      setManualCode("");
-      setNotes("");
-      setPhotos([]);
-      setTodayCount((n) => n + 1);
-      if (typeof data.pendingMissingCount === "number") {
-        setPendingMissing(data.pendingMissingCount);
-      }
-      if (data.recentScan) {
-        setRecentScans((prev) => [data.recentScan as RecentScanItem, ...prev]);
-      }
+      setSaved({ id: Date.now(), text, restocked: Boolean(data.restocked) });
+      applySaved(data, text);
+      finishScanForm();
     } catch {
-      setLookupError("No connection. Try again.");
+      // Network down: keep it on this phone and send it when Wi-Fi is back.
+      // The same key makes a late duplicate harmless.
+      setPendingScans((prev) =>
+        prev.some((p) => p.clientKey === entry.clientKey) ? prev : [...prev, { ...entry, text, tries: 0 }]
+      );
+      playBeep("warn");
+      haptic(18);
+      toast("No Wi-Fi. Saved on this phone, will send by itself.", "error");
+      finishScanForm();
     } finally {
       setSavingScan(false);
     }
   }
 
+  const flushPendingScans = useCallback(async () => {
+    if (flushingRef.current || pendingRef.current.length === 0) return;
+    flushingRef.current = true;
+    try {
+      for (const p of [...pendingRef.current]) {
+        try {
+          const res = await fetch("/api/scan/confirm", { method: "POST", body: buildScanForm(p) });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok) {
+            applySaved(data, p.text);
+            setPendingScans((prev) => prev.filter((x) => x.clientKey !== p.clientKey));
+            toast(`Sent: ${p.text}`);
+          } else if (res.status >= 400 && res.status < 500 && res.status !== 401 && res.status !== 408 && res.status !== 429) {
+            // The server refused it for good (e.g. parcel gone): don't retry forever.
+            setPendingScans((prev) => prev.filter((x) => x.clientKey !== p.clientKey));
+            toast(`Not saved: ${p.text}. ${data.error ?? ""}`.trim(), "error");
+          } else {
+            setPendingScans((prev) => prev.map((x) => (x.clientKey === p.clientKey ? { ...x, tries: x.tries + 1 } : x)));
+          }
+        } catch {
+          break; // Still offline.
+        }
+      }
+    } finally {
+      flushingRef.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (pendingScans.length === 0) return;
+    const t = setInterval(() => void flushPendingScans(), 8000);
+    const onOnline = () => void flushPendingScans();
+    const onUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("online", onOnline);
+    window.addEventListener("beforeunload", onUnload);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("beforeunload", onUnload);
+    };
+  }, [pendingScans.length, flushPendingScans]);
+
+  useEffect(() => {
+    if (!lastUndo) return;
+    const t = setTimeout(() => setLastUndo(null), Math.max(0, lastUndo.until - Date.now()));
+    return () => clearTimeout(t);
+  }, [lastUndo]);
+
+  async function handleUndoScan() {
+    if (!lastUndo) return;
+    setUndoing(true);
+    try {
+      const res = await fetch("/api/scan/undo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scanId: lastUndo.scanId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast(data.error || "Couldn't undo", "error");
+        if (res.status === 404 || res.status === 409) setLastUndo(null);
+        return;
+      }
+      haptic(12);
+      setTodayCount((n) => Math.max(0, n - 1));
+      setRecentScans((prev) => prev.filter((r) => r.id !== lastUndo.scanId));
+      if (typeof data.pendingMissingCount === "number") setPendingMissing(data.pendingMissingCount);
+      setSaved(null);
+      toast(`Undid: ${lastUndo.text}. Scan it again.`);
+      setLastUndo(null);
+    } catch {
+      toast("No connection. Try again.", "error");
+    } finally {
+      setUndoing(false);
+    }
+  }
+
+  async function openWaitingSheet() {
+    setWaitingOpen(true);
+    setWaitingList(null);
+    try {
+      const res = await fetch("/api/scan/waiting", { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast(data.error || "Couldn't load the list", "error");
+        setWaitingList([]);
+        return;
+      }
+      setWaitingList(data.parcels ?? []);
+      setWaitingTotal(typeof data.total === "number" ? data.total : (data.parcels ?? []).length);
+      if (typeof data.total === "number") setPendingMissing(data.total);
+    } catch {
+      toast("No connection. Try again.", "error");
+      setWaitingList([]);
+    }
+  }
+
   async function handleLockStaff() {
     await stopCamera();
-    await fetch("/api/auth/logout", { method: "POST" });
+    await fetch("/api/auth/logout?scope=staff", { method: "POST" });
     setUnlocked(false);
     setMatchedParcel(null);
     setSaved(null);
@@ -674,6 +1016,13 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
   function handleTabChange(next: PackerTab) {
     void stopCamera();
     setTab(next);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", next);
+      window.history.replaceState(null, "", url.toString());
+    } catch {
+      // Ignore URL errors
+    }
     setLookupError("");
     setCameraError("");
     setManualCode("");
@@ -840,7 +1189,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
 
           <div className="flex shrink-0 items-center gap-1">
             <Link
-              href="/stock-in"
+              href={`/stock-in?from=${tab}`}
               aria-label="Shelf and stock updates"
               title="Shelf & stock"
               className="pressable flex h-11 items-center whitespace-nowrap rounded-full px-2.5 text-[16px] font-semibold text-brand hover:bg-ink/[0.05]"
@@ -932,10 +1281,16 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
           {tab === "pick" && (
             <PickListSection
               waveData={waveData}
+              recentWaves={recentWaves}
               waveLoading={waveLoading}
               waveError={waveError}
               checkedPickKeys={checkedPickKeys}
               reprintingSn={reprintingSn}
+              onSelectWave={(id) => {
+                selectedWaveIdRef.current = id;
+                setSelectedWaveId(id);
+                void loadWave(id);
+              }}
               onToggleChecked={togglePickChecked}
               onRefresh={() => void loadWave()}
               onOpenCheckSheet={openCheckSheet}
@@ -961,6 +1316,19 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                   >
                     <X className="h-5 w-5" />
                   </button>
+                  {torchSupported && (
+                    <button
+                      type="button"
+                      onClick={() => void toggleTorch()}
+                      aria-label={torchOn ? "Turn light off" : "Turn light on"}
+                      aria-pressed={torchOn}
+                      className={`pressable absolute left-3 top-3 flex h-11 w-11 items-center justify-center rounded-full backdrop-blur ${
+                        torchOn ? "bg-white text-black" : "bg-black/50 text-white"
+                      }`}
+                    >
+                      {torchOn ? <FlashlightOff className="h-5 w-5" /> : <Flashlight className="h-5 w-5" />}
+                    </button>
+                  )}
                 </div>
               ) : (
                 <button
@@ -975,6 +1343,53 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
 
               {cameraError && (
                 <p className="anim-fade-in px-1 text-[15px] font-semibold text-failed-ink">{cameraError}</p>
+              )}
+
+              <button
+                type="button"
+                onClick={toggleAutoNext}
+                aria-pressed={autoNext}
+                className="pressable flex min-h-11 w-full items-center gap-2.5 rounded-[var(--radius-control)] px-1 text-left text-[15px] font-semibold text-ink-2"
+              >
+                <Repeat className={`h-5 w-5 ${autoNext ? "text-brand" : "text-ink-3"}`} />
+                <span className="flex-1">Open the camera again after each save</span>
+                <span
+                  className={`rounded-full px-2.5 py-0.5 text-[13px] font-bold ${
+                    autoNext ? "bg-brand-soft text-brand" : "bg-surface-muted text-ink-3"
+                  }`}
+                >
+                  {autoNext ? "On" : "Off"}
+                </span>
+              </button>
+
+              {pendingScans.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void flushPendingScans()}
+                  className="anim-rise-in pressable flex w-full items-center gap-3 rounded-[var(--radius-control)] bg-failed-soft px-4 py-3 text-left text-failed-ink"
+                >
+                  <CloudOff className="h-5 w-5 shrink-0" />
+                  <span className="min-w-0 flex-1 text-[15px] font-bold">
+                    {pendingScans.length} {pendingScans.length === 1 ? "scan" : "scans"} waiting for Wi-Fi. Keep this page open.
+                  </span>
+                  <span className="text-[14px] font-bold underline">Send now</span>
+                </button>
+              )}
+
+              {lastUndo && (
+                <div className="anim-rise-in flex items-center gap-3 rounded-[var(--radius-control)] bg-surface px-4 py-2 shadow-[var(--shadow-card)]">
+                  <span className="min-w-0 flex-1 truncate text-[15px] text-ink-2">
+                    Last saved: <span className="font-semibold text-ink">{lastUndo.text}</span>
+                  </span>
+                  <button
+                    type="button"
+                    disabled={undoing}
+                    onClick={() => void handleUndoScan()}
+                    className="pressable inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full px-3 text-[15px] font-semibold text-brand hover:bg-brand/10 disabled:opacity-50"
+                  >
+                    <Undo2 className="h-4 w-4" /> {undoing ? "Undoing…" : "Undo"}
+                  </button>
+                </div>
               )}
 
               <form
@@ -1060,12 +1475,17 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                 </button>
 
                 {pendingMissing > 0 && (
-                  <div className="flex min-h-[52px] items-center justify-between gap-3 px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={() => void openWaitingSheet()}
+                    className="group pressable-row flex min-h-[54px] w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-surface-subtle active:bg-surface-muted"
+                  >
                     <span className="text-[16px] font-semibold text-ink">Returned to seller, waiting to scan</span>
-                    <span className="text-[15px] font-bold text-missing-ink tabular-nums">
+                    <span className="flex items-center gap-1.5 text-[15px] font-bold text-missing-ink tabular-nums">
                       {pendingMissing}
+                      <ChevronRight className="chevron-nudge h-5 w-5 text-hairline-strong" />
                     </span>
-                  </div>
+                  </button>
                 )}
 
                 <button
@@ -1190,20 +1610,47 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                   }`}
                 >
                   <Camera className="h-5 w-5" />
-                  {photos.length > 0
-                    ? `${photos.length} photo${photos.length > 1 ? "s" : ""} added`
-                    : condition?.needsPhoto
-                      ? "Take photo (required for dispute)"
-                      : "Add photo"}
+                  {photos.length >= 3
+                    ? "3 photos attached (max)"
+                    : photos.length > 0
+                      ? `Add another photo (${photos.length}/3)`
+                      : condition?.needsPhoto
+                        ? "Take photo (required for dispute)"
+                        : "Add photo"}
                   <input
                     type="file"
                     accept="image/*"
                     capture="environment"
                     multiple
+                    disabled={photos.length >= 3}
                     className="sr-only"
-                    onChange={(e) => setPhotos(Array.from(e.target.files ?? []).slice(0, 3))}
+                    onChange={(e) => {
+                      const added = Array.from(e.target.files ?? []);
+                      if (added.length > 0) {
+                        setPhotos((prev) => [...prev, ...added].slice(0, 3));
+                      }
+                      e.currentTarget.value = "";
+                    }}
                   />
                 </label>
+                {photoPreviews.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {photoPreviews.map((url, idx) => (
+                      <div key={url} className="relative h-16 w-16 overflow-hidden rounded-lg bg-surface-muted ring-1 ring-hairline">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={url} alt={`Proof ${idx + 1}`} className="h-full w-full object-cover" />
+                        <button
+                          type="button"
+                          aria-label={`Remove photo ${idx + 1}`}
+                          onClick={() => setPhotos((prev) => prev.filter((_, i) => i !== idx))}
+                          className="absolute right-0.5 top-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {needsPhotoMissing && (
                   <p className="px-1 text-[14px] font-semibold text-missing-ink">
                     Photo of the waybill &amp; item is required before saving an issue return.
@@ -1291,7 +1738,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                   <button
                     type="button"
                     onClick={handleCopyList}
-                    className="pressable inline-flex h-9 items-center gap-1.5 rounded-full bg-surface px-3 text-[13px] font-bold text-brand shadow-[var(--shadow-card)]"
+                    className="pressable inline-flex h-11 items-center gap-1.5 rounded-full bg-surface px-3 text-[13px] font-bold text-brand shadow-[var(--shadow-card)]"
                   >
                     {copiedList ? (
                       <>
@@ -1428,7 +1875,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                         variant="secondary"
                         disabled={reprintingSn === p.orderSn}
                         onClick={() => void handleReprintLabel(p.orderSn)}
-                        className="h-10 text-[14px]"
+                        className="h-11 text-[15px]"
                       >
                         <Printer className="mr-1.5 h-4 w-4" />
                         {reprintingSn === p.orderSn ? "Sending…" : "Reprint missing label"}
@@ -1472,6 +1919,23 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
             </Button>
           </form>
 
+          <label
+            className={`pressable flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-control)] bg-surface-muted text-[16px] font-semibold text-ink hover:bg-surface-track ${
+              decodingPhoto ? "opacity-60" : ""
+            }`}
+          >
+            <Camera className="h-5 w-5 text-brand" />
+            {decodingPhoto ? "Reading barcode…" : "Scan the label with the camera"}
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              disabled={decodingPhoto}
+              onChange={(e) => void handleCheckPhoto(e)}
+              className="sr-only"
+            />
+          </label>
+
           {checkError && <p className="anim-fade-in text-[14px] font-semibold text-missing-ink">{checkError}</p>}
 
           {checkResults.length > 0 && (
@@ -1505,18 +1969,75 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                       </li>
                     ))}
                   </ul>
-                  {!p.isCancelled && p.canReprint && (
-                    <Button
-                      full
-                      variant="secondary"
-                      disabled={reprintingSn === p.orderSn}
-                      onClick={() => void handleReprintLabel(p.orderSn)}
-                      className="h-10 text-[14px]"
-                    >
-                      <Printer className="mr-1.5 h-4 w-4" />
-                      {reprintingSn === p.orderSn ? "Sending…" : "Reprint label"}
-                    </Button>
+                  {!p.isCancelled && (
+                    <div className="flex flex-wrap gap-2">
+                      {!p.packedAt ? (
+                        <Button
+                          variant="primary"
+                          disabled={packingId === p.packageId}
+                          onClick={() => void handleConfirmPack(p)}
+                          className="h-11 flex-1 text-[15px]"
+                        >
+                          <Check className="mr-1.5 h-4 w-4" />
+                          {packingId === p.packageId ? "Saving…" : "Mark packed"}
+                        </Button>
+                      ) : (
+                        <span className="inline-flex h-11 flex-1 items-center justify-center gap-1 rounded-[var(--radius-control)] bg-arrived-soft px-3 text-[13px] font-bold text-arrived">
+                          <Check className="h-4 w-4" />
+                          Packed{p.packedByName ? ` · ${p.packedByName}` : ""}
+                        </span>
+                      )}
+                      {p.canReprint && (
+                        <Button
+                          variant="secondary"
+                          disabled={reprintingSn === p.orderSn}
+                          onClick={() => void handleReprintLabel(p.orderSn)}
+                          className="h-11 flex-1 text-[15px]"
+                        >
+                          <Printer className="mr-1.5 h-4 w-4" />
+                          {reprintingSn === p.orderSn ? "Sending…" : "Reprint"}
+                        </Button>
+                      )}
+                    </div>
                   )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </Sheet>
+
+      {/* Sheet 5: what to look for in the courier's return sack */}
+      <Sheet open={waitingOpen} onClose={() => setWaitingOpen(false)} title="Waiting to scan">
+        <div className="space-y-3">
+          <p className="text-[14px] text-ink-3">
+            The courier says these came back. Look for them in the return sack, then scan each one.
+            {waitingTotal > (waitingList?.length ?? 0) ? ` Showing the oldest ${waitingList?.length ?? 0} of ${waitingTotal}.` : ""}
+          </p>
+          {waitingList === null ? (
+            <div className="h-32 animate-pulse rounded-[var(--radius-control)] bg-surface-muted" aria-busy="true" />
+          ) : waitingList.length === 0 ? (
+            <p className="py-4 text-center text-[16px] text-ink-3">Nothing waiting. All scanned.</p>
+          ) : (
+            <ul className="divide-y divide-hairline">
+              {waitingList.map((p) => (
+                <li key={p.id} className="flex items-center gap-3 py-3">
+                  <ItemThumb src={p.itemImageUrl} alt={p.itemSummary} size="md" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[16px] font-semibold text-ink">
+                      {p.quantity > 1 ? `${p.quantity}× ` : ""}
+                      {p.itemSummary}
+                    </span>
+                    <span className="block truncate text-[14px] text-ink-3 tabular-nums">
+                      {[
+                        p.variationName,
+                        shortCourier(p.courier),
+                        `···${last6(p.rtsTrackingNumber || p.forwardTrackingNumber, p.orderSn)}`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  </span>
                 </li>
               ))}
             </ul>

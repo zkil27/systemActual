@@ -6,7 +6,17 @@ import { getOwnerSession } from "@/lib/auth";
 import { normalizeCourierName } from "@/lib/connectors/normalizer";
 import { buildWavePreview, getReadyCounts } from "@/lib/waves/build";
 import { claimReadyReconcile, reconcileReadyOrders } from "@/lib/waves/reconcile";
-import { reprintLabel, retryFailed, retryItem, shipNow, startWave, WaveStartError } from "@/lib/waves/run";
+import {
+  cancelWave,
+  excludeWaveParcel,
+  reprintLabel,
+  reprintWaveRange,
+  retryFailed,
+  retryItem,
+  shipNow,
+  startWave,
+  WaveStartError,
+} from "@/lib/waves/run";
 import { isContinuousWave, nextWaveAt, parseWaveTimes } from "@/lib/waves/schedule";
 import { runTick } from "@/lib/worker/tick";
 import {
@@ -27,7 +37,7 @@ export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("mode") === "progress") {
     const waves = await prisma.wave.findMany({
       orderBy: { createdAt: "desc" },
-      take: 5,
+      take: 8,
       select: { id: true, status: true },
     });
     const waveIds = waves.map((w) => w.id);
@@ -63,8 +73,9 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  const requestedWaveId = req.nextUrl.searchParams.get("waveId");
   const [waves, writable, settings, readyBreakdown] = await Promise.all([
-    prisma.wave.findMany({ orderBy: { createdAt: "desc" }, take: 5 }),
+    prisma.wave.findMany({ orderBy: { createdAt: "desc" }, take: 8 }),
     prisma.shopConnection.count({ where: { isDemo: false, writesEnabled: true, accessToken: { not: null } } }),
     prisma.appSettings.findUnique({ where: { id: "default" }, select: { waveTimes: true, wavesAutoEnabled: true } }),
     getReadyCounts(new Date(), { live: true }),
@@ -80,7 +91,10 @@ export async function GET(req: NextRequest) {
   const times = parseWaveTimes(settings?.waveTimes ?? "");
   const continuous = isContinuousWave(settings?.waveTimes ?? "");
   const waveIds = waves.map((w) => w.id);
-  const latestWave = waves[0];
+  const selectedWave =
+    (requestedWaveId ? waves.find((w) => w.id === requestedWaveId) : undefined) ??
+    waves.find((w) => w.status === "RUNNING") ??
+    waves[0];
   const [counts, failed, rawLatestItems] = await Promise.all([
     prisma.waveItem.groupBy({
       by: ["waveId", "status"],
@@ -93,9 +107,9 @@ export async function GET(req: NextRequest) {
       orderBy: { position: "asc" },
       take: 50,
     }),
-    latestWave
+    selectedWave
       ? prisma.waveItem.findMany({
-          where: { waveId: latestWave.id },
+          where: { waveId: selectedWave.id },
           orderBy: { position: "asc" },
           include: {
             package: {
@@ -135,7 +149,7 @@ export async function GET(req: NextRequest) {
     listings.map((l) => [`${l.shopConnectionId}:${l.listingId}:${l.variationId}`, l])
   );
 
-  const totalInWave = latestWave ? latestWave.parcelCount || rawLatestItems.length : 0;
+  const totalInWave = selectedWave ? selectedWave.parcelCount || rawLatestItems.length : 0;
   const latestParcels: WaveParcel[] = rawLatestItems.map((wi) => {
     const pkg = wi.package;
     const o = pkg.order;
@@ -190,6 +204,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     canShip: writable > 0,
+    selectedWaveId: selectedWave?.id ?? null,
     readyBreakdown,
     schedule: {
       auto: Boolean(settings?.wavesAutoEnabled),
@@ -197,7 +212,7 @@ export async function GET(req: NextRequest) {
       times,
       nextAt: settings?.wavesAutoEnabled ? nextWaveAt(new Date(), times, continuous)?.toISOString() ?? null : null,
     },
-    waves: waves.map((w, idx) => ({
+    waves: waves.map((w) => ({
       id: w.id,
       status: w.status,
       trigger: w.trigger,
@@ -208,7 +223,7 @@ export async function GET(req: NextRequest) {
       failed: failed
         .filter((f) => f.waveId === w.id)
         .map((f) => ({ id: f.id, orderSn: f.package.order.orderSn, error: f.error })),
-      parcels: idx === 0 ? latestParcels : [],
+      parcels: w.id === selectedWave?.id ? latestParcels : [],
     })),
   });
 }
@@ -219,6 +234,8 @@ const actionSchema = z.discriminatedUnion("action", [
     limit: z.number().int().min(1).max(2500).optional(),
     platform: z.enum([Platform.SHOPEE, Platform.TIKTOK]).optional(),
     courier: z.string().min(1).max(64).optional(),
+    pieceMode: z.enum(["all", "singles", "multis"]).optional(),
+    includeNewOrders: z.boolean().optional(),
   }),
   z.object({ action: z.literal("print_pick_list"), waveId: z.string().min(1) }),
   z.object({ action: z.literal("start"), waveId: z.string().min(1) }),
@@ -226,9 +243,20 @@ const actionSchema = z.discriminatedUnion("action", [
     action: z.literal("ship_now"),
     platform: z.enum([Platform.SHOPEE, Platform.TIKTOK]).optional(),
     courier: z.string().min(1).max(64).optional(),
+    pieceMode: z.enum(["all", "singles", "multis"]).optional(),
+    includeNewOrders: z.boolean().optional(),
   }),
   z.object({ action: z.literal("retry_item"), itemId: z.string().min(1) }),
   z.object({ action: z.literal("retry_failed"), waveId: z.string().min(1) }),
+  z.object({ action: z.literal("cancel_wave"), waveId: z.string().min(1) }),
+  z.object({ action: z.literal("exclude_parcel"), waveId: z.string().min(1), waveItemId: z.string().min(1) }),
+  z.object({
+    action: z.literal("reprint_range"),
+    waveId: z.string().min(1),
+    fromPos: z.number().int().min(1),
+    toPos: z.number().int().min(1),
+    groupKey: z.string().optional(),
+  }),
   z.object({ action: z.literal("reprint"), orderSn: z.string().min(3).max(64) }),
 ]);
 
@@ -245,6 +273,8 @@ export async function POST(req: NextRequest) {
         limit: parsed.data.limit,
         platform: parsed.data.platform,
         courier: parsed.data.courier,
+        pieceMode: parsed.data.pieceMode,
+        includeNewOrders: parsed.data.includeNewOrders,
       });
       return NextResponse.json({ ok: true, ...result });
     }
@@ -263,6 +293,8 @@ export async function POST(req: NextRequest) {
           const result = await shipNow("MANUAL", new Date(), {
             platform: parsed.data.platform,
             courier: parsed.data.courier,
+            pieceMode: parsed.data.pieceMode,
+            includeNewOrders: parsed.data.includeNewOrders,
           });
           if (result.shipping) kick();
           return NextResponse.json({ ok: true, ...result });
@@ -276,6 +308,22 @@ export async function POST(req: NextRequest) {
           if (retried) kick();
           return NextResponse.json({ ok: true, retried });
         }
+        case "cancel_wave":
+          await cancelWave(parsed.data.waveId);
+          return NextResponse.json({ ok: true });
+        case "exclude_parcel":
+          await excludeWaveParcel(parsed.data.waveId, parsed.data.waveItemId);
+          return NextResponse.json({ ok: true });
+        case "reprint_range":
+          return NextResponse.json({
+            ok: true,
+            ...(await reprintWaveRange({
+              waveId: parsed.data.waveId,
+              fromPos: parsed.data.fromPos,
+              toPos: parsed.data.toPos,
+              groupKey: parsed.data.groupKey,
+            })),
+          });
         case "reprint":
           return NextResponse.json({ ok: true, ...(await reprintLabel(parsed.data.orderSn)) });
       }

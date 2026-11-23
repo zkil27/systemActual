@@ -17,6 +17,13 @@ import {
   type PickVariantTarget,
 } from "./PickActionSheets";
 
+export interface StaffRecentWave {
+  id: string;
+  status: string;
+  createdAt: string;
+  parcelCount: number;
+}
+
 export interface StaffWaveData {
   id: string;
   status: string;
@@ -29,6 +36,7 @@ export interface StaffWaveData {
   courierTotals: Array<{ title: string; count: number }>;
   groups: StaffPickGroup[];
   multiParcels: StaffSafeOutboundPackage[];
+  checkedKeys?: Record<string, boolean>;
 }
 
 function last6(trackingNumber: string | null, orderSn: string): string {
@@ -144,20 +152,24 @@ function PickFilterStrip({
 
 export function PickListSection({
   waveData,
+  recentWaves = [],
   waveLoading,
   waveError,
   checkedPickKeys,
   reprintingSn,
+  onSelectWave,
   onToggleChecked,
   onRefresh,
   onOpenCheckSheet,
   onReprintLabel,
 }: {
   waveData: StaffWaveData | null;
+  recentWaves?: StaffRecentWave[];
   waveLoading: boolean;
   waveError: string;
   checkedPickKeys: Record<string, boolean>;
   reprintingSn: string | null;
+  onSelectWave?: (waveId: string) => void;
   onToggleChecked: (key: string) => void;
   onRefresh: () => void;
   onOpenCheckSheet: () => void;
@@ -256,7 +268,7 @@ export function PickListSection({
             <button
               type="button"
               onClick={onOpenCheckSheet}
-              className="pressable flex h-10 items-center gap-1.5 rounded-full bg-surface px-3 text-[15px] font-semibold text-ink shadow-[var(--shadow-card)] hover:bg-surface-subtle"
+              className="pressable flex h-11 items-center gap-1.5 rounded-full bg-surface px-3 text-[15px] font-semibold text-ink shadow-[var(--shadow-card)] hover:bg-surface-subtle"
             >
               <Printer className="h-4 w-4 text-brand" />
               <span>Reprint</span>
@@ -266,7 +278,7 @@ export function PickListSection({
               onClick={onRefresh}
               disabled={waveLoading}
               aria-label="Refresh pick list"
-              className="pressable flex h-10 w-10 items-center justify-center rounded-full bg-surface text-ink-2 shadow-[var(--shadow-card)] hover:bg-surface-subtle disabled:opacity-50"
+              className="pressable flex h-11 w-11 items-center justify-center rounded-full bg-surface text-ink-2 shadow-[var(--shadow-card)] hover:bg-surface-subtle disabled:opacity-50"
             >
               <RefreshCw className={`h-4 w-4 ${waveLoading ? "anim-spin" : ""}`} />
             </button>
@@ -280,6 +292,33 @@ export function PickListSection({
               <span className="whitespace-nowrap text-ink-3 tabular-nums">· {timeStamp}</span>
             )}
           </div>
+        )}
+
+        {recentWaves.length > 1 && onSelectWave && (
+          <ScrollChips role="tablist" label="Switch wave" rowClassName="gap-1.5 pt-1">
+            {recentWaves.map((w) => {
+              const active = w.id === waveData?.id;
+              const labelTime = isSameManilaDay(w.createdAt)
+                ? manilaTime(w.createdAt)
+                : manilaDateTime(w.createdAt);
+              return (
+                <button
+                  key={w.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => onSelectWave(w.id)}
+                  className={`pressable h-9 shrink-0 rounded-full px-3 text-[13px] font-semibold tabular-nums transition-colors ${
+                    active
+                      ? "bg-ink text-ink-inverse"
+                      : "bg-surface text-ink-2 shadow-[var(--shadow-card)] hover:text-ink"
+                  }`}
+                >
+                  {w.parcelCount}p · {labelTime}
+                </button>
+              );
+            })}
+          </ScrollChips>
         )}
       </div>
 

@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { decryptSecret } from "@/lib/crypto";
 
 export function getShopeeConfig() {
   return {
@@ -101,6 +102,7 @@ export async function exchangeShopeeCode(code: string, shopId: string) {
       shop_id: Number(shopId),
       partner_id: Number(cfg.partnerId),
     }),
+    signal: AbortSignal.timeout(15_000),
   });
   const data = await res.json();
   if (!res.ok || data.error) {
@@ -119,6 +121,7 @@ export async function shopeeGet(
   accessToken: string,
   query: Record<string, string | number>
 ) {
+  const token = decryptSecret(accessToken);
   const cfg = getShopeeConfig();
   const timestamp = Math.floor(Date.now() / 1000);
   const sign = signShopeeRequest({
@@ -126,13 +129,13 @@ export async function shopeeGet(
     partnerKey: cfg.partnerKey,
     path,
     timestamp,
-    accessToken,
+    accessToken: token,
     shopId,
   });
   const qs = new URLSearchParams({
     partner_id: cfg.partnerId,
     timestamp: String(timestamp),
-    access_token: accessToken,
+    access_token: token,
     shop_id: shopId,
     sign,
     ...Object.fromEntries(Object.entries(query).map(([k, v]) => [k, String(v)])),
@@ -155,6 +158,7 @@ export async function shopeePost(
   body: Record<string, unknown>,
   fetchFn: typeof fetch = fetch
 ) {
+  const token = decryptSecret(accessToken);
   const cfg = getShopeeConfig();
   const timestamp = Math.floor(Date.now() / 1000);
   const sign = signShopeeRequest({
@@ -162,13 +166,13 @@ export async function shopeePost(
     partnerKey: cfg.partnerKey,
     path,
     timestamp,
-    accessToken,
+    accessToken: token,
     shopId,
   });
   const qs = new URLSearchParams({
     partner_id: cfg.partnerId,
     timestamp: String(timestamp),
-    access_token: accessToken,
+    access_token: token,
     shop_id: shopId,
     sign,
   });
@@ -196,6 +200,7 @@ export async function shopeePostFile(
   body: Record<string, unknown>,
   fetchFn: typeof fetch = fetch
 ): Promise<Buffer> {
+  const token = decryptSecret(accessToken);
   const cfg = getShopeeConfig();
   const timestamp = Math.floor(Date.now() / 1000);
   const sign = signShopeeRequest({
@@ -203,13 +208,13 @@ export async function shopeePostFile(
     partnerKey: cfg.partnerKey,
     path,
     timestamp,
-    accessToken,
+    accessToken: token,
     shopId,
   });
   const qs = new URLSearchParams({
     partner_id: cfg.partnerId,
     timestamp: String(timestamp),
-    access_token: accessToken,
+    access_token: token,
     shop_id: shopId,
     sign,
   });

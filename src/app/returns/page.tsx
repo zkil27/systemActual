@@ -41,6 +41,10 @@ interface ReturnRow {
   isOverdueRts: boolean;
   expectsPhysicalReturn: boolean;
   digitalStatus: string;
+  disputeStatus?: string;
+  disputeDeadlineAt?: string | null;
+  isUrgentDeadline?: boolean;
+  resolvedAt?: string | null;
 }
 
 /** Scrolling filter chips with one highlight that slides to the selected chip. */
@@ -145,6 +149,7 @@ function ReturnsExplorerInner() {
   const [totalCount, setTotalCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -187,7 +192,12 @@ function ReturnsExplorerInner() {
           const rows: ReturnRow[] = data.parcels ?? [];
           setParcels(rows);
           setTotalCount(typeof data.totalCount === "number" ? data.totalCount : rows.length);
+          setLoadError(false);
+        } else {
+          setLoadError(true);
         }
+      } catch {
+        setLoadError(true);
       } finally {
         if (!opts?.silent) setLoading(false);
       }
@@ -411,7 +421,7 @@ function ReturnsExplorerInner() {
                     aria-label="From date"
                     value={dateFilter.date || dateFilter.from}
                     onChange={(e) => updateCustomBound("from", e.target.value)}
-                    className="h-9 min-w-0 flex-1 rounded-lg bg-surface-muted px-2.5 text-[14px] text-ink tabular-nums focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
+                    className="h-11 min-w-0 flex-1 rounded-lg bg-surface-muted px-2.5 text-[16px] text-ink tabular-nums focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
                   />
                 </label>
                 <label className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-medium text-ink-3">
@@ -421,7 +431,7 @@ function ReturnsExplorerInner() {
                     aria-label="To date"
                     value={dateFilter.date || dateFilter.to}
                     onChange={(e) => updateCustomBound("to", e.target.value)}
-                    className="h-9 min-w-0 flex-1 rounded-lg bg-surface-muted px-2.5 text-[14px] text-ink tabular-nums focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
+                    className="h-11 min-w-0 flex-1 rounded-lg bg-surface-muted px-2.5 text-[16px] text-ink tabular-nums focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
                   />
                 </label>
                 {dateActive && (
@@ -429,7 +439,7 @@ function ReturnsExplorerInner() {
                     type="button"
                     onClick={() => selectDatePreset("all")}
                     aria-label="Clear date filter"
-                    className="pressable inline-flex h-9 shrink-0 items-center gap-1 rounded-lg px-2.5 text-[13px] font-semibold text-ink-2 hover:bg-surface-muted hover:text-ink"
+                    className="pressable inline-flex h-11 shrink-0 items-center gap-1 rounded-lg px-2.5 text-[13px] font-semibold text-ink-2 hover:bg-surface-muted hover:text-ink"
                   >
                     <X className="h-3.5 w-3.5" />
                     Clear
@@ -453,7 +463,18 @@ function ReturnsExplorerInner() {
             </p>
           )}
 
-          {parcels === null ? (
+          {parcels === null && loadError ? (
+            <div className="space-y-3 py-10 text-center">
+              <p className="text-[16px] text-ink-2">Couldn&apos;t load returns.</p>
+              <button
+                type="button"
+                onClick={() => void loadParcels()}
+                className="pressable inline-flex h-12 items-center rounded-[var(--radius-control)] bg-surface-muted px-5 text-[16px] font-bold text-ink hover:bg-surface-track"
+              >
+                Try again
+              </button>
+            </div>
+          ) : parcels === null ? (
             <div className="space-y-2" aria-busy="true" aria-label="Loading">
               {[0, 1, 2, 3].map((i) => (
                 <div key={i} className="h-[76px] animate-pulse rounded-[var(--radius-card)] bg-surface-track/60" />
@@ -505,7 +526,11 @@ function ReturnsExplorerInner() {
         >
           {isDesktop &&
             (selectedId ? (
-              <ParcelDetailPanel parcelId={selectedId} onClose={() => setSelectedId(null)} />
+              <ParcelDetailPanel
+                parcelId={selectedId}
+                onClose={() => setSelectedId(null)}
+                onChanged={() => loadParcels({ silent: true })}
+              />
             ) : (
               <div className="flex min-h-80 flex-col items-center justify-center gap-2 px-8 py-12 text-center">
                 <PackageSearch className="h-10 w-10 text-ink-3" strokeWidth={1.6} />
@@ -524,6 +549,7 @@ function ReturnsExplorerInner() {
       <ParcelDetailSheet
         parcelId={isDesktop ? null : selectedId}
         onClose={() => setSelectedId(null)}
+        onChanged={() => loadParcels({ silent: true })}
       />
     </AppShell>
   );

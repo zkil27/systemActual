@@ -51,6 +51,11 @@ describe("hasLeftWarehouse", () => {
     expect(hasLeftWarehouse(Platform.SHOPEE, "CANCELLED", null)).toBe(false);
     expect(hasLeftWarehouse(Platform.SHOPEE, "CANCELLED", new Date())).toBe(true);
   });
+  it("does not deduct TikTok CANCELLED orders on rts_time alone unless a package reached transit", () => {
+    expect(hasLeftWarehouse(Platform.TIKTOK, "CANCELLED", new Date())).toBe(false);
+    expect(hasLeftWarehouse(Platform.TIKTOK, "CANCELLED", new Date(), [{ status: "TO_FULFILL" }])).toBe(false);
+    expect(hasLeftWarehouse(Platform.TIKTOK, "CANCELLED", new Date(), [{ status: "IN_TRANSIT" }])).toBe(true);
+  });
 });
 
 describe("shipMovements", () => {

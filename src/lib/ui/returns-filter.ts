@@ -8,6 +8,8 @@ export const RETURN_FILTERS = [
   { id: "refund", label: "Buyer return" },
   { id: "issues", label: "Damaged" },
   { id: "overdue", label: "Overdue" },
+  { id: "urgent", label: "Dispute due" },
+  { id: "disputes", label: "Disputes filed" },
 ] as const;
 
 export type ReturnFilter = (typeof RETURN_FILTERS)[number]["id"];

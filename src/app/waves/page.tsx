@@ -1,20 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { WaveParcelSheet, type WaveParcelSelection } from "@/components/WaveParcelSheet";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { Button, Group } from "@/components/ui/Button";
 import { ItemThumb } from "@/components/ui/ItemThumb";
+import { ScrollChips } from "@/components/ui/ScrollChips";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
+import { Switch } from "@/components/ui/Switch";
 import { toast } from "@/components/ui/Toast";
-import { formatPeso, manilaDateTime } from "@/lib/ui/format";
+import { useConfirm } from "@/components/ui/ConfirmSheet";
+import { formatPeso, manilaDateTime, manilaTime } from "@/lib/ui/format";
 import { useLiveRefresh } from "@/lib/ui/use-live-refresh";
+import type { CourierHandoverSummary } from "@/lib/print/handover";
 import type { ReadyBreakdown } from "@/lib/waves/build";
 import { groupPickItems } from "@/lib/waves/pick-list";
 import { addHeld, HELD_LABELS } from "@/lib/waves/ready";
-import { matchParcelsForVariant, type WaveParcel, type WaveSummary } from "@/lib/waves/plan";
+import { matchParcelsForVariant, type WaveParcel, type WavePieceMode, type WaveSummary } from "@/lib/waves/plan";
 import { formatWaveScheduleSetting } from "@/lib/waves/schedule";
 
 interface WaveRow {
@@ -81,11 +85,11 @@ function readyHeader(ready: ReadyBreakdown, filter: "ALL" | "SHOPEE" | "TIKTOK")
 
   if (filter === "TIKTOK" && liveTikTok !== null) {
     return {
-      title: `${liveTikTok} to ship on TikTok`,
-      aside: null,
+      count: liveTikTok,
+      label: "to ship on TikTok",
+      waiting,
       details: [
         `${readyNow} ready now`,
-        ...(waiting > 0 ? [`${waiting} waiting 1h`] : []),
         ...heldParts,
         ...(gap && gap > 0 ? [`${gap} still syncing`] : []),
         ...(gap && gap < 0 ? [`${-gap} being re-checked`] : []),
@@ -93,52 +97,91 @@ function readyHeader(ready: ReadyBreakdown, filter: "ALL" | "SHOPEE" | "TIKTOK")
     };
   }
   return {
-    title: `${readyNow} ready to ship`,
-    aside: waiting > 0 ? `${waiting} waiting 1h` : null,
-    details: [...heldParts, ...(filter === "ALL" && liveTikTok !== null ? [`TikTok Seller Center: ${liveTikTok} to ship`] : [])],
+    count: readyNow,
+    label: "ready to ship",
+    waiting,
+    details: [...heldParts, ...(filter === "ALL" && liveTikTok !== null ? [`Seller Center shows ${liveTikTok} on TikTok`] : [])],
   };
+}
+
+/** Small label over a filter group. A form label, not a heading. */
+function FilterLabel({ children }: { children: React.ReactNode }) {
+  return <legend className="mb-1.5 text-[13px] font-semibold text-ink-3">{children}</legend>;
 }
 
 /** Preview what a wave would ship and print its pick list. Nothing is shipped from here yet. */
 export default function WavesPage() {
+  const { confirm, sheet: confirmSheet } = useConfirm();
   const [waves, setWaves] = useState<WaveRow[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [selectedWaveId, setSelectedWaveId] = useState<string | null>(null);
+  const selectedWaveIdRef = useRef<string | null>(null);
+  selectedWaveIdRef.current = selectedWaveId;
+  const [handover, setHandover] = useState<CourierHandoverSummary[]>([]);
   const [canShip, setCanShip] = useState(false);
   const [ready, setReady] = useState<ReadyBreakdown | null>(null);
   const [platformFilter, setPlatformFilter] = useState<"ALL" | "SHOPEE" | "TIKTOK">("ALL");
   const [courierFilter, setCourierFilter] = useState<string>("ALL");
+  const [pieceMode, setPieceMode] = useState<WavePieceMode>("all");
+  const [includeNewOrders, setIncludeNewOrders] = useState(false);
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [selectedTimes, setSelectedTimes] = useState<string[]>([]);
   const [continuousMode, setContinuousMode] = useState(false);
   const [customTime, setCustomTime] = useState("");
   const [timesInitialized, setTimesInitialized] = useState(false);
   const [reprintSn, setReprintSn] = useState("");
+  const [rangeFrom, setRangeFrom] = useState("1");
+  const [rangeTo, setRangeTo] = useState("");
+  const [rangeGroup, setRangeGroup] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [showFullNames, setShowFullNames] = useState(false);
   const [pickView, setPickView] = useState<"items" | "parcels">("items");
   const [parcelSelection, setParcelSelection] = useState<WaveParcelSelection | null>(null);
-  const [busy, setBusy] = useState<"preview" | "print" | "start" | "ship" | "retry" | "schedule" | "reprint" | null>(null);
+  const [busy, setBusy] = useState<"preview" | "print" | "start" | "ship" | "retry" | "cancel" | "schedule" | "reprint" | "handover" | null>(null);
 
-  const load = useCallback(async () => {
-    const res = await fetch("/api/waves");
-    if (!res.ok) return;
-    const data = await res.json();
-    setWaves(data.waves);
-    setCanShip(Boolean(data.canShip));
-    setReady(data.readyBreakdown ?? null);
-    setSchedule(data.schedule);
-    if (!timesInitialized && data.schedule) {
-      setSelectedTimes(data.schedule.times ?? []);
-      setContinuousMode(Boolean(data.schedule.continuous));
-      setTimesInitialized(true);
+  const load = useCallback(async (waveIdOverride?: string | null) => {
+    const targetWaveId = waveIdOverride !== undefined ? waveIdOverride : selectedWaveIdRef.current;
+    const qs = targetWaveId ? `?waveId=${encodeURIComponent(targetWaveId)}` : "";
+    let res: Response;
+    let handoverRes: Response | null = null;
+    try {
+      [res, handoverRes] = await Promise.all([
+        fetch(`/api/waves${qs}`, { cache: "no-store" }),
+        fetch("/api/handover", { cache: "no-store" }).catch(() => null as unknown as Response),
+      ]);
+    } catch {
+      setLoadError(true);
+      return;
+    }
+    setLoadError(!res.ok);
+    if (res.ok) {
+      const data = await res.json();
+      setWaves(data.waves);
+      if (data.selectedWaveId && (waveIdOverride === undefined || waveIdOverride === data.selectedWaveId)) {
+        selectedWaveIdRef.current = data.selectedWaveId;
+        setSelectedWaveId(data.selectedWaveId);
+      }
+      setCanShip(Boolean(data.canShip));
+      setReady(data.readyBreakdown ?? null);
+      setSchedule(data.schedule);
+      if (!timesInitialized && data.schedule) {
+        setSelectedTimes(data.schedule.times ?? []);
+        setContinuousMode(Boolean(data.schedule.continuous));
+        setTimesInitialized(true);
+      }
+    }
+    if (handoverRes?.ok) {
+      const hData = await handoverRes.json();
+      setHandover(hData.couriers ?? []);
     }
   }, [timesInitialized]);
 
-  async function run(kind: NonNullable<typeof busy>, fn: () => Promise<string | void>) {
+  async function run(kind: NonNullable<typeof busy>, fn: () => Promise<string | void>, nextWaveId?: string | null) {
     setBusy(kind);
     try {
       const msg = await fn();
       if (msg) toast(msg);
-      await load();
+      await load(nextWaveId);
     } catch (e) {
       toast((e as Error).message, "error");
     } finally {
@@ -164,11 +207,13 @@ export default function WavesPage() {
     if (
       auto &&
       !schedule?.auto &&
-      !window.confirm(
-        nextContinuous
-          ? "Turn on Continuous Auto-Ship? Every 15 minutes, Kyna Ops will arrange pickup and print labels for any ready order older than 1 hour. The warehouse PC must be on."
-          : "Ship waves automatically at these times? Each one arranges pickup on the shops and prints labels, with no tap. The warehouse PC must be on."
-      )
+      !(await confirm({
+        title: nextContinuous ? "Turn on Continuous Auto-Ship?" : "Ship waves automatically?",
+        message: nextContinuous
+          ? "Every 15 minutes, Kyna Ops will arrange pickup and print labels for any ready order older than 1 hour. The warehouse PC must be on."
+          : "Each wave time arranges pickup on the shops and prints labels, with no tap. The warehouse PC must be on.",
+        confirmLabel: "Turn on",
+      }))
     ) {
       return;
     }
@@ -191,22 +236,30 @@ export default function WavesPage() {
   const activeFilters = {
     ...(platformFilter !== "ALL" ? { platform: platformFilter } : {}),
     ...(courierFilter !== "ALL" ? { courier: courierFilter } : {}),
+    ...(pieceMode !== "all" ? { pieceMode } : {}),
+    ...(includeNewOrders ? { includeNewOrders: true } : {}),
   };
 
   const filterLabel = [
     platformFilter === "SHOPEE" ? "Shopee" : platformFilter === "TIKTOK" ? "TikTok" : null,
     courierFilter !== "ALL" ? courierFilter : null,
+    pieceMode === "singles" ? "1-piece" : pieceMode === "multis" ? "Multi-item" : null,
   ]
     .filter(Boolean)
     .join(" · ");
 
-  function shipNowClick() {
+  async function shipNowClick() {
     const scope = filterLabel ? `${filterLabel} parcels` : "everything that's ready";
-    if (!window.confirm(`Ship ${scope} now? This arranges pickup on the shops and prints labels. It can't be undone.`)) return;
+    const ok = await confirm({
+      title: `Ship ${scope} now?`,
+      message: "This arranges pickup on the shops and prints labels. It can't be undone.",
+      confirmLabel: "Ship now",
+    });
+    if (!ok) return;
     run("ship", async () => {
       const data = await post({ action: "ship_now", ...activeFilters });
       return data.shipping ? `Shipping ${data.shipping} parcels` : "Nothing ready to ship";
-    });
+    }, null);
   }
 
   useEffect(() => {
@@ -261,9 +314,12 @@ export default function WavesPage() {
 
   async function start(wave: WaveRow) {
     if (
-      !window.confirm(
-        `Ship ${wave.parcelCount} parcels now? Kyna Ops will arrange pickup on the shops and print the labels. This can't be undone. Each order is checked for cancellation again just before it ships.`
-      )
+      !(await confirm({
+        title: `Ship ${wave.parcelCount} parcels now?`,
+        message:
+          "Kyna Ops will arrange pickup on the shops and print the labels. This can't be undone. Each order is checked for cancellation again just before it ships.",
+        confirmLabel: "Ship",
+      }))
     ) {
       return;
     }
@@ -271,7 +327,7 @@ export default function WavesPage() {
     try {
       const data = await post({ action: "start", waveId: wave.id });
       toast(`Shipping ${data.shipping} parcels`);
-      await load();
+      await load(wave.id);
     } catch (e) {
       toast((e as Error).message, "error");
     } finally {
@@ -295,7 +351,8 @@ export default function WavesPage() {
     try {
       const data = await post({ action: "preview", ...activeFilters, ...(limit ? { limit } : {}) });
       toast(`${data.summary.total} parcels ready`);
-      await load();
+      if (data.waveId) setSelectedWaveId(data.waveId);
+      await load(data.waveId ?? null);
     } catch (e) {
       toast((e as Error).message, "error");
     } finally {
@@ -315,9 +372,12 @@ export default function WavesPage() {
     }
   }
 
-  const latest = waves?.[0];
+  const latest = (selectedWaveId ? waves?.find((w) => w.id === selectedWaveId) : undefined) ?? waves?.[0];
   const s = latest?.summary;
   const skips = s ? SKIP_LABELS.filter(([k]) => s.skipped[k] > 0) : [];
+  const hasPrintedOrQueued =
+    Boolean(latest) &&
+    ((latest?.progress?.PRINTED ?? 0) > 0 || (latest?.progress?.LABEL_READY ?? 0) > 0);
 
   const allTimes = [...new Set([...PRESET_TIMES, ...selectedTimes])].sort();
   const header = ready ? readyHeader(ready, platformFilter) : null;
@@ -326,88 +386,110 @@ export default function WavesPage() {
     <AppShell title="Waves" width="wide" onRefresh={load}>
       <div className="space-y-6 lg:grid lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
         <div className="space-y-6">
-          <Group className="space-y-3.5 p-4">
+          <Group className="p-4">
             {ready && header && (
-              <div className="space-y-1">
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-[16px] font-bold text-ink tabular-nums">{header.title}</span>
-                  {header.aside && <span className="text-[13px] text-ink-3 tabular-nums">{header.aside}</span>}
-                </div>
+              <div>
+                <p className="flex items-baseline gap-2">
+                  <AnimatedNumber
+                    value={header.count}
+                    className="text-[34px] font-extrabold leading-none tracking-[-0.02em] text-ink"
+                  />
+                  <span className="text-[17px] font-semibold text-ink">{header.label}</span>
+                </p>
                 {header.details.length > 0 && (
-                  <p className="text-[13px] leading-snug text-ink-3 tabular-nums">{header.details.join(" · ")}</p>
+                  <p className="mt-1.5 text-[14px] leading-snug text-ink-3 tabular-nums">{header.details.join(" · ")}</p>
                 )}
               </div>
             )}
 
-            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by shop">
-              {(
-                [
-                  { id: "ALL", label: ready ? `All (${ready.totalReady})` : "All shops" },
-                  { id: "SHOPEE", label: ready ? `Shopee (${ready.byPlatform.SHOPEE})` : "Shopee" },
-                  { id: "TIKTOK", label: ready ? `TikTok (${ready.byPlatform.TIKTOK})` : "TikTok" },
-                ] as const
-              ).map((opt) => {
-                const active = platformFilter === opt.id;
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => setPlatformFilter(opt.id)}
-                    className={`pressable h-9 rounded-full px-3 text-[13px] font-semibold ${
-                      active ? "bg-ink text-ink-inverse" : "bg-surface-muted text-ink-2 hover:bg-surface-track"
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
+            <div className="mt-5 space-y-4">
+              <fieldset>
+                <FilterLabel>Shop</FilterLabel>
+                <SegmentedControl
+                  label="Shop"
+                  size="sm"
+                  options={[
+                    { id: "ALL", label: ready ? `All ${ready.totalReady}` : "All" },
+                    { id: "SHOPEE", label: ready ? `Shopee ${ready.byPlatform.SHOPEE}` : "Shopee" },
+                    { id: "TIKTOK", label: ready ? `TikTok ${ready.byPlatform.TIKTOK}` : "TikTok" },
+                  ]}
+                  value={platformFilter}
+                  onChange={setPlatformFilter}
+                />
+              </fieldset>
+
+              {ready && ready.byCourier.length > 0 && (
+                <fieldset>
+                  <FilterLabel>Courier</FilterLabel>
+                  <ScrollChips label="Courier" className="-mx-4" rowClassName="gap-1.5 px-4 py-1">
+                    {[{ courier: "ALL", count: null as number | null }, ...ready.byCourier].map((c) => {
+                      const active = courierFilter === c.courier;
+                      return (
+                        <button
+                          key={c.courier}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => setCourierFilter(c.courier)}
+                          className={`pressable relative inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-semibold after:absolute after:-inset-y-1 after:inset-x-0 after:content-[''] ${
+                            active
+                              ? "bg-ink text-ink-inverse"
+                              : "bg-surface text-ink-2 ring-1 ring-inset ring-hairline-strong hover:text-ink"
+                          }`}
+                        >
+                          {c.courier === "ALL" ? "All couriers" : c.courier}
+                          {c.count !== null && (
+                            <span className={`tabular-nums ${active ? "text-ink-inverse/70" : "text-ink-3"}`}>{c.count}</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </ScrollChips>
+                </fieldset>
+              )}
+
+              <fieldset>
+                <FilterLabel>Pieces per parcel</FilterLabel>
+                <SegmentedControl
+                  label="Pieces per parcel"
+                  size="sm"
+                  options={[
+                    { id: "all", label: "Any" },
+                    { id: "singles", label: "1 piece" },
+                    { id: "multis", label: "2 or more" },
+                  ]}
+                  value={pieceMode}
+                  onChange={setPieceMode}
+                />
+              </fieldset>
+
+              <label className="flex min-h-11 cursor-pointer items-center justify-between gap-4 border-t border-hairline pt-3.5">
+                <span className="min-w-0">
+                  <span className="block text-[15px] font-semibold text-ink">Include orders under 1h old</span>
+                  <span className="block text-[13px] text-ink-3 tabular-nums">
+                    {header && header.waiting > 0
+                      ? `${header.waiting} still inside the buyer's cancel window`
+                      : "None waiting right now"}
+                  </span>
+                </span>
+                <Switch
+                  checked={includeNewOrders}
+                  onChange={setIncludeNewOrders}
+                  label="Include orders under 1h old"
+                />
+              </label>
             </div>
 
-            {ready && ready.byCourier.length > 0 && (
-              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by courier">
-                <button
-                  type="button"
-                  aria-pressed={courierFilter === "ALL"}
-                  onClick={() => setCourierFilter("ALL")}
-                  className={`pressable h-9 rounded-full px-3 text-[13px] font-semibold ${
-                    courierFilter === "ALL" ? "bg-brand-solid text-on-brand" : "bg-surface-muted text-ink-2 hover:bg-surface-track"
-                  }`}
-                >
-                  All couriers
-                </button>
-                {ready.byCourier.map((c) => {
-                  const active = courierFilter === c.courier;
-                  return (
-                    <button
-                      key={c.courier}
-                      type="button"
-                      aria-pressed={active}
-                      onClick={() => setCourierFilter(c.courier)}
-                      className={`pressable h-9 rounded-full px-3 text-[13px] font-semibold tabular-nums ${
-                        active ? "bg-brand-solid text-on-brand" : "bg-surface-muted text-ink-2 hover:bg-surface-track"
-                      }`}
-                    >
-                      {c.courier} ({c.count})
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            <p className="text-[14px] text-ink-3">
-              Every order is checked live for cancellations before shipping. Preview first or print straight away.
-            </p>
-            <Button full size="lg" disabled={busy !== null} onClick={() => preview()}>
-              {busy === "preview"
-                ? "Checking orders…"
-                : filterLabel
-                  ? `Preview ${filterLabel}`
-                  : "Preview wave"}
-            </Button>
-            <Button full variant="plain" disabled={busy !== null} onClick={() => preview(5)}>
-              Preview a test wave (5 parcels)
-            </Button>
+            <div className="mt-5 space-y-1.5">
+              <Button full size="lg" disabled={busy !== null} onClick={() => preview()}>
+                {busy === "preview"
+                  ? "Checking orders…"
+                  : filterLabel
+                    ? `Preview ${filterLabel}`
+                    : "Preview wave"}
+              </Button>
+              <Button full variant="plain" disabled={busy !== null} onClick={() => preview(5)}>
+                Try a test wave of 5
+              </Button>
             {canShip && (
               <Button full variant="secondary" disabled={busy !== null || Boolean(running)} onClick={shipNowClick}>
                 {busy === "ship"
@@ -419,6 +501,10 @@ export default function WavesPage() {
                       : "Print wave now"}
               </Button>
             )}
+              <p className="pt-1 text-center text-[13px] text-ink-3">
+                Each order is re-checked for cancellation right before it ships.
+              </p>
+            </div>
           </Group>
 
           <Group className="space-y-3.5 p-4">
@@ -472,9 +558,9 @@ export default function WavesPage() {
                     value={customTime}
                     onChange={(e) => setCustomTime(e.target.value)}
                     placeholder="Add HH:MM (e.g. 19:00)"
-                    className="h-10 min-w-0 flex-1 rounded-[var(--radius-control)] bg-surface-muted px-3 text-[14px] tabular-nums text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
+                    className="h-11 min-w-0 flex-1 rounded-[var(--radius-control)] bg-surface-muted px-3 text-[16px] tabular-nums text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
                   />
-                  <Button variant="plain" type="button" onClick={addCustomTime} className="h-10 px-3">
+                  <Button variant="plain" type="button" onClick={addCustomTime} className="h-11 px-3">
                     Add
                   </Button>
                 </div>
@@ -523,11 +609,190 @@ export default function WavesPage() {
                 Reprint
               </Button>
             </form>
+
+            {hasPrintedOrQueued && latest && s && (
+              <form
+                className="space-y-2.5 border-t border-hairline pt-3"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const fromPos = Number(rangeFrom || 1);
+                  const toPos = Number(rangeTo || latest.parcelCount);
+                  if (!Number.isInteger(fromPos) || !Number.isInteger(toPos) || fromPos < 1 || toPos < fromPos) {
+                    toast("Enter a valid parcel range (e.g. 47 to 200)", "error");
+                    return;
+                  }
+                  run("reprint", async () => {
+                    const data = await post({
+                      action: "reprint_range",
+                      waveId: latest.id,
+                      fromPos,
+                      toPos,
+                      ...(rangeGroup ? { groupKey: rangeGroup } : {}),
+                    });
+                    return `Reprinting ${data.queuedParcels} parcels`;
+                  });
+                }}
+              >
+                <p className="text-[13px] font-semibold text-ink-2">
+                  Printer jammed? Reprint a position range (#1–#{latest.parcelCount})
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={latest.parcelCount}
+                    value={rangeFrom}
+                    onChange={(e) => setRangeFrom(e.target.value)}
+                    placeholder="From #"
+                    aria-label="From parcel number"
+                    className="h-11 w-24 rounded-[var(--radius-control)] bg-surface-muted px-3 text-[16px] tabular-nums text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
+                  />
+                  <span className="text-[14px] text-ink-3">to</span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={latest.parcelCount}
+                    value={rangeTo || String(latest.parcelCount)}
+                    onChange={(e) => setRangeTo(e.target.value)}
+                    placeholder={String(latest.parcelCount)}
+                    aria-label="To parcel number"
+                    className="h-11 w-24 rounded-[var(--radius-control)] bg-surface-muted px-3 text-[16px] tabular-nums text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none"
+                  />
+                  <Button type="submit" variant="secondary" disabled={busy !== null} className="h-11 flex-1">
+                    Reprint range
+                  </Button>
+                </div>
+                {s.groups.length > 1 && (
+                  <select
+                    value={rangeGroup}
+                    onChange={(e) => setRangeGroup(e.target.value)}
+                    aria-label="Filter range by courier stack"
+                    className="h-11 w-full rounded-[var(--radius-control)] bg-surface-muted px-3 text-[16px] text-ink"
+                  >
+                    <option value="">All courier stacks</option>
+                    {s.groups.map((g) => (
+                      <option key={g.key} value={g.key}>
+                        {g.title} ({g.count})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </form>
+            )}
           </Group>
+
+          {handover.length > 0 && (
+            <Group className="space-y-3 p-4">
+              <span className="block text-[17px] font-bold text-ink">Courier handover today</span>
+              <ul className="divide-y divide-hairline">
+                {handover.map((h) => (
+                  <li key={h.courier} className="flex items-center justify-between gap-3 py-2.5">
+                    <span className="min-w-0">
+                      <span className="block text-[15px] font-bold text-ink">{h.courier}</span>
+                      <span className="block text-[13px] text-ink-3 tabular-nums">
+                        {h.totalPrinted} printed · {h.handedOverCount} picked up · {h.awaitingPickupCount} waiting
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      <Button
+                        variant="secondary"
+                        disabled={busy !== null}
+                        className="h-11 px-3 text-[14px]"
+                        onClick={() =>
+                          run("handover", async () => {
+                            const res = await fetch("/api/handover", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ courier: h.courier, mode: "print" }),
+                            });
+                            const data = await res.json().catch(() => ({}));
+                            if (!res.ok) throw new Error(data.error || "Couldn't print slip");
+                            return `${h.courier} handover slip queued`;
+                          })
+                        }
+                      >
+                        Print slip
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const res = await fetch("/api/handover", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ courier: h.courier, mode: "pdf" }),
+                          });
+                          if (!res.ok) return toast("Couldn't open slip", "error");
+                          const blob = await res.blob();
+                          const url = URL.createObjectURL(blob);
+                          window.open(url, "_blank", "noopener,noreferrer");
+                        }}
+                        className="pressable inline-flex h-11 items-center rounded-[var(--radius-control)] bg-surface-muted px-3 text-[13px] font-semibold text-ink hover:bg-surface-track"
+                      >
+                        PDF
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Group>
+          )}
         </div>
 
-        <div>
-          {waves === null ? (
+        <div className="space-y-4">
+          {waves && waves.length > 1 && (
+            <ScrollChips role="tablist" label="Recent waves" rowClassName="gap-1.5 py-0.5">
+              {waves.map((w) => {
+                const active = w.id === latest?.id;
+                const failCount = w.failed.length;
+                const statusWord =
+                  w.status === "RUNNING"
+                    ? "Shipping"
+                    : w.status === "PREVIEW"
+                      ? "Preview"
+                      : w.status === "CANCELLED"
+                        ? "Stopped"
+                        : failCount > 0
+                          ? `Done (${failCount} failed)`
+                          : "Done";
+                return (
+                  <button
+                    key={w.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => {
+                      selectedWaveIdRef.current = w.id;
+                      setSelectedWaveId(w.id);
+                      void load(w.id);
+                    }}
+                    className={`pressable h-11 shrink-0 rounded-full px-3.5 text-[13px] font-semibold tabular-nums transition-colors ${
+                      active
+                        ? "bg-ink text-ink-inverse"
+                        : w.status === "RUNNING"
+                          ? "bg-brand-soft text-brand ring-1 ring-brand/35"
+                          : "bg-surface text-ink-2 shadow-[var(--shadow-card)] hover:text-ink"
+                    }`}
+                  >
+                    {statusWord} · {w.parcelCount} · {manilaTime(w.createdAt)}
+                  </button>
+                );
+              })}
+            </ScrollChips>
+          )}
+          {waves === null && loadError ? (
+            <div className="space-y-3 py-10 text-center">
+              <p className="text-[16px] text-ink-2">Couldn&apos;t load waves.</p>
+              <button
+                type="button"
+                onClick={() => void load()}
+                className="pressable inline-flex h-12 items-center rounded-[var(--radius-control)] bg-surface-muted px-5 text-[16px] font-bold text-ink hover:bg-surface-track"
+              >
+                Try again
+              </button>
+            </div>
+          ) : waves === null ? (
             <div className="h-40 animate-pulse rounded-[var(--radius-card)] bg-surface-track/60" aria-busy="true" />
           ) : !latest || !s ? (
             <p className="px-1 text-[16px] text-ink-3">No waves yet.</p>
@@ -576,7 +841,7 @@ export default function WavesPage() {
                           </span>
                           <Button
                             variant="secondary"
-                            className="h-10 shrink-0 px-3"
+                            className="h-11 shrink-0 px-3"
                             disabled={busy !== null}
                             onClick={() =>
                               run("retry", async () => {
@@ -607,6 +872,44 @@ export default function WavesPage() {
                     )}
                   </div>
                 )}
+                {latest.status === "RUNNING" && (
+                  <div className="mt-4 space-y-2">
+                    <Button full variant="secondary" disabled={busy !== null} onClick={() => printPickList(latest.id)}>
+                      {busy === "print" ? "Sending…" : "Reprint pick list"}
+                    </Button>
+                    <Button
+                      full
+                      variant="danger"
+                      disabled={busy !== null}
+                      onClick={async () => {
+                        if (
+                          !(await confirm({
+                            title: "Stop this wave?",
+                            message:
+                              "Parcels not yet shipped can go in the next wave; already-shipped parcels can still be retried.",
+                            confirmLabel: "Stop wave",
+                            danger: true,
+                          }))
+                        ) {
+                          return;
+                        }
+                        void run("cancel", async () => {
+                          await post({ action: "cancel_wave", waveId: latest.id });
+                          return "Wave stopped";
+                        });
+                      }}
+                    >
+                      {busy === "cancel" ? "Stopping…" : "Stop wave"}
+                    </Button>
+                  </div>
+                )}
+                {(latest.status === "DONE" || latest.status === "CANCELLED") && (
+                  <div className="mt-4">
+                    <Button full variant="secondary" disabled={busy !== null} onClick={() => printPickList(latest.id)}>
+                      {busy === "print" ? "Sending…" : "Reprint pick list"}
+                    </Button>
+                  </div>
+                )}
                 {latest.status === "PREVIEW" && s.total > 0 && (
                   <div className="mt-4 space-y-2">
                     {canShip && Date.now() - new Date(latest.createdAt).getTime() < PREVIEW_MAX_AGE_MS ? (
@@ -622,6 +925,19 @@ export default function WavesPage() {
                     )}
                     <Button full variant="secondary" disabled={busy !== null} onClick={() => printPickList(latest.id)}>
                       {busy === "print" ? "Sending…" : "Print pick list only"}
+                    </Button>
+                    <Button
+                      full
+                      variant="plain"
+                      disabled={busy !== null}
+                      onClick={() =>
+                        run("cancel", async () => {
+                          await post({ action: "cancel_wave", waveId: latest.id });
+                          return "Preview discarded";
+                        })
+                      }
+                    >
+                      Discard preview
                     </Button>
                   </div>
                 )}
@@ -845,8 +1161,25 @@ export default function WavesPage() {
       <WaveParcelSheet
         selection={parcelSelection}
         showFullNames={showFullNames}
+        canExclude={latest?.status === "PREVIEW"}
+        actionBusy={busy !== null}
+        onReprintParcel={(orderSn) =>
+          run("reprint", async () => {
+            const data = await post({ action: "reprint", orderSn });
+            return `Reprinting ${data.orderSn}`;
+          })
+        }
+        onExcludeParcel={async (waveItemId) => {
+          if (!latest) return;
+          await run("cancel", async () => {
+            await post({ action: "exclude_parcel", waveId: latest.id, waveItemId });
+            setParcelSelection(null);
+            return "Parcel left out of wave";
+          });
+        }}
         onClose={() => setParcelSelection(null)}
       />
+      {confirmSheet}
     </AppShell>
   );
 }

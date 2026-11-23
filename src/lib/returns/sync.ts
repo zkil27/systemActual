@@ -1,4 +1,4 @@
-import { DigitalStatus, Platform, type Prisma, type ReturnParcel, type ShopConnection } from "@prisma/client";
+import { DigitalStatus, Platform, ReturnCategory, type Prisma, type ReturnParcel, type ShopConnection } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { shopeeGet } from "@/lib/connectors/shopee";
 import { tiktokRequest } from "@/lib/connectors/tiktok";
@@ -328,9 +328,19 @@ async function markCourierReturned(parcel: ReturnParcel, at: Date, source: strin
  * delivered, oldest-checked first, regardless of age (up to 60 days), so the
  * overdue and missing lists keep working past the old 7-day window.
  */
-export function openParcelsWhere(shopConnectionId: string, now: number): Prisma.ReturnParcelWhereInput {
+/**
+ * Parcels worth a courier tracking check this tick. TikTok buyer returns have
+ * no seller-side reverse tracking (their status comes from the returns sync),
+ * so they're left out instead of using up batch slots for nothing.
+ */
+export function openParcelsWhere(
+  shopConnectionId: string,
+  now: number,
+  platform?: Platform
+): Prisma.ReturnParcelWhereInput {
   return {
     shopConnectionId,
+    ...(platform === Platform.TIKTOK ? { category: ReturnCategory.FAILED_DELIVERY } : {}),
     expectsPhysicalReturn: true,
     physicallyReceivedAt: null,
     courierReturnedToSellerAt: null,
@@ -342,7 +352,7 @@ export function openParcelsWhere(shopConnectionId: string, now: number): Prisma.
 
 export async function refreshOpenParcels(conn: ShopConnection, token: string, deadline: number) {
   const parcels = await prisma.returnParcel.findMany({
-    where: openParcelsWhere(conn.id, Date.now()),
+    where: openParcelsWhere(conn.id, Date.now(), conn.platform),
     orderBy: [{ lastCheckedAt: { sort: "asc", nulls: "first" } }],
     take: RECHECK_BATCH,
   });

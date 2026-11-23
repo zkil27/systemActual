@@ -25,6 +25,8 @@ export interface ParcelStatusInput {
   /** False for refund-only returns: nothing is coming back. */
   expectsPhysicalReturn?: boolean;
   digitalStatus?: string;
+  /** Owner closed the case by hand. */
+  resolvedAt?: string | null;
 }
 
 export function getParcelStatus(p: ParcelStatusInput): ParcelStatus {
@@ -33,6 +35,7 @@ export function getParcelStatus(p: ParcelStatusInput): ParcelStatus {
     return { label: "Issue", tone: "issue" };
   }
   if (p.physicallyReceivedAt) return { label: "Arrived", tone: "arrived" };
+  if (p.resolvedAt) return { label: "Settled", tone: "neutral" };
   if (p.digitalStatus === "CANCELLED_RETURN") return { label: "Cancelled", tone: "neutral" };
   if (p.expectsPhysicalReturn === false) return { label: "Refund only", tone: "neutral" };
   if (p.courierReturnedToSellerAt) return { label: "Returned to seller", tone: "neutral" };

@@ -395,4 +395,11 @@ describe("open parcels are refreshed however old", () => {
     expect(twentyDaysAgo).toBeGreaterThanOrEqual(since);
     expect(where.expectsPhysicalReturn).toBe(true);
   });
+
+  it("skips TikTok buyer returns (no seller-side tracking) but keeps Shopee's", async () => {
+    const { openParcelsWhere } = await import("@/lib/returns/sync");
+    const now = Date.now();
+    expect(openParcelsWhere("shop1", now, "TIKTOK").category).toBe("FAILED_DELIVERY");
+    expect(openParcelsWhere("shop1", now, "SHOPEE").category).toBeUndefined();
+  });
 });

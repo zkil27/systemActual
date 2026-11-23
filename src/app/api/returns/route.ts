@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PhysicalCondition, Prisma, ReturnCategory } from "@prisma/client";
+import { DisputeStatus, PhysicalCondition, Prisma, ReturnCategory } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { getRealShopWhere } from "@/lib/shops";
 import {
   activeSinceWhere,
   arrivedWhere,
@@ -9,6 +10,8 @@ import {
   missingWhere,
   overdueWhere,
   returnedToSellerWhere,
+  isUrgentDeadline,
+  urgentDeadlineWhere,
 } from "@/lib/returns/rules";
 import { getManilaDateRangeBounds } from "@/lib/time";
 
@@ -31,10 +34,14 @@ export async function GET(req: NextRequest) {
     });
     const hasDateFilter = Boolean(dateBounds && (dateBounds.start || dateBounds.end));
 
+    const realFilter = await getRealShopWhere();
     const conditions: Prisma.ReturnParcelWhereInput[] = [];
+    if (Object.keys(realFilter).length > 0) {
+      conditions.push(realFilter);
+    }
     // Apply the go-live cutoff only when viewing the unfiltered active queue;
-    // explicit date/range filters or text searches inspect history as well.
-    if (!hasDateFilter && !q) {
+    // explicit date/range filters, text searches and dispute views inspect history as well.
+    if (!hasDateFilter && !q && filter !== "urgent" && filter !== "disputes") {
       const activeFilter = activeSinceWhere(missingSinceAt);
       if (activeFilter) {
         conditions.push(activeFilter);
@@ -63,6 +70,10 @@ export async function GET(req: NextRequest) {
       });
     } else if (filter === "overdue") {
       conditions.push(overdueWhere(overdueDays, now, missingSinceAt));
+    } else if (filter === "urgent") {
+      conditions.push(urgentDeadlineWhere(now));
+    } else if (filter === "disputes") {
+      conditions.push({ disputeStatus: DisputeStatus.FILED });
     }
 
     if (hasDateFilter && dateBounds) {
@@ -122,8 +133,14 @@ export async function GET(req: NextRequest) {
           digitalStatus: true,
           courierReturnedToSellerAt: true,
           digitalReturnTaggedAt: true,
+          disputeDeadlineAt: true,
+          disputeStatus: true,
+          resolvedAt: true,
         },
-        orderBy: [{ courierReturnedToSellerAt: "desc" }, { digitalReturnTaggedAt: "desc" }],
+        orderBy:
+          filter === "urgent"
+            ? [{ disputeDeadlineAt: "asc" }]
+            : [{ courierReturnedToSellerAt: "desc" }, { digitalReturnTaggedAt: "desc" }],
         take: limit,
         skip: offset,
       }),
@@ -150,6 +167,10 @@ export async function GET(req: NextRequest) {
         isMissingDiscrepancy: isMissingDiscrepancy(p, missingSinceAt),
         isOverdueRts: isOverdueRts(p, overdueDays, now, missingSinceAt),
         expectsPhysicalReturn: p.expectsPhysicalReturn,
+        disputeStatus: p.disputeStatus,
+        disputeDeadlineAt: p.disputeDeadlineAt?.toISOString() ?? null,
+        isUrgentDeadline: isUrgentDeadline(p, now),
+        resolvedAt: p.resolvedAt?.toISOString() ?? null,
       })),
     });
   } catch (err) {

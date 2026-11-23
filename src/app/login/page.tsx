@@ -3,8 +3,9 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ScanBarcode } from "lucide-react";
+import { Eye, EyeOff, ScanBarcode } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { safeNextPath } from "@/lib/ui/safe-next";
 
 const fieldClass =
   "h-[52px] w-full bg-transparent px-4 text-[17px] text-ink placeholder:text-ink-3 focus:outline-none";
@@ -12,12 +13,14 @@ const fieldClass =
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextPath = searchParams.get("next") || "/";
+  // Only same-site paths: "?next=//evil.com" or "?next=https://..." would leave the app.
+  const nextPath = safeNextPath(searchParams.get("next"));
   // Dev-only hints. Next swaps NODE_ENV for a literal, so production builds drop them entirely.
   const demo = process.env.NODE_ENV === "development";
 
   const [email, setEmail] = useState(demo ? "owner@kynaph.com" : "");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [shakeKey, setShakeKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
@@ -73,18 +76,29 @@ function LoginForm() {
                 className={fieldClass}
               />
             </label>
-            <label className="block">
-              <span className="sr-only">Password</span>
-              <input
-                type="password"
-                required
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Password"
-                className={fieldClass}
-              />
-            </label>
+            <div className="flex items-center">
+              <label className="block min-w-0 flex-1">
+                <span className="sr-only">Password</span>
+                <input
+                  type={showPassword ? "text" : "password"}
+                  required
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Password"
+                  className={fieldClass}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-pressed={showPassword}
+                className="pressable mr-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-3 hover:text-ink"
+              >
+                {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+              </button>
+            </div>
           </div>
 
           {error && (

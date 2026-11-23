@@ -4,6 +4,7 @@ import { useRef } from "react";
 import { ButtonLink } from "@/components/ui/Button";
 import { Sheet } from "@/components/ui/Sheet";
 import type { CategoryDailyTruth } from "@/lib/analytics/daily-returns";
+import type { CourierRate } from "@/lib/analytics/rates";
 import { formatPeso, shortCourier } from "@/lib/ui/format";
 import { returnsUrl, type ReturnDateFilter, type ReturnFilter } from "@/lib/ui/returns-filter";
 
@@ -43,11 +44,14 @@ export function CategorySheet({
   category,
   stats,
   dateFilter,
+  courierRates = [],
   onClose,
 }: {
   category: CategoryKey | null;
   stats: CategoryDailyTruth | null;
   dateFilter?: Partial<ReturnDateFilter>;
+  /** 30-day courier failure / missing rates. */
+  courierRates?: CourierRate[];
   onClose: () => void;
 }) {
   // Keep the last content so the sheet isn't blank while it slides away.
@@ -79,10 +83,34 @@ export function CategorySheet({
             )}
           </RowGroup>
 
-          {shown.category === "refund" && (
-            <RowGroup label="By store">
-              <Row label="Shopee" value={shown.stats.shopeeTaggedCount} />
-              <Row label="TikTok Shop" value={shown.stats.tiktokTaggedCount} />
+          <RowGroup label="By store">
+            <Row label="Shopee" value={shown.stats.shopeeTaggedCount} />
+            <Row label="TikTok Shop" value={shown.stats.tiktokTaggedCount} />
+          </RowGroup>
+
+          {shown.category === "failed" && courierRates.some((c) => c.shipped > 0) && (
+            <RowGroup label="Courier failure rate · last 30 days">
+              {courierRates
+                .filter((c) => c.shipped > 0)
+                .map((c) => (
+                  <Row
+                    key={c.courier}
+                    label={`${shortCourier(c.courier)} · ${c.shipped} shipped`}
+                    value={
+                      c.failRatePct === null ? (
+                        <span className="text-ink-3">{c.failed} failed</span>
+                      ) : (
+                        <>
+                          {c.failRatePct}% failed
+                          {c.missingRatePct ? (
+                            <span className="ml-2 text-missing">· {c.missingRatePct}% missing</span>
+                          ) : null}
+                        </>
+                      )
+                    }
+                    tone={c.failRatePct !== null && c.failRatePct >= 10 ? "text-failed-ink" : undefined}
+                  />
+                ))}
             </RowGroup>
           )}
 

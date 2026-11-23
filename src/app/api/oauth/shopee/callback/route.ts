@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getOwnerSession } from "@/lib/auth";
+import { encryptSecret } from "@/lib/crypto";
 import { exchangeShopeeCode } from "@/lib/connectors/shopee";
 import { checkOAuthState, clearOAuthStateCookie } from "@/lib/oauth-state";
 import { runTick } from "@/lib/worker/tick";
@@ -29,8 +30,8 @@ async function connectShopee(req: NextRequest, code: string, shopId: string): Pr
   try {
     const tokens = await exchangeShopeeCode(code, shopId);
     const tokenData = {
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
+      accessToken: encryptSecret(tokens.accessToken),
+      refreshToken: encryptSecret(tokens.refreshToken),
       tokenExpiresAt: new Date(Date.now() + tokens.expiresIn * 1000),
       tokenErrorAt: null,
       tokenError: null,

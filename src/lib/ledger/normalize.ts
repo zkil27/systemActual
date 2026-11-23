@@ -114,7 +114,18 @@ export function mapShopeeOrder(o: Raw): NormalizedOrder {
 /** One order from /order/202309/orders/search. TikTok line items are one unit each. */
 export function mapTikTokOrder(o: Raw): NormalizedOrder {
   const createdAt = fromUnix(o.create_time) ?? new Date(0);
-  const items = arr(o.line_items);
+  const status = String(o.status ?? "UNKNOWN");
+  const orderCancelled = status.trim().toUpperCase() === "CANCELLED";
+  const allItems = arr(o.line_items);
+  // Filter out partially-cancelled line items on active orders so pick lists,
+  // packing slips, and stock deductions only count active items.
+  const activeItems = orderCancelled
+    ? allItems
+    : allItems.filter((li) => {
+        const ds = String(li.display_status ?? "").trim().toUpperCase();
+        return ds !== "CANCELLED" && ds !== "CANCELED";
+      });
+  const items = activeItems.length > 0 ? activeItems : allItems;
   const lines = items.map((li) => ({
     listingId: String(li.product_id ?? ""),
     variationId: String(li.sku_id ?? ""),

@@ -45,8 +45,10 @@ describe("shipBlocker", () => {
     expect(shipBlocker(order({ status: "CANCELLED" }), pkg(), now)).toBe("cancelled");
   });
 
-  it("waits an hour after the order was placed", () => {
-    expect(shipBlocker(order({ platformCreatedAt: new Date(now.getTime() - 59 * 60_000) }), pkg(), now)).toBe("tooNew");
+  it("waits an hour after the order was placed unless includeNewOrders is enabled", () => {
+    const young = order({ platformCreatedAt: new Date(now.getTime() - 59 * 60_000) });
+    expect(shipBlocker(young, pkg(), now)).toBe("tooNew");
+    expect(shipBlocker(young, pkg(), now, { includeNewOrders: true })).toBeNull();
   });
 
   it("skips already-arranged, split and in-another-wave packages", () => {

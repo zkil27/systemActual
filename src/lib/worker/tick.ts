@@ -11,6 +11,7 @@ import { recordShipments } from "@/lib/stock/ledger";
 import { pushStock } from "@/lib/stock/push";
 import { requeueStalePrintJobs } from "@/lib/print/jobs";
 import { sendDailyBriefIfDue } from "@/lib/reports/daily-brief";
+import { runProactiveAlerts } from "@/lib/reports/alerts";
 import { advanceShopeeWaves } from "@/lib/shipping/shopee-engine";
 import { advanceTikTokWaves } from "@/lib/shipping/tiktok-engine";
 import { finishDoneWaves, maybeStartScheduledWave } from "@/lib/waves/run";
@@ -231,6 +232,12 @@ async function tickOnce(
     console.error("[tick] daily brief", err);
   }
 
+  try {
+    await withSpan("worker.tick.alerts", () => runProactiveAlerts());
+  } catch (err) {
+    console.error("[tick] proactive alerts", err);
+  }
+
   const [pruneRes, runningWaves] = await Promise.all([
     pruneDailyData(),
     prisma.wave.count({ where: { status: WaveStatus.RUNNING } }),
@@ -248,11 +255,15 @@ export async function runTick(
 ): Promise<TickResult> {
   const started = Date.now();
   const deadline = started + TICK_BUDGET_MS;
+  // Only the first pass honours the platform filter. A rerun was asked for by
+  // some other webhook/agent call, which may be for the other shop, so later
+  // passes cover every shop (a Shopee webhook burst must never starve TikTok).
+  let pass = 0;
   const run = await runLocked({
     id: "tick",
     leaseMs: LEASE_MS,
     deadline,
-    fn: () => tickOnce(deadline, opts),
+    fn: () => tickOnce(deadline, pass++ === 0 ? opts : undefined),
   });
   const last = run.passes[run.passes.length - 1];
   return {

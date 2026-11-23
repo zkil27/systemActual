@@ -9,6 +9,7 @@ import {
   PackageSearch,
   Printer,
   ScanBarcode,
+  Search,
   Settings2,
   Shirt,
   type LucideIcon,
@@ -69,6 +70,7 @@ const SIDEBAR_PRIMARY: Tab[] = [
     badge: true,
   },
   { href: "/scan", label: "Scan", icon: ScanBarcode, match: (p) => p.startsWith("/scan") },
+  { href: "/orders", label: "Find an order", icon: Search, match: (p) => p.startsWith("/orders") },
 ];
 
 const SIDEBAR_OPS: Tab[] = [
@@ -141,6 +143,8 @@ function SidebarList({
 // tab indicator can slide from the old tab and the badge doesn't pop again.
 let lastTabIndex = -1;
 let lastMissing = 0;
+/** Whether any screen has told us the Missing count this session. */
+let missingKnown = false;
 
 export function AppShell({
   children,
@@ -167,11 +171,32 @@ export function AppShell({
     return () => cancelAnimationFrame(id);
   }, [activeIndex]);
 
-  const missing = missingCount ?? lastMissing;
+  // Screens other than Home don't know the Missing count. On a cold load there
+  // (e.g. a deep link to /items) ask once, so the Returns badge isn't blank.
+  const [fetchedMissing, setFetchedMissing] = useState<number | null>(null);
+  useEffect(() => {
+    if (missingCount !== undefined || missingKnown) return;
+    missingKnown = true;
+    let active = true;
+    fetch("/api/returns?filter=missing&limit=1", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (active && d && typeof d.totalCount === "number") setFetchedMissing(d.totalCount);
+      })
+      .catch(() => {
+        missingKnown = false;
+      });
+    return () => {
+      active = false;
+    };
+  }, [missingCount]);
+
+  const missing = missingCount ?? fetchedMissing ?? lastMissing;
   const badgeChanged = missing !== lastMissing;
   useEffect(() => {
     lastMissing = missing;
-  }, [missing]);
+    if (missingCount !== undefined) missingKnown = true;
+  }, [missing, missingCount]);
   const badge = formatBadgeCount(missing);
 
   // Large title → compact title once it scrolls under the bar.

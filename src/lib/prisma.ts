@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 
-const SCHEMA_VERSION = "2026-11-22-package-packed";
+const SCHEMA_VERSION = "2026-11-23-auth-hardening";
 
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;

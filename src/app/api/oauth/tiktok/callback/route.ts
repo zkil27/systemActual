@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getOwnerSession } from "@/lib/auth";
+import { encryptSecret } from "@/lib/crypto";
 import { exchangeTikTokCode, getAuthorizedShops } from "@/lib/connectors/tiktok";
 import { checkOAuthState, clearOAuthStateCookie } from "@/lib/oauth-state";
 import { runTick } from "@/lib/worker/tick";
@@ -35,8 +36,8 @@ async function connectTikTok(req: NextRequest, code: string): Promise<NextRespon
     }
 
     const tokenData = {
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
+      accessToken: encryptSecret(tokens.accessToken),
+      refreshToken: encryptSecret(tokens.refreshToken),
       tokenExpiresAt: tokens.expiresAt,
       tokenErrorAt: null,
       tokenError: null,
@@ -44,6 +45,7 @@ async function connectTikTok(req: NextRequest, code: string): Promise<NextRespon
     };
 
     for (const shop of shops) {
+      const encryptedCipher = shop.cipher ? encryptSecret(shop.cipher) : null;
       // Older versions stored a made-up "tiktok-<seller>" id. Move that row to
       // the real id so its parcels stay attached.
       const existing = await prisma.shopConnection.findUnique({ where: { shopId: shop.id } });
@@ -56,7 +58,7 @@ async function connectTikTok(req: NextRequest, code: string): Promise<NextRespon
       if (legacy) {
         await prisma.shopConnection.update({
           where: { id: legacy.id },
-          data: { shopId: shop.id, shopName: shop.name, shopCipher: shop.cipher, ...tokenData },
+          data: { shopId: shop.id, shopName: shop.name, shopCipher: encryptedCipher, ...tokenData },
         });
         continue;
       }
@@ -67,10 +69,10 @@ async function connectTikTok(req: NextRequest, code: string): Promise<NextRespon
           platform: Platform.TIKTOK,
           shopId: shop.id,
           shopName: shop.name,
-          shopCipher: shop.cipher,
+          shopCipher: encryptedCipher,
           ...tokenData,
         },
-        update: { shopName: shop.name, shopCipher: shop.cipher, ...tokenData },
+        update: { shopName: shop.name, shopCipher: encryptedCipher, ...tokenData },
       });
     }
     after(() => runTick("manual").catch((err) => console.error("[TikTok first sync error]", err)));

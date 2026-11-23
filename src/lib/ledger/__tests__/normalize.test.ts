@@ -68,6 +68,27 @@ describe("mapTikTokOrder", () => {
     expect(o.shippedAt?.getTime()).toBe(1794850000 * 1000);
     expect(o.packages[0].trackingNumber).toBe("JT0012345678");
   });
+
+  it("drops partially-cancelled line items on active TikTok orders", () => {
+    const partial = {
+      ...structuredClone(tiktokTwoUnitOrder),
+      status: "AWAITING_SHIPMENT",
+      line_items: [
+        ...(tiktokTwoUnitOrder.line_items as Array<Record<string, unknown>>),
+        {
+          product_id: "999",
+          sku_id: "888",
+          product_name: "Cancelled Belt",
+          sku_name: "Tan",
+          sale_price: "99",
+          display_status: "CANCELLED",
+        },
+      ],
+    };
+    const o = mapTikTokOrder(partial);
+    expect(o.lines).toHaveLength(1);
+    expect(o.lines[0].quantity).toBe(2);
+  });
 });
 
 describe("re-syncing is a no-op", () => {

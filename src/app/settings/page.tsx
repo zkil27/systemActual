@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronRight, Monitor, Moon, Sun } from "lucide-react";
+import { ChevronRight, Lock, Monitor, Moon, Sun } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Button, Group } from "@/components/ui/Button";
+import { useConfirm } from "@/components/ui/ConfirmSheet";
 import { Disclosure } from "@/components/ui/Disclosure";
+import { Sheet } from "@/components/ui/Sheet";
+import type { HealthSummary } from "@/lib/health";
+import { updatedAgo } from "@/lib/ui/format";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { Switch } from "@/components/ui/Switch";
 import { toast } from "@/components/ui/Toast";
@@ -27,6 +31,7 @@ const THEME_HINT: Record<ThemePreference, string> = {
 };
 
 interface SettingsPayload {
+  hasDemoData?: boolean;
   settings: {
     defaultUnitCostPhp: number;
     defaultSellingPrice: number;
@@ -35,6 +40,7 @@ interface SettingsPayload {
     stockSafetyBuffer: number;
     telegramChatId: string;
     telegramDailyBriefUtc: string;
+    telegramDailyBriefManila: string;
     missingSinceDate: string;
     customWaybillEnabled: boolean;
   };
@@ -43,7 +49,8 @@ interface SettingsPayload {
     tiktokEnvReady: boolean;
     telegramBotReady: boolean;
   };
-  staff: Array<{ id: string; name: string; active: boolean }>;
+  owner: { email: string; name: string } | null;
+  staff: StaffRow[];
   shops: Array<{
     id: string;
     platform: "SHOPEE" | "TIKTOK";
@@ -54,9 +61,279 @@ interface SettingsPayload {
     lastSyncedAt: string | null;
     tokenExpiresAt: string | null;
     needsReconnect: boolean;
+    tokenError: string | null;
     writesEnabled: boolean;
   }>;
   telegramPreview?: string;
+}
+
+interface StaffRow {
+  id: string;
+  name: string;
+  active: boolean;
+  locked: boolean;
+  lockedUntil: string | null;
+  failedPinAttempts: number;
+}
+
+async function postSettings(body: Record<string, unknown>): Promise<{ ok: boolean; data: Record<string, unknown> }> {
+  try {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok && data.ok !== false, data };
+  } catch {
+    return { ok: false, data: { error: "No connection" } };
+  }
+}
+
+const fieldClass =
+  "h-12 w-full rounded-[var(--radius-control)] bg-surface-muted px-3.5 text-[16px] text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none";
+
+/** Tap a staff row: rename, reset PIN, clear a lockout. */
+function StaffSheet({ staff, onClose, onSaved }: { staff: StaffRow | null; onClose: () => void; onSaved: () => void }) {
+  const last = useRef<StaffRow | null>(null);
+  if (staff) last.current = staff;
+  const s = last.current;
+  const [name, setName] = useState("");
+  const [pin, setPin] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (staff) {
+      setName(staff.name);
+      setPin("");
+    }
+  }, [staff]);
+
+  async function run(body: Record<string, unknown>, done: string) {
+    setBusy(true);
+    const { ok, data } = await postSettings(body);
+    setBusy(false);
+    if (!ok) return toast(String(data.error ?? "Couldn't save"), "error");
+    toast(done);
+    onSaved();
+  }
+
+  return (
+    <Sheet open={staff !== null} onClose={onClose} title={s?.name ?? "Staff"}>
+      {s && (
+        <div className="space-y-6 pt-1">
+          {s.locked && (
+            <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] bg-missing-soft px-4 py-2">
+              <span className="text-[15px] font-semibold text-missing-ink">Locked out after wrong PINs</span>
+              <Button
+                variant="plain"
+                disabled={busy}
+                onClick={() => run({ action: "clear_staff_lockout", staffId: s.id }, "Unlocked")}
+                className="h-11 px-3"
+              >
+                Unlock
+              </Button>
+            </div>
+          )}
+          <form
+            className="space-y-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!/^\d{4}$/.test(pin)) return toast("PIN must be 4 digits", "error");
+              void run({ action: "update_staff_pin", staffId: s.id, pin }, "New PIN saved. They need to unlock again.");
+              setPin("");
+            }}
+          >
+            <label className="block">
+              <span className="mb-1 block text-[14px] font-semibold text-ink-3">New 4-digit PIN</span>
+              <input
+                inputMode="numeric"
+                autoComplete="off"
+                maxLength={4}
+                value={pin}
+                onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+                className={`tabular-nums tracking-[0.4em] ${fieldClass}`}
+              />
+            </label>
+            <Button type="submit" full disabled={busy || pin.length !== 4}>
+              Reset PIN
+            </Button>
+          </form>
+          <form
+            className="space-y-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!name.trim() || name.trim() === s.name) return;
+              void run({ action: "rename_staff", staffId: s.id, staffName: name.trim() }, "Renamed");
+            }}
+          >
+            <label className="block">
+              <span className="mb-1 block text-[14px] font-semibold text-ink-3">Name</span>
+              <input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} className={fieldClass} />
+            </label>
+            <Button type="submit" variant="secondary" full disabled={busy || !name.trim() || name.trim() === s.name}>
+              Rename
+            </Button>
+          </form>
+          <Button
+            variant={s.active ? "danger" : "secondary"}
+            full
+            disabled={busy}
+            onClick={() =>
+              run({ action: "toggle_staff", staffId: s.id, active: !s.active }, s.active ? "Turned off" : "Turned on")
+            }
+          >
+            {s.active ? "Turn off (signs them out now)" : "Let them use the scanner again"}
+          </Button>
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
+/** Owner email + password. Both need the current password. */
+function AccountSheet({
+  open,
+  email,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  email: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [current, setCurrent] = useState("");
+  const [newEmail, setNewEmail] = useState(email);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (open) {
+      setCurrent("");
+      setNewEmail(email);
+      setNewPassword("");
+      setConfirmPassword("");
+    }
+  }, [open, email]);
+
+  async function run(body: Record<string, unknown>, done: string) {
+    setBusy(true);
+    const { ok, data } = await postSettings(body);
+    setBusy(false);
+    if (!ok) return toast(String(data.error ?? "Couldn't save"), "error");
+    toast(done);
+    onSaved();
+    onClose();
+  }
+
+  const type = show ? "text" : "password";
+  return (
+    <Sheet open={open} onClose={onClose} title="Your account">
+      <div className="space-y-5 pt-1">
+        <label className="block">
+          <span className="mb-1 block text-[14px] font-semibold text-ink-3">Current password</span>
+          <input type={type} autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} className={fieldClass} />
+        </label>
+        <label className="flex min-h-11 items-center gap-2 text-[15px] text-ink-2">
+          <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} className="h-5 w-5" />
+          Show passwords
+        </label>
+        <div className="space-y-2">
+          <label className="block">
+            <span className="mb-1 block text-[14px] font-semibold text-ink-3">Email</span>
+            <input type="email" autoComplete="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className={fieldClass} />
+          </label>
+          <Button
+            variant="secondary"
+            full
+            disabled={busy || !current || !newEmail.trim() || newEmail.trim().toLowerCase() === email.toLowerCase()}
+            onClick={() => run({ action: "update_owner_email", currentPassword: current, email: newEmail.trim() }, "Email changed")}
+          >
+            Change email
+          </Button>
+        </div>
+        <div className="space-y-2">
+          <label className="block">
+            <span className="mb-1 block text-[14px] font-semibold text-ink-3">New password (8+ characters)</span>
+            <input type={type} autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={fieldClass} />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[14px] font-semibold text-ink-3">Type it again</span>
+            <input type={type} autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={fieldClass} />
+          </label>
+          {confirmPassword && newPassword !== confirmPassword && (
+            <p className="text-[14px] font-semibold text-missing-ink">The two passwords don&apos;t match.</p>
+          )}
+          <Button
+            full
+            disabled={busy || !current || newPassword.length < 8 || newPassword !== confirmPassword}
+            onClick={() => run({ action: "update_owner_password", currentPassword: current, newPassword }, "Password changed")}
+          >
+            Change password
+          </Button>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+const HEALTH_DOT: Record<string, string> = { ok: "bg-arrived", warn: "bg-failed", bad: "bg-missing" };
+const HEALTH_WORD: Record<string, string> = { ok: "All good", warn: "Needs a look", bad: "Something is wrong" };
+
+function HealthPanel() {
+  const [health, setHealth] = useState<HealthSummary | null>(null);
+  const [error, setError] = useState(false);
+  const load = useCallback(async () => {
+    setError(false);
+    try {
+      const res = await fetch("/api/health", { cache: "no-store" });
+      if (!res.ok) throw new Error(String(res.status));
+      setHealth(await res.json());
+    } catch {
+      setError(true);
+    }
+  }, []);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <Group>
+      <Disclosure
+        summaryClassName={rowLinkClass}
+        label={
+          <span className="flex items-center gap-2.5">
+            <span aria-hidden="true" className={`h-2.5 w-2.5 rounded-full ${health ? HEALTH_DOT[health.level] : "bg-ink-3/40"}`} />
+            <span className="text-[17px] text-ink">System health</span>
+            <span className="text-[15px] text-ink-3">{health ? HEALTH_WORD[health.level] : error ? "Couldn't check" : "Checking…"}</span>
+          </span>
+        }
+        onOpenChange={(open) => {
+          if (open) void load();
+        }}
+      >
+        <ul className="divide-y divide-hairline border-t border-hairline">
+          {(health?.checks ?? []).map((c) => (
+            <li key={c.id} className="flex items-start gap-3 px-4 py-3">
+              <span aria-hidden="true" className={`mt-2 h-2 w-2 shrink-0 rounded-full ${HEALTH_DOT[c.level]}`} />
+              <span className="min-w-0">
+                <span className="block text-[16px] font-semibold text-ink">{c.label}</span>
+                <span className="block text-[14px] text-ink-3">{c.detail}</span>
+              </span>
+            </li>
+          ))}
+          {error && (
+            <li className="px-4 py-3">
+              <Button variant="secondary" onClick={load}>
+                Try again
+              </Button>
+            </li>
+          )}
+        </ul>
+      </Disclosure>
+    </Group>
+  );
 }
 
 function GroupLabel({ children }: { children: React.ReactNode }) {
@@ -132,6 +409,13 @@ export default function SettingsPage() {
   const [addingStaff, setAddingStaff] = useState(false);
   const [telegramPreview, setTelegramPreview] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
+  const [pairCode, setPairCode] = useState<string | null>(null);
+  const [clearingDemo, setClearingDemo] = useState(false);
+  const [briefTime, setBriefTime] = useState("20:00");
+  const [loadError, setLoadError] = useState(false);
+  const [staffOpen, setStaffOpen] = useState<string | null>(null);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const { confirm, sheet: confirmSheet } = useConfirm();
 
   async function loadTelegramPreview() {
     if (telegramPreview !== null || loadingPreview) return;
@@ -148,9 +432,17 @@ export default function SettingsPage() {
   }
 
   async function loadSettings() {
-    const res = await fetch("/api/settings");
+    let res: Response;
+    try {
+      res = await fetch("/api/settings", { cache: "no-store" });
+    } catch {
+      setLoadError(true);
+      return;
+    }
+    setLoadError(!res.ok);
     if (res.ok) {
       const payload: SettingsPayload = await res.json();
+      setBriefTime(payload.settings.telegramDailyBriefManila ?? "20:00");
       setData(payload);
       setUnitCost(String(payload.settings.defaultUnitCostPhp));
       setSellingPrice(String(payload.settings.defaultSellingPrice));
@@ -174,14 +466,17 @@ export default function SettingsPage() {
       returnShipping !== String(data.settings.returnShippingEstimatePhp) ||
       stockBuffer !== String(data.settings.stockSafetyBuffer) ||
       telegramChatId !== data.settings.telegramChatId ||
+      briefTime !== (data.settings.telegramDailyBriefManila ?? "20:00") ||
       missingSinceDate !== (data.settings.missingSinceDate ?? ""));
 
   async function setShopWrites(shopConnectionId: string, label: string, active: boolean) {
     if (
       active &&
-      !window.confirm(
-        `Let Kyna Ops update ${label}? It will sync stock, ship orders, and print labels automatically.`
-      )
+      !(await confirm({
+        title: `Let Kyna Ops update ${label}?`,
+        message: "It will sync stock, ship orders, and print labels automatically.",
+        confirmLabel: "Turn on",
+      }))
     ) {
       return;
     }
@@ -227,6 +522,7 @@ export default function SettingsPage() {
           returnShippingEstimatePhp: Number(returnShipping),
           stockSafetyBuffer: Number(stockBuffer),
           telegramChatId,
+          telegramDailyBriefManila: briefTime,
           missingSinceDate,
         }),
       });
@@ -243,9 +539,12 @@ export default function SettingsPage() {
 
   async function handleResetMissingBaseline() {
     if (
-      !window.confirm(
-        "Start fresh from today? Older returns stay saved in the database, but Today, 7 Days, Missing, and Overdue will only count from today onward."
-      )
+      !(await confirm({
+        title: "Start fresh from today?",
+        message:
+          "Older returns stay saved in the database, but Today, 7 Days, Missing, and Overdue will only count from today onward.",
+        confirmLabel: "Start fresh",
+      }))
     ) {
       return;
     }
@@ -319,6 +618,64 @@ export default function SettingsPage() {
     else toast(out.error || "Add your Telegram chat ID first", "error");
   }
 
+  async function handleGeneratePairCode() {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "generate_telegram_pair_code" }),
+    });
+    const out = await res.json().catch(() => ({}));
+    if (res.ok && out.code) {
+      setPairCode(out.code);
+      toast("Code ready (valid 10 mins)");
+    } else {
+      toast("Couldn't generate code", "error");
+    }
+  }
+
+  async function handleClearDemo() {
+    if (
+      !(await confirm({
+        title: "Remove sample data?",
+        message: "Your real shops and settings won't be touched.",
+        confirmLabel: "Remove",
+        danger: true,
+      }))
+    )
+      return;
+    setClearingDemo(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear_demo" }),
+      });
+      if (res.ok) {
+        toast("Sample data cleared");
+        await loadSettings();
+      } else {
+        toast("Couldn't clear sample data", "error");
+      }
+    } finally {
+      setClearingDemo(false);
+    }
+  }
+
+  async function handleDisconnect(shop: ShopRow) {
+    const label = shop.platform === "SHOPEE" ? "Shopee" : "TikTok Shop";
+    const ok = await confirm({
+      title: `Disconnect ${label}?`,
+      message: "Orders, returns and stock history stay. Syncing and updates to the shop stop until you connect again.",
+      confirmLabel: "Disconnect",
+      danger: true,
+    });
+    if (!ok) return;
+    const res = await postSettings({ action: "disconnect_shop", shopConnectionId: shop.id });
+    if (!res.ok) return toast("Couldn't disconnect", "error");
+    toast(`${label} disconnected`);
+    await loadSettings();
+  }
+
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
     router.replace("/login");
@@ -341,21 +698,39 @@ export default function SettingsPage() {
                 ] as const
               ).map((row) => {
                 const detail = storeDetail(row.shop);
-                return (
-                  <a key={row.label} href={row.href} className={rowLinkClass}>
-                    <span className="flex flex-col">
+                const synced = row.shop?.connected && row.shop.lastSyncedAt ? `Synced ${updatedAgo(row.shop.lastSyncedAt)}` : null;
+                const status = storeStatus(row.shop, Boolean(row.keys));
+                const body = (
+                  <>
+                    <span className="flex min-w-0 flex-col py-2">
                       <span className="text-[17px] text-ink">{row.label}</span>
-                      {detail && <span className="text-[13px] text-ink-3">{detail}</span>}
+                      {row.shop?.needsReconnect && row.shop.tokenError ? (
+                        <span className="text-[13px] text-missing-ink">{row.shop.tokenError}</span>
+                      ) : (
+                        (detail || synced) && (
+                          <span className="text-[13px] text-ink-3">{[synced, detail].filter(Boolean).join(" · ")}</span>
+                        )
+                      )}
                     </span>
                     <span
-                      className={`flex items-center gap-1 text-[16px] ${
+                      className={`flex shrink-0 items-center gap-1 text-[16px] ${
                         row.shop?.needsReconnect ? "font-semibold text-missing-ink" : "text-ink-3"
                       }`}
                     >
-                      {storeStatus(row.shop, Boolean(row.keys))}
-                      <ChevronRight className="chevron-nudge h-5 w-5" />
+                      {status}
+                      {row.keys && <ChevronRight className="chevron-nudge h-5 w-5" />}
                     </span>
+                  </>
+                );
+                // No app keys on the server: connecting would only show an error page.
+                return row.keys ? (
+                  <a key={row.label} href={row.href} className={rowLinkClass}>
+                    {body}
                   </a>
+                ) : (
+                  <div key={row.label} className={rowClass} aria-disabled="true">
+                    {body}
+                  </div>
                 );
               })}
               {[shopee, tiktok]
@@ -376,6 +751,20 @@ export default function SettingsPage() {
                     </div>
                   );
                 })}
+              {[shopee, tiktok]
+                .filter((s): s is ShopRow => Boolean(s?.connected))
+                .map((s) => (
+                  <button
+                    key={`dc-${s.id}`}
+                    type="button"
+                    onClick={() => handleDisconnect(s)}
+                    className={`${rowLinkClass} w-full text-left`}
+                  >
+                    <span className="text-[17px] text-missing-ink">
+                      Disconnect {s.platform === "SHOPEE" ? "Shopee" : "TikTok Shop"}
+                    </span>
+                  </button>
+                ))}
             </Group>
             <Group className="mt-4 divide-y divide-hairline lg:hidden">
               <Link href="/items" className={rowLinkClass}>
@@ -436,6 +825,11 @@ export default function SettingsPage() {
           </section>
 
           <PrinterSettings />
+
+          <section>
+            <GroupLabel>Health</GroupLabel>
+            <HealthPanel />
+          </section>
         </div>
 
         <div className="space-y-8">
@@ -466,7 +860,7 @@ export default function SettingsPage() {
                     aria-label="Track returns from"
                     value={missingSinceDate}
                     onChange={(e) => setMissingSinceDate(e.target.value)}
-                    className="tabular-nums h-9 rounded-lg bg-surface-muted px-2.5 text-[15px] font-semibold text-ink focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
+                    className="tabular-nums h-11 rounded-lg bg-surface-muted px-2.5 text-[16px] font-semibold text-ink focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
                   />
                 </label>
                 <button
@@ -496,6 +890,25 @@ export default function SettingsPage() {
                     className="tabular-nums min-w-0 flex-1 bg-transparent text-right text-[17px] text-ink focus:outline-none"
                   />
                 </label>
+                <button type="button" onClick={handleGeneratePairCode} className={`${rowLinkClass} w-full text-left`}>
+                  <span className="text-[17px] text-brand">Link Telegram with 1-time code</span>
+                </button>
+                {pairCode && (
+                  <div className="space-y-1 bg-brand-soft px-4 py-3">
+                    <p className="text-[14px] text-ink-2">Send this to your Kyna Ops Telegram bot within 10 minutes:</p>
+                    <code className="block select-all font-mono text-[15px] font-bold text-ink">/start {pairCode}</code>
+                  </div>
+                )}
+                <label className={rowClass}>
+                  <span className="text-[17px] text-ink">Send the summary at</span>
+                  <input
+                    type="time"
+                    aria-label="Daily summary time (Manila)"
+                    value={briefTime}
+                    onChange={(e) => setBriefTime(e.target.value)}
+                    className="tabular-nums h-11 rounded-lg bg-surface-muted px-2.5 text-[16px] font-semibold text-ink focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
+                  />
+                </label>
                 <button type="button" onClick={handleSendTestTelegram} className={`${rowLinkClass} w-full text-left`}>
                   <span className="text-[17px] text-brand">Send a test</span>
                 </button>
@@ -516,9 +929,17 @@ export default function SettingsPage() {
             </section>
 
             {dirty && (
-              <Button type="submit" full disabled={saving} className="anim-rise-in">
-                {saving ? "Saving…" : "Save changes"}
-              </Button>
+              <div className="anim-rise-in sticky bottom-[calc(env(safe-area-inset-bottom)+76px)] z-20 lg:bottom-4">
+                <div className="flex items-center gap-2 rounded-[var(--radius-card)] bg-surface p-2 shadow-[var(--shadow-sheet)]">
+                  <span className="flex-1 px-2 text-[15px] font-semibold text-ink-2">Unsaved changes</span>
+                  <Button type="button" variant="plain" onClick={() => void loadSettings()} disabled={saving}>
+                    Undo
+                  </Button>
+                  <Button type="submit" disabled={saving}>
+                    {saving ? "Saving…" : "Save"}
+                  </Button>
+                </div>
+              </div>
             )}
           </form>
 
@@ -526,8 +947,20 @@ export default function SettingsPage() {
             <GroupLabel>Warehouse staff</GroupLabel>
             <Group className="divide-y divide-hairline">
               {(data?.staff ?? []).map((s) => (
-                <div key={s.id} className={rowClass}>
-                  <span className={`text-[17px] ${s.active ? "text-ink" : "text-ink-3"}`}>{s.name}</span>
+                <div key={s.id} className={`${rowClass} pr-4`}>
+                  <button
+                    type="button"
+                    onClick={() => setStaffOpen(s.id)}
+                    className="pressable flex min-h-[52px] min-w-0 flex-1 items-center gap-2 text-left"
+                  >
+                    <span className={`truncate text-[17px] ${s.active ? "text-ink" : "text-ink-3"}`}>{s.name}</span>
+                    {s.locked && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-missing-soft px-2 py-0.5 text-[12px] font-bold text-missing-ink">
+                        <Lock className="h-3 w-3" /> Locked
+                      </span>
+                    )}
+                    <ChevronRight className="chevron-nudge ml-auto h-5 w-5 shrink-0 text-ink-3" />
+                  </button>
                   <Switch
                     checked={s.active}
                     onChange={(next) => handleToggleStaff(s.id, next)}
@@ -561,13 +994,60 @@ export default function SettingsPage() {
             </Group>
           </section>
 
-          <Group>
-            <button type="button" onClick={handleLogout} className={`${rowLinkClass} w-full`}>
-              <span className="text-[17px] text-missing">Sign out</span>
-            </button>
-          </Group>
+          {data?.hasDemoData && (
+            <Group>
+              <button
+                type="button"
+                disabled={clearingDemo}
+                onClick={handleClearDemo}
+                className={`${rowLinkClass} w-full disabled:opacity-50`}
+              >
+                <span className="text-[17px] text-missing-ink">
+                  {clearingDemo ? "Clearing sample data…" : "Clear sample data"}
+                </span>
+              </button>
+            </Group>
+          )}
+
+          <section>
+            <GroupLabel>Your account</GroupLabel>
+            <Group className="divide-y divide-hairline">
+              <button type="button" onClick={() => setAccountOpen(true)} className={`${rowLinkClass} w-full text-left`}>
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-[17px] text-ink">Email &amp; password</span>
+                  {data?.owner?.email && <span className="truncate text-[13px] text-ink-3">{data.owner.email}</span>}
+                </span>
+                <ChevronRight className="chevron-nudge h-5 w-5 shrink-0 text-ink-3" />
+              </button>
+              <button type="button" onClick={handleLogout} className={`${rowLinkClass} w-full`}>
+                <span className="text-[17px] text-missing">Sign out</span>
+              </button>
+            </Group>
+          </section>
         </div>
       </div>
+
+      {loadError && !data && (
+        <div className="mt-6 space-y-3 text-center">
+          <p className="text-[16px] text-ink-2">Couldn&apos;t load settings.</p>
+          <Button variant="secondary" onClick={() => void loadSettings()}>
+            Try again
+          </Button>
+        </div>
+      )}
+
+      <StaffSheet
+        staff={data?.staff.find((s) => s.id === staffOpen) ?? null}
+        onClose={() => setStaffOpen(null)}
+        onSaved={() => void loadSettings()}
+      />
+      <AccountSheet
+        open={accountOpen}
+        email={data?.owner?.email ?? ""}
+        onClose={() => setAccountOpen(false)}
+        onSaved={() => void loadSettings()}
+      />
+      {confirmSheet}
     </AppShell>
   );
 }

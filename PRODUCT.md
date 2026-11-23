@@ -59,7 +59,7 @@ Seller Center buries return dates under order creation dates, lumps Failed Deliv
 
 - **Product Name:** `Kyna Ops` (for Kyna Clothing Shop / `kynaph`).
 - **Voice:** Calm, clear, plain everyday English built for a busy non-tech-savvy shop owner on her phone.
-- **Visual Direction (User-Locked Canon):** Clean Merchant Standard — crisp white cards on a soft mist-slate ground, calm teal (`#0F766E`) primary accent, bold high-contrast tabular numerals, unmistakable crimson Missing Parcel alert banner, big 48px+ mobile thumb targets, bottom tab bar navigation, and zero visual clutter (executed at the craft bar of Shopify Mobile, Square, and modern PH merchant tools).
+- **Visual Direction (User-Locked Canon):** Clean Merchant Standard — crisp white cards on a soft mist-slate ground, rose-berry brand accent (`#b83b6b` text/links with pastel pink `#f4a7c1` solid fills, per `DESIGN.md`), bold high-contrast tabular numerals, unmistakable crimson Missing Parcel alert banner, big 48px+ mobile thumb targets, bottom tab bar navigation, and zero visual clutter (executed at the craft bar of Shopify Mobile, Square, and modern PH merchant tools).
 
 ## Evidence on Hand
 

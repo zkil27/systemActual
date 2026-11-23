@@ -6,14 +6,10 @@ import {
   redactOutboundPackageForStaff,
   redactParcelForStaff,
 } from "@/lib/auth";
-import { upsertNormalizedReturn } from "@/lib/connectors/normalizer";
 import { MIN_SUFFIX_LENGTH, resolveScanMatch } from "@/lib/returns/scan-match";
 import {
   evaluateOutboundScan,
   findOutboundPackagesByCode,
-  getPackerStats,
-  OUTBOUND_PACKAGE_INCLUDE,
-  resolveActorStaffMemberId,
 } from "@/lib/shipping/outbound";
 import { withSpan } from "@/lib/otel";
 
@@ -67,7 +63,6 @@ export async function GET(req: NextRequest) {
   const modeParam = (req.nextUrl.searchParams.get("mode") || "auto").trim().toLowerCase();
   const mode = modeParam === "outbound" || modeParam === "return" ? modeParam : "auto";
   const courierLock = req.nextUrl.searchParams.get("courierLock");
-  const autoPack = req.nextUrl.searchParams.get("autoPack") === "1";
 
   if (!code || code.length < 4) {
     return NextResponse.json(
@@ -82,8 +77,7 @@ export async function GET(req: NextRequest) {
     );
 
     if (outMatch.kind === "one") {
-      let pkg = outMatch.pkg;
-      let safe = redactOutboundPackageForStaff(pkg);
+      const safe = redactOutboundPackageForStaff(outMatch.pkg);
       const evaluation = evaluateOutboundScan(
         {
           isCancelled: safe.isCancelled,
@@ -92,38 +86,15 @@ export async function GET(req: NextRequest) {
           lineCount: safe.lines.length,
           alreadyPacked: Boolean(safe.packedAt),
         },
-        { courierLock, autoPackSingle: autoPack }
+        { courierLock, autoPackSingle: false }
       );
 
-      let autoPacked = false;
-      if (evaluation.status === "AUTO_PACK_OK" && autoPack) {
-        const staffMemberId = await resolveActorStaffMemberId(session);
-        if (staffMemberId) {
-          const updated = await prisma.package.update({
-            where: { id: pkg.id },
-            data: { packedAt: new Date(), packedByStaffId: staffMemberId },
-            include: OUTBOUND_PACKAGE_INCLUDE,
-          });
-          pkg = {
-            ...updated,
-            order: {
-              ...updated.order,
-              lines: pkg.order.lines,
-            },
-          };
-          safe = redactOutboundPackageForStaff(pkg);
-          autoPacked = true;
-        }
-      }
-
-      const stats = autoPacked ? await getPackerStats(session) : undefined;
       return NextResponse.json({
         found: true,
         kind: "outbound",
-        autoPacked,
+        autoPacked: false,
         evaluation,
         outbound: safe,
-        ...(stats ?? {}),
       });
     }
 
@@ -191,8 +162,8 @@ export async function GET(req: NextRequest) {
       );
     default: {
       // Fallback: if a rider physically returns an order before Shopee/TikTok syncs
-      // the return status, match it from the outbound Package/Order ledger so packers
-      // aren't blocked at the receiving table.
+      // the return status, build a read-only preview from the outbound ledger so
+      // GET stays mutation-free; POST /api/scan/confirm creates the ReturnParcel.
       const outMatch = await withSpan("scan.lookup.returnFallback", () =>
         findOutboundPackagesByCode(code)
       );
@@ -207,12 +178,13 @@ export async function GET(req: NextRequest) {
           listingId: l.listingId,
           variationId: l.variationId,
         }));
-        const now = new Date();
-        const created = await upsertNormalizedReturn({
-          shopConnectionId: ord.shopConnectionId,
+        const preview = redactParcelForStaff({
+          id: `early:${outMatch.pkg.id}`,
           platform: ord.platform,
           orderSn: ord.orderSn,
+          returnSn: null,
           forwardTrackingNumber: outMatch.pkg.trackingNumber ?? null,
+          rtsTrackingNumber: null,
           courier:
             outMatch.pkg.carrier ??
             (ord.platform === Platform.SHOPEE ? "SPX Express" : "J&T Express"),
@@ -227,21 +199,16 @@ export async function GET(req: NextRequest) {
           variationName: firstLine?.variationName ?? null,
           quantity: Math.max(1, ord.lines.reduce((n, l) => n + l.quantity, 0)),
           itemImageUrl: firstLine?.imageUrl ?? null,
-          items,
-          orderTotalPhp: Number(ord.totalPhp),
-          orderCreatedAt: ord.platformCreatedAt,
-          digitalReturnTaggedAt: now,
+          itemsJson: items,
+          digitalReturnTaggedAt: null,
           courierReturnedToSellerAt: null,
-          expectsPhysicalReturn: true,
-          source: "WAREHOUSE_SCAN",
-          rawStatus: "EARLY_ARRIVAL",
-          eventDescription: "Scanned physically before platform return sync",
-          eventTimestamp: now,
+          physicallyReceivedAt: null,
+          physicalCondition: null,
         });
         return NextResponse.json({
           found: true,
           kind: "return",
-          parcel: redactParcelForStaff(created),
+          parcel: preview,
         });
       }
       if (outMatch.kind === "ambiguous") {

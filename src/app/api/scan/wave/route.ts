@@ -1,11 +1,13 @@
-import { NextResponse } from "next/server";
-import { WaveItemStatus, WaveStatus } from "@prisma/client";
+import { NextRequest, NextResponse } from "next/server";
+import { Prisma, WaveItemStatus, WaveStatus } from "@prisma/client";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getScannerSession, redactOutboundPackageForStaff } from "@/lib/auth";
 import {
   cancelledToPullWhere,
   enrichPackageLineImages,
   OUTBOUND_PACKAGE_INCLUDE,
+  resolveActorStaffMemberId,
   unpickedPrintedWhere,
 } from "@/lib/shipping/outbound";
 import { groupPickItems, parsePickItemLabel, type WaveSummary } from "@/lib/waves/plan";
@@ -34,7 +36,7 @@ export interface StaffPickGroup {
   garments: StaffPickGarmentGroup[];
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await getScannerSession();
   if (!session) {
     return NextResponse.json(
@@ -43,11 +45,13 @@ export async function GET() {
     );
   }
 
+  const requestedWaveId = req.nextUrl.searchParams.get("waveId");
   const now = new Date();
-  const [latestWave, cancelledItems, unpickedItems] = await Promise.all([
-    prisma.wave.findFirst({
+  const [recentWaves, cancelledItems, unpickedItems] = await Promise.all([
+    prisma.wave.findMany({
       where: { status: { in: [WaveStatus.RUNNING, WaveStatus.DONE, WaveStatus.PREVIEW] } },
       orderBy: { createdAt: "desc" },
+      take: 5,
     }),
     prisma.waveItem.findMany({
       where: cancelledToPullWhere(now),
@@ -63,6 +67,12 @@ export async function GET() {
     }),
   ]);
 
+  const latestWave =
+    (requestedWaveId ? recentWaves.find((w) => w.id === requestedWaveId) : undefined) ??
+    recentWaves.find((w) => w.status === WaveStatus.RUNNING) ??
+    recentWaves[0] ??
+    null;
+
   const [enrichedCancelled, enrichedUnpicked] = await Promise.all([
     enrichPackageLineImages(cancelledItems.map((c) => c.package)),
     enrichPackageLineImages(unpickedItems.map((u) => u.package)),
@@ -70,10 +80,17 @@ export async function GET() {
 
   const cancelledToPull = enrichedCancelled.map(redactOutboundPackageForStaff);
   const unpickedParcels = enrichedUnpicked.map(redactOutboundPackageForStaff);
+  const recentWaveSummaries = recentWaves.map((w) => ({
+    id: w.id,
+    status: w.status,
+    createdAt: w.createdAt.toISOString(),
+    parcelCount: w.parcelCount,
+  }));
 
   if (!latestWave) {
     return NextResponse.json({
       wave: null,
+      recentWaves: [],
       cancelledToPull,
       unpickedParcels,
     });
@@ -202,6 +219,13 @@ export async function GET() {
   const enrichedMulti = await enrichPackageLineImages(multiWavePkgs);
   const multiParcels = enrichedMulti.map(redactOutboundPackageForStaff);
 
+  const checkedKeys: Record<string, boolean> = {
+    ...(summary.checkedKeys && typeof summary.checkedKeys === "object" ? summary.checkedKeys : {}),
+  };
+  for (const mp of multiParcels) {
+    if (mp.packedAt) checkedKeys[`multi::${mp.packageId}`] = true;
+  }
+
   return NextResponse.json({
     wave: {
       id: latestWave.id,
@@ -215,8 +239,69 @@ export async function GET() {
       courierTotals: (summary.groups ?? []).map((g) => ({ title: g.title, count: g.count })),
       groups,
       multiParcels,
+      checkedKeys,
     },
+    recentWaves: recentWaveSummaries,
     cancelledToPull,
     unpickedParcels,
   });
+}
+
+const checkSchema = z.object({
+  waveId: z.string().min(1),
+  key: z.string().min(1).max(300),
+  checked: z.boolean(),
+});
+
+/** Syncs pick-list checkoffs across all 6 warehouse staff phones in real time. */
+export async function POST(req: NextRequest) {
+  const session = await getScannerSession();
+  if (!session) {
+    return NextResponse.json(
+      { error: "Unlock the scanner with your 4-digit PIN first." },
+      { status: 401 }
+    );
+  }
+  const parsed = checkSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+  }
+
+  const { waveId, key, checked } = parsed.data;
+  const staffMemberId = await resolveActorStaffMemberId(session);
+
+  const checkedKeys = await prisma.$transaction(async (tx) => {
+    const wave = await tx.wave.findUnique({ where: { id: waveId }, select: { summaryJson: true } });
+    if (!wave) return null;
+    const summary = wave.summaryJson as unknown as WaveSummary;
+    const nextKeys: Record<string, boolean> = {
+      ...(summary.checkedKeys && typeof summary.checkedKeys === "object" ? summary.checkedKeys : {}),
+    };
+    if (checked) nextKeys[key] = true;
+    else delete nextKeys[key];
+
+    const updatedSummary: WaveSummary = { ...summary, checkedKeys: nextKeys };
+    await tx.wave.update({
+      where: { id: waveId },
+      data: { summaryJson: updatedSummary as unknown as Prisma.InputJsonValue },
+    });
+
+    if (key.startsWith("multi::")) {
+      const pkgId = key.slice("multi::".length);
+      if (pkgId) {
+        await tx.package.updateMany({
+          where: { id: pkgId },
+          data: checked
+            ? { packedAt: new Date(), packedByStaffId: staffMemberId }
+            : { packedAt: null, packedByStaffId: null },
+        });
+      }
+    }
+    return nextKeys;
+  });
+
+  if (!checkedKeys) {
+    return NextResponse.json({ error: "Wave not found." }, { status: 404 });
+  }
+  return NextResponse.json({ ok: true, checkedKeys });
 }
