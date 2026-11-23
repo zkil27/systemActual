@@ -3,18 +3,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronRight, Lock, Monitor, Moon, Sun } from "lucide-react";
+import { CalendarDays, ChevronRight, Lock, Monitor, Moon, Sun } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Button, Group } from "@/components/ui/Button";
 import { useConfirm } from "@/components/ui/ConfirmSheet";
+import { DatePickerSheet } from "@/components/ui/DatePickerSheet";
 import { Disclosure } from "@/components/ui/Disclosure";
 import { Sheet } from "@/components/ui/Sheet";
 import type { HealthSummary } from "@/lib/health";
-import { updatedAgo } from "@/lib/ui/format";
+import { manilaDayLabel, updatedAgo } from "@/lib/ui/format";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { Switch } from "@/components/ui/Switch";
 import { toast } from "@/components/ui/Toast";
-import { formatManilaDateTime } from "@/lib/time";
+import { formatManilaDateTime, getManilaTodayStr } from "@/lib/time";
 import { useTheme, type ThemePreference } from "@/lib/ui/theme";
 import { PrinterSettings } from "@/components/PrinterSettings";
 
@@ -336,6 +337,12 @@ function HealthPanel() {
   );
 }
 
+/** "Nov 18", or "Nov 18, 2025" when the date isn't in this year. */
+function sinceLabel(ymd: string): string {
+  const label = manilaDayLabel(ymd);
+  return ymd.slice(0, 4) === getManilaTodayStr().slice(0, 4) ? label : `${label}, ${ymd.slice(0, 4)}`;
+}
+
 function GroupLabel({ children }: { children: React.ReactNode }) {
   return <h2 className="mb-2 px-4 text-[15px] font-semibold text-ink-3">{children}</h2>;
 }
@@ -402,6 +409,7 @@ export default function SettingsPage() {
   const [stockBuffer, setStockBuffer] = useState("0");
   const [telegramChatId, setTelegramChatId] = useState("");
   const [missingSinceDate, setMissingSinceDate] = useState("");
+  const [sincePickerOpen, setSincePickerOpen] = useState(false);
   const [resettingMissing, setResettingMissing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [newStaffName, setNewStaffName] = useState("");
@@ -848,21 +856,30 @@ export default function SettingsPage() {
             <section>
               <GroupLabel>Return tracking</GroupLabel>
               <Group className="divide-y divide-hairline">
-                <label className="flex min-h-[64px] items-center justify-between gap-4 px-4 py-2.5">
+                <button
+                  type="button"
+                  aria-haspopup="dialog"
+                  onClick={() => setSincePickerOpen(true)}
+                  className="pressable-row flex min-h-[64px] w-full items-center justify-between gap-4 px-4 py-2.5 text-left hover:bg-surface-subtle active:bg-surface-muted"
+                >
                   <span className="flex flex-col">
                     <span className="text-[17px] text-ink">Track returns from</span>
                     <span className="text-[13px] text-ink-3">
                       Older returns stay saved in history, hidden from Today &amp; Missing
                     </span>
                   </span>
-                  <input
-                    type="date"
-                    aria-label="Track returns from"
-                    value={missingSinceDate}
-                    onChange={(e) => setMissingSinceDate(e.target.value)}
-                    className="tabular-nums h-11 rounded-lg bg-surface-muted px-2.5 text-[16px] font-semibold text-ink focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
-                  />
-                </label>
+                  <span className="tabular-nums flex h-11 shrink-0 items-center gap-1.5 rounded-lg bg-surface-muted px-3 text-[16px] font-semibold text-ink">
+                    <CalendarDays className="h-4 w-4 text-ink-3" />
+                    {missingSinceDate ? sinceLabel(missingSinceDate) : "Pick date"}
+                  </span>
+                </button>
+                <DatePickerSheet
+                  title="Track returns from"
+                  open={sincePickerOpen}
+                  onClose={() => setSincePickerOpen(false)}
+                  value={missingSinceDate}
+                  onChange={setMissingSinceDate}
+                />
                 <button
                   type="button"
                   onClick={handleResetMissingBaseline}

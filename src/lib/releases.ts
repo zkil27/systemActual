@@ -19,6 +19,17 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    id: 3,
+    date: "2026-11-24",
+    title: "New date picker",
+    changes: [
+      "Pick date on Today now opens a calendar that looks the same on every phone and computer.",
+      "Custom dates in Returns: tap the first day, then the last day, then Apply.",
+      "Track returns from in Settings uses the same calendar.",
+      "Tap the month name at the top of the calendar to jump straight to any month or year.",
+    ],
+  },
+  {
     id: 2,
     date: "2026-11-23",
     title: "Easier taps",

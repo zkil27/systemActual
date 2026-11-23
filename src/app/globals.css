@@ -284,6 +284,13 @@ html.theme-transition * {
   .anim-toast-out {
     animation: toast-out 180ms var(--ease-ios) forwards;
   }
+  /* Calendar month change: days slide in from the side you moved toward. */
+  .anim-month-next {
+    animation: month-next 240ms var(--ease-out-expo) backwards;
+  }
+  .anim-month-prev {
+    animation: month-prev 240ms var(--ease-out-expo) backwards;
+  }
   .anim-pop {
     animation: pop 260ms var(--ease-out-expo) backwards;
   }
@@ -332,6 +339,20 @@ html.theme-transition * {
   from {
     opacity: 0;
     transform: translateY(-4px);
+  }
+}
+
+@keyframes month-next {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+
+@keyframes month-prev {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
   }
 }
 
@@ -413,6 +434,8 @@ html.theme-transition * {
   .anim-page-in,
   .anim-rise-in,
   .anim-disclosure-in,
+  .anim-month-next,
+  .anim-month-prev,
   .anim-pop {
     animation-name: fade-in;
   }

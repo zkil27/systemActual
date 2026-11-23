@@ -2,11 +2,12 @@
 
 import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, PackageSearch, Search, X } from "lucide-react";
+import { CalendarDays, PackageSearch, Search } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { ParcelDetailPanel, ParcelDetailSheet } from "@/components/ParcelDetailSheet";
 import { ParcelRow } from "@/components/ParcelRow";
 import { Button, Group } from "@/components/ui/Button";
+import { DatePickerSheet } from "@/components/ui/DatePickerSheet";
 import { ScrollChips } from "@/components/ui/ScrollChips";
 import { toast } from "@/components/ui/Toast";
 import { manilaDayLabel } from "@/lib/ui/format";
@@ -141,9 +142,7 @@ function ReturnsExplorerInner() {
   const [dateFilter, setDateFilter] = useState<ReturnDateFilter>(() =>
     parseReturnDateFilter(searchParams)
   );
-  const [customOpen, setCustomOpen] = useState(() =>
-    Boolean(searchParams.get("date") || searchParams.get("from") || searchParams.get("to"))
-  );
+  const [customOpen, setCustomOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [parcels, setParcels] = useState<ReturnRow[] | null>(null);
   const [totalCount, setTotalCount] = useState<number | null>(null);
@@ -161,7 +160,6 @@ function ReturnsExplorerInner() {
     setFilter(parseReturnFilter(searchParams.get("filter")));
     const nextDate = parseReturnDateFilter(searchParams);
     setDateFilter(nextDate);
-    if (nextDate.date || nextDate.from || nextDate.to) setCustomOpen(true);
   }, [searchParams]);
 
   const buildQueryParams = useCallback(
@@ -267,15 +265,8 @@ function ReturnsExplorerInner() {
     applyDateFilter({ ...EMPTY_DATE_FILTER, range: preset });
   }
 
-  function updateCustomBound(field: "from" | "to", value: string) {
-    const baseFrom = dateFilter.date || dateFilter.from;
-    const baseTo = dateFilter.date || dateFilter.to;
-    applyDateFilter({
-      range: "all",
-      date: "",
-      from: field === "from" ? value : baseFrom,
-      to: field === "to" ? value : baseTo,
-    });
+  function applyCustomRange(from: string, to: string) {
+    applyDateFilter({ range: "all", date: "", from, to });
   }
 
   const stagger = firstLoad.current;
@@ -343,8 +334,8 @@ function ReturnsExplorerInner() {
           type="button"
           aria-label="Filter by date range"
           title="Filter by date range"
-          aria-expanded={customOpen}
-          onClick={() => setCustomOpen((o) => !o)}
+          aria-haspopup="dialog"
+          onClick={() => setCustomOpen(true)}
           className={`pressable relative hidden h-11 w-11 items-center justify-center rounded-full hover:bg-ink/[0.05] lg:flex ${
             customOpen || isCustomActive ? "text-brand" : "text-ink-2"
           }`}
@@ -399,8 +390,9 @@ function ReturnsExplorerInner() {
               })}
               <button
                 type="button"
-                aria-pressed={isCustomActive || customOpen}
-                onClick={() => setCustomOpen((o) => !o)}
+                aria-pressed={isCustomActive}
+                aria-haspopup="dialog"
+                onClick={() => setCustomOpen(true)}
                 className={`pressable inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-semibold ${
                   isCustomActive || customOpen
                     ? "bg-brand/12 text-brand ring-1 ring-inset ring-brand/35"
@@ -412,41 +404,15 @@ function ReturnsExplorerInner() {
               </button>
             </ScrollChips>
 
-            {customOpen && (
-              <div className="anim-disclosure-in flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] bg-surface p-2.5 shadow-[var(--shadow-card)]">
-                <label className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-medium text-ink-3">
-                  <span className="shrink-0">From</span>
-                  <input
-                    type="date"
-                    aria-label="From date"
-                    value={dateFilter.date || dateFilter.from}
-                    onChange={(e) => updateCustomBound("from", e.target.value)}
-                    className="h-11 min-w-0 flex-1 rounded-lg bg-surface-muted px-2.5 text-[16px] text-ink tabular-nums focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
-                  />
-                </label>
-                <label className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-medium text-ink-3">
-                  <span className="shrink-0">To</span>
-                  <input
-                    type="date"
-                    aria-label="To date"
-                    value={dateFilter.date || dateFilter.to}
-                    onChange={(e) => updateCustomBound("to", e.target.value)}
-                    className="h-11 min-w-0 flex-1 rounded-lg bg-surface-muted px-2.5 text-[16px] text-ink tabular-nums focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
-                  />
-                </label>
-                {dateActive && (
-                  <button
-                    type="button"
-                    onClick={() => selectDatePreset("all")}
-                    aria-label="Clear date filter"
-                    className="pressable inline-flex h-11 shrink-0 items-center gap-1 rounded-lg px-2.5 text-[13px] font-semibold text-ink-2 hover:bg-surface-muted hover:text-ink"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                    Clear
-                  </button>
-                )}
-              </div>
-            )}
+            <DatePickerSheet
+              mode="range"
+              open={customOpen}
+              onClose={() => setCustomOpen(false)}
+              from={dateFilter.date || dateFilter.from}
+              to={dateFilter.date || dateFilter.to}
+              onApply={applyCustomRange}
+              onClear={isCustomActive ? () => selectDatePreset("all") : undefined}
+            />
           </div>
 
           {parcels !== null && totalCount !== null && (

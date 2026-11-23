@@ -75,7 +75,7 @@ export function Sheet({
       if (e.key === "Tab" && panelRef.current) {
         // Keep Tab inside the sheet.
         const items = panelRef.current.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
+          'a[href], button:not([disabled]):not([tabindex="-1"]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
         );
         if (items.length === 0) return;
         const first = items[0];

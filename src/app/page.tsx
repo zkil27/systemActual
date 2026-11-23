@@ -9,6 +9,7 @@ import { ParcelDetailSheet } from "@/components/ParcelDetailSheet";
 import { MoneyBreakdownSheet } from "@/components/MoneyBreakdownSheet";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { Group, SectionHeader } from "@/components/ui/Button";
+import { DatePickerSheet } from "@/components/ui/DatePickerSheet";
 import { ItemThumb } from "@/components/ui/ItemThumb";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { Sheet } from "@/components/ui/Sheet";
@@ -467,6 +468,7 @@ export default function DashboardPage() {
   const [openCategory, setOpenCategory] = useState<CategoryKey | null>(null);
   const [topOpen, setTopOpen] = useState(false);
   const [moneyOpen, setMoneyOpen] = useState(false);
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
   const cacheRef = useRef<Map<string, { report: DailyTruthReport; fetchedAt: number }>>(new Map());
 
   const loadReport = useCallback(
@@ -539,14 +541,6 @@ export default function DashboardPage() {
     } catch {
       setSyncState("idle");
       toast("No connection", "error");
-    }
-  }
-
-  function triggerDateInput(input: HTMLInputElement) {
-    try {
-      input.showPicker?.();
-    } catch {
-      // Fallback for browsers where showPicker throws; native click still handles it.
     }
   }
 
@@ -630,18 +624,16 @@ export default function DashboardPage() {
                   : "bg-surface text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] hover:text-ink active:bg-surface-muted"
               }`}
             >
-              <label className="pressable relative flex h-full cursor-pointer items-center gap-1.5 px-3.5 text-[14px] font-semibold">
+              <button
+                type="button"
+                aria-label={customDate ? `Change date, ${manilaDayLabel(customDate)}` : "Choose specific date"}
+                aria-haspopup="dialog"
+                onClick={() => setDatePickerOpen(true)}
+                className="pressable relative flex h-full items-center gap-1.5 px-3.5 text-[14px] font-semibold"
+              >
                 <CalendarDays className="h-4 w-4 shrink-0" />
                 <span>{customDate ? manilaDayLabel(customDate) : "Pick date"}</span>
-                <input
-                  type="date"
-                  aria-label="Choose specific date"
-                  value={customDate}
-                  onClick={(e) => triggerDateInput(e.currentTarget)}
-                  onChange={(e) => setCustomDate(e.target.value)}
-                  className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                />
-              </label>
+              </button>
               {customDate && (
                 <button
                   type="button"
@@ -800,6 +792,13 @@ export default function DashboardPage() {
       <ParcelDetailSheet parcelId={selectedParcelId} onClose={() => setSelectedParcelId(null)} />
 
       <MoneyBreakdownSheet open={moneyOpen} onClose={() => setMoneyOpen(false)} initialRange={range} />
+
+      <DatePickerSheet
+        open={datePickerOpen}
+        onClose={() => setDatePickerOpen(false)}
+        value={customDate}
+        onChange={setCustomDate}
+      />
     </AppShell>
   );
 }
