@@ -4,6 +4,12 @@ Shared by every AI agent working in this repo. Kiro reads this file directly;
 `CLAUDE.md` (Claude Code) and `GEMINI.md` (Gemini CLI) import it.
 Edit this file, not those.
 
+## Branches
+
+- Work on `dev`. Commit and push there.
+- `main` is production: every push to it deploys to the live app.
+- Don't commit to, push to, or merge into `main` unless the user asks.
+
 ## Release notes
 
 The app shows a "New update available" sheet when a deploy adds a new entry to
@@ -31,7 +37,8 @@ If you're unsure, ask the user instead of guessing.
 
 Run `git diff origin/main -- src/lib/releases.ts`.
 
-- If the top entry shows up in that diff, it hasn't been pushed yet. Add your
+- If the top entry shows up in that diff, it isn't live on `main` yet (it may
+  be on `dev`, or uncommitted). Add your
   lines to its `changes` (and adjust its `title` if it no longer fits). Don't
   create a second unpushed entry.
 - Otherwise add a new entry at the top of the list.
