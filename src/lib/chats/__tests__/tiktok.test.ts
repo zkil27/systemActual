@@ -199,8 +199,9 @@ describe("TikTok chat webhooks and switches", () => {
     expect(isChatLive(real)).toBe(false);
     expect(isChatLive({ ...real, chatAccessAt: new Date() })).toBe(true);
     expect(isChatLive({ ...real, platform: "SHOPEE", chatAccessAt: new Date() })).toBe(false);
-    expect(canSendFrom(real)).toBe(false);
-    expect(canSendFrom({ isDemo: true, platform: "TIKTOK" })).toBe(true);
+    // Explicit setting: the test must not depend on the local .env.
+    expect(canSendFrom(real, "c1", "off")).toBe(false);
+    expect(canSendFrom({ isDemo: true, platform: "TIKTOK" }, undefined, "off")).toBe(true);
   });
 
   it("sends to real TikTok chats only where CHAT_SEND_TIKTOK allows", () => {
