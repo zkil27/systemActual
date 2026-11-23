@@ -19,6 +19,15 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    id: 2,
+    date: "2026-11-23",
+    title: "Easier taps",
+    changes: [
+      "Wave time buttons in Auto-ship schedule are bigger and easier to tap.",
+      "Tabs in Money no longer cut off labels like Yesterday and Withdraw.",
+    ],
+  },
+  {
     id: 1,
     date: "2026-11-23",
     title: "Update notices",
