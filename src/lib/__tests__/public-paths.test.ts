@@ -28,6 +28,11 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/api/agent/poll")).toBe(true);
   });
 
+  it("lets every open app check for updates, signed in or not", () => {
+    expect(isPublicPath("/api/version")).toBe(true);
+    expect(isPublicPath("/api/version-admin")).toBe(false);
+  });
+
   it("keeps the owner's printer controls private", () => {
     expect(isPublicPath("/api/printer")).toBe(false);
   });

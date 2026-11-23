@@ -27,6 +27,8 @@ const PUBLIC_EXACT = new Set([
   "/favicon.ico",
   "/icon",
   "/apple-icon",
+  // Build ID + release notes; every open app polls it, signed in or not.
+  "/api/version",
 ]);
 
 export function isPublicPath(pathname: string): boolean {

@@ -22,12 +22,13 @@ export const prismaLockStore: LockStore = {
       data: { holder, lockedUntil: until, rerunRequested: false },
     });
     if (taken.count === 1) return true;
-    try {
-      await prisma.workerLock.create({ data: { id, holder, lockedUntil: until } });
-      return true;
-    } catch {
-      return false; // row exists and is held
-    }
+    // First run for this id: insert the row. ON CONFLICT DO NOTHING instead of
+    // create() + catch, so a held lease doesn't spam prisma:error logs.
+    const created = await prisma.workerLock.createMany({
+      data: [{ id, holder, lockedUntil: until }],
+      skipDuplicates: true,
+    });
+    return created.count === 1; // 0 → row exists and is held
   },
   async requestRerun(id) {
     await prisma.workerLock.updateMany({ where: { id }, data: { rerunRequested: true } });

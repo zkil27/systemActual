@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Public_Sans } from "next/font/google";
 import { ThemeSync } from "@/components/ThemeSync";
+import { UpdatePrompt } from "@/components/UpdatePrompt";
 import { THEME_INIT_SCRIPT } from "@/lib/ui/theme";
 import "./globals.css";
 
@@ -50,6 +51,7 @@ export default function RootLayout({
       <body className="antialiased">
         <ThemeSync />
         {children}
+        <UpdatePrompt />
       </body>
     </html>
   );
