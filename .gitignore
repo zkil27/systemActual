@@ -6,6 +6,8 @@ out
 .env.*.local
 public/uploads/*
 !public/uploads/.gitkeep
+# Local photo fallback (proof and chat photos) when Vercel Blob isn't set up
+uploads/
 .impeccable/mocks
 .impeccable/review
 .impeccable/build

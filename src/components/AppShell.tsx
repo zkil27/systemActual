@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   CalendarCheck2,
   FileUp,
+  MessageCircle,
   PackageSearch,
   Printer,
   ScanBarcode,
@@ -18,6 +19,7 @@ import { Toaster } from "@/components/ui/Toast";
 import { PullIndicator } from "@/components/ui/PullToRefresh";
 import { usePullToRefresh } from "@/lib/ui/use-pull-to-refresh";
 import { formatBadgeCount } from "@/lib/ui/format";
+import { BOTTOM_TABS, SIDEBAR_PRIMARY_ITEMS, type NavBadge, type NavItem } from "@/lib/ui/nav";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -36,42 +38,43 @@ interface AppShellProps {
   onRefresh?: () => Promise<unknown> | void;
   /** Turn the pull off for a while, e.g. while the camera is scanning. */
   pullEnabled?: boolean;
+  /** Pass on screens that know the unread chat count (Chats); others poll for it. */
+  chatUnread?: number;
 }
 
-interface Tab {
-  href: string;
-  label: string;
+interface Tab extends NavItem {
   icon: LucideIcon;
-  match: (path: string) => boolean;
-  badge?: boolean;
 }
 
-const TABS: Tab[] = [
-  { href: "/", label: "Today", icon: CalendarCheck2, match: (p) => p === "/" },
-  { href: "/waves", label: "Ship", icon: Printer, match: (p) => p.startsWith("/waves") },
-  {
-    href: "/returns?filter=missing",
-    label: "Returns",
-    icon: PackageSearch,
-    match: (p) => p.startsWith("/returns"),
-    badge: true,
-  },
-  { href: "/items", label: "Stock", icon: Shirt, match: (p) => p.startsWith("/items") },
-  { href: "/scan", label: "Scan", icon: ScanBarcode, match: (p) => p.startsWith("/scan") },
-];
+const ICONS: Record<string, LucideIcon> = {
+  "/": CalendarCheck2,
+  "/waves": Printer,
+  "/returns?filter=missing": PackageSearch,
+  "/items": Shirt,
+  "/chats": MessageCircle,
+  "/scan": ScanBarcode,
+  "/orders": Search,
+};
 
-const SIDEBAR_PRIMARY: Tab[] = [
-  { href: "/", label: "Today", icon: CalendarCheck2, match: (p) => p === "/" },
-  {
-    href: "/returns?filter=missing",
-    label: "Returns",
-    icon: PackageSearch,
-    match: (p) => p.startsWith("/returns"),
-    badge: true,
-  },
-  { href: "/scan", label: "Scan", icon: ScanBarcode, match: (p) => p.startsWith("/scan") },
-  { href: "/orders", label: "Find an order", icon: Search, match: (p) => p.startsWith("/orders") },
-];
+const withIcons = (items: NavItem[]): Tab[] => items.map((t) => ({ ...t, icon: ICONS[t.href] ?? Search }));
+
+const TABS: Tab[] = withIcons(BOTTOM_TABS);
+const SIDEBAR_PRIMARY: Tab[] = withIcons(SIDEBAR_PRIMARY_ITEMS);
+
+interface BadgeView {
+  text: string | null;
+  changed: boolean;
+  count: number;
+}
+
+/** Missing is crimson (DESIGN.md reserves it); unread chats use the brand pink. */
+const BADGE_TONE: Record<NavBadge, string> = {
+  missing: "bg-missing-solid text-white",
+  chats: "bg-brand-solid text-on-brand",
+};
+
+/** How often other screens re-check unread chats while open. */
+const CHAT_UNREAD_POLL_MS = 30_000;
 
 const SIDEBAR_OPS: Tab[] = [
   { href: "/items", label: "Items & stock", icon: Shirt, match: (p) => p.startsWith("/items") },
@@ -86,16 +89,12 @@ const SIDEBAR_FOOTER: Tab[] = [
 function SidebarList({
   items,
   pathname,
-  badge,
-  badgeChanged,
-  missing,
+  badges,
   className = "",
 }: {
   items: Tab[];
   pathname: string;
-  badge: string | null;
-  badgeChanged: boolean;
-  missing: number;
+  badges: Record<NavBadge, BadgeView>;
   className?: string;
 }) {
   return (
@@ -103,6 +102,7 @@ function SidebarList({
       {items.map((item) => {
         const Icon = item.icon;
         const active = item.match(pathname);
+        const b = item.badge ? badges[item.badge] : null;
         return (
           <li key={item.href}>
             <Link
@@ -121,14 +121,15 @@ function SidebarList({
                 strokeWidth={active ? 2.3 : 1.9}
               />
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
-              {item.badge && badge && (
+              {item.badge && b?.text && (
                 <span
-                  key={badgeChanged ? `sb-${missing}` : "sb"}
-                  className={`tabular-nums rounded-full bg-missing-solid px-1.5 py-0.5 text-[11px] font-bold leading-none text-white ${
-                    badgeChanged ? "anim-pop" : ""
-                  }`}
+                  key={b.changed ? `sb-${b.count}` : "sb"}
+                  aria-label={item.badge === "chats" ? `${b.text} unread` : `${b.text} missing`}
+                  className={`tabular-nums rounded-full px-1.5 py-0.5 text-[11px] font-bold leading-none ${
+                    BADGE_TONE[item.badge]
+                  } ${b.changed ? "anim-pop" : ""}`}
                 >
-                  {badge}
+                  {b.text}
                 </span>
               )}
             </Link>
@@ -145,6 +146,8 @@ let lastTabIndex = -1;
 let lastMissing = 0;
 /** Whether any screen has told us the Missing count this session. */
 let missingKnown = false;
+let lastChatUnread = 0;
+let chatUnreadFetchedAt = 0;
 
 export function AppShell({
   children,
@@ -156,6 +159,7 @@ export function AppShell({
   subtitle,
   onRefresh,
   pullEnabled = true,
+  chatUnread,
 }: AppShellProps) {
   const pull = usePullToRefresh(onRefresh, pullEnabled);
   const pathname = usePathname();
@@ -199,6 +203,46 @@ export function AppShell({
   }, [missing, missingCount]);
   const badge = formatBadgeCount(missing);
 
+  // Unread chats: screens other than Chats check now and then while visible.
+  const [fetchedChatUnread, setFetchedChatUnread] = useState<number | null>(null);
+  useEffect(() => {
+    if (chatUnread !== undefined) return;
+    let active = true;
+    const load = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - chatUnreadFetchedAt < CHAT_UNREAD_POLL_MS - 1000) return;
+      chatUnreadFetchedAt = Date.now();
+      fetch("/api/chats/unread", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (active && d && typeof d.total === "number") setFetchedChatUnread(d.total);
+        })
+        .catch(() => {
+          chatUnreadFetchedAt = 0;
+        });
+    };
+    load();
+    const id = setInterval(load, CHAT_UNREAD_POLL_MS);
+    document.addEventListener("visibilitychange", load);
+    return () => {
+      active = false;
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", load);
+    };
+  }, [chatUnread]);
+
+  const chats = chatUnread ?? fetchedChatUnread ?? lastChatUnread;
+  const chatChanged = chats !== lastChatUnread;
+  useEffect(() => {
+    lastChatUnread = chats;
+    if (chatUnread !== undefined) chatUnreadFetchedAt = Date.now();
+  }, [chats, chatUnread]);
+
+  const badges: Record<NavBadge, BadgeView> = {
+    missing: { text: badge, changed: badgeChanged, count: missing },
+    chats: { text: formatBadgeCount(chats), changed: chatChanged, count: chats },
+  };
+
   // Large title → compact title once it scrolls under the bar.
   const titleRef = useRef<HTMLHeadingElement>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -222,29 +266,10 @@ export function AppShell({
           Kyna Ops
         </Link>
         <nav aria-label="Primary" className="flex min-h-0 flex-1 flex-col">
-          <SidebarList
-            items={SIDEBAR_PRIMARY}
-            pathname={pathname}
-            badge={badge}
-            badgeChanged={badgeChanged}
-            missing={missing}
-          />
+          <SidebarList items={SIDEBAR_PRIMARY} pathname={pathname} badges={badges} />
           <hr className="mx-3 my-3 border-hairline" />
-          <SidebarList
-            items={SIDEBAR_OPS}
-            pathname={pathname}
-            badge={badge}
-            badgeChanged={badgeChanged}
-            missing={missing}
-          />
-          <SidebarList
-            items={SIDEBAR_FOOTER}
-            pathname={pathname}
-            badge={badge}
-            badgeChanged={badgeChanged}
-            missing={missing}
-            className="mt-auto"
-          />
+          <SidebarList items={SIDEBAR_OPS} pathname={pathname} badges={badges} />
+          <SidebarList items={SIDEBAR_FOOTER} pathname={pathname} badges={badges} className="mt-auto" />
         </nav>
       </aside>
 
@@ -268,6 +293,15 @@ export function AppShell({
 
           <div className="ml-auto flex items-center gap-1">
             {headerRight}
+            {/* Scan left the tab bar for Chats; it stays one tap away on every phone screen. */}
+            <Link
+              href="/scan"
+              aria-label="Scan"
+              title="Scan"
+              className="pressable flex h-11 w-11 items-center justify-center rounded-full text-ink-2 hover:bg-ink/[0.05] lg:hidden"
+            >
+              <ScanBarcode className="h-[22px] w-[22px]" />
+            </Link>
             {pathname !== "/settings" && (
               <Link
                 href="/settings"
@@ -316,6 +350,7 @@ export function AppShell({
           {TABS.map((tab, i) => {
             const Icon = tab.icon;
             const active = i === activeIndex;
+            const b = tab.badge ? badges[tab.badge] : null;
             return (
               <Link
                 key={tab.href}
@@ -332,14 +367,15 @@ export function AppShell({
                     }`}
                     strokeWidth={active ? 2.3 : 1.9}
                   />
-                  {tab.badge && badge && (
+                  {tab.badge && b?.text && (
                     <span
-                      key={badgeChanged ? `b-${missing}` : "b"}
-                      className={`tabular-nums absolute -right-3.5 -top-1 min-w-[18px] rounded-full bg-missing-solid px-1 py-[3px] text-center text-[10px] font-bold leading-none text-white ring-2 ring-surface ${
-                        badgeChanged ? "anim-pop" : ""
-                      }`}
+                      key={b.changed ? `b-${b.count}` : "b"}
+                      aria-label={tab.badge === "chats" ? `${b.text} unread` : `${b.text} missing`}
+                      className={`tabular-nums absolute -right-3.5 -top-1 min-w-[18px] rounded-full px-1 py-[3px] text-center text-[10px] font-bold leading-none ring-2 ring-surface ${
+                        BADGE_TONE[tab.badge]
+                      } ${b.changed ? "anim-pop" : ""}`}
                     >
-                      {badge}
+                      {b.text}
                     </span>
                   )}
                 </span>

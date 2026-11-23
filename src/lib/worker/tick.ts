@@ -2,6 +2,8 @@ import { Platform, WaveStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { ensureFreshToken } from "@/lib/connectors/tokens";
 import { pruneDailyData } from "@/lib/worker/prune";
+import { notifyNewBuyerMessage } from "@/lib/chats/notify";
+import { syncAllTikTokChats } from "@/lib/chats/tiktok-sync";
 import { syncOrders } from "@/lib/ledger/sync";
 import { detectFailedDeliveries, refreshOpenParcels, syncReturnRequests } from "@/lib/returns/sync";
 import { syncMoney } from "@/lib/money/sync";
@@ -236,6 +238,20 @@ async function tickOnce(
     await withSpan("worker.tick.alerts", () => runProactiveAlerts());
   } catch (err) {
     console.error("[tick] proactive alerts", err);
+  }
+
+  try {
+    // TikTok buyer chats: changed chats only, at most once a minute per shop.
+    await withSpan("worker.tick.chats", () => syncAllTikTokChats(sliceDeadline(deadline, 0.3)));
+  } catch (err) {
+    console.error("[tick] chats", err);
+  }
+
+  try {
+    // Sends any grouped "new buyer messages" alert held back by the 2-minute limit.
+    await notifyNewBuyerMessage({ count: 0 });
+  } catch (err) {
+    console.error("[tick] chat alerts", err);
   }
 
   const [pruneRes, runningWaves] = await Promise.all([

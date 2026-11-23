@@ -1,5 +1,5 @@
 import { put } from "@vercel/blob";
-import { mkdir, writeFile } from "fs/promises";
+import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import crypto from "crypto";
 
@@ -49,7 +49,8 @@ export function localProofsDir(): string {
   return path.join(process.cwd(), "uploads", "proofs");
 }
 
-export async function saveProofPhoto(file: File): Promise<string> {
+/** Size and real-image checks shared by proof and chat photos. */
+async function readValidatedPhoto(file: File): Promise<{ buffer: Buffer; format: ImageFormat }> {
   if (file.size <= 0) {
     throw new InvalidProofPhotoError("Photo file is empty.");
   }
@@ -64,6 +65,69 @@ export async function saveProofPhoto(file: File): Promise<string> {
   if (!format) {
     throw new InvalidProofPhotoError("Only JPEG, PNG, or WebP photos are allowed.");
   }
+  return { buffer, format };
+}
+
+export function localChatPhotosDir(): string {
+  return path.join(process.cwd(), "uploads", "chat-photos");
+}
+
+export const SAFE_CHAT_PHOTO_FILE = /^chat-photo-\d+-[a-f0-9]+\.(jpg|png|webp)$/;
+
+/** Saves a photo the owner sends in a chat. Same checks as proof photos. */
+export async function saveChatPhoto(file: File): Promise<string> {
+  const { buffer, format } = await readValidatedPhoto(file);
+  const uniqueName = `chat-photo-${Date.now()}-${crypto.randomBytes(16).toString("hex")}${format.ext}`;
+
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    const blob = await put(`chat-photos/${uniqueName}`, buffer, {
+      access: "public",
+      contentType: format.contentType,
+    });
+    return blob.url;
+  }
+
+  const dir = localChatPhotosDir();
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, uniqueName), buffer);
+  return `/api/chats/photos/${uniqueName}`;
+}
+
+/** Only our own Blob store; never fetch an arbitrary URL from the server. */
+export function isOwnBlobUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && u.hostname.endsWith(".blob.vercel-storage.com") && u.pathname.includes("/chat-photos/");
+  } catch {
+    return false;
+  }
+}
+
+/** Reads back a chat photo saved by saveChatPhoto (to pass it on to the shop). */
+export async function readChatPhoto(url: string): Promise<{ buffer: Buffer; format: ImageFormat; fileName: string }> {
+  let buffer: Buffer;
+  let fileName: string;
+  const local = url.match(/^\/api\/chats\/photos\/([^/?#]+)$/);
+  if (local) {
+    fileName = local[1];
+    if (!SAFE_CHAT_PHOTO_FILE.test(fileName)) throw new InvalidProofPhotoError("Photo not found.");
+    buffer = await readFile(path.join(localChatPhotosDir(), fileName));
+  } else if (isOwnBlobUrl(url)) {
+    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) throw new InvalidProofPhotoError("Photo not found.");
+    buffer = Buffer.from(await res.arrayBuffer());
+    fileName = decodeURIComponent(new URL(url).pathname.split("/").pop() || "photo");
+  } else {
+    throw new InvalidProofPhotoError("Photo not found.");
+  }
+  if (buffer.length > MAX_PROOF_BYTES) throw new InvalidProofPhotoError("Photo must be 5 MB or smaller.");
+  const format = detectImageFormat(buffer);
+  if (!format) throw new InvalidProofPhotoError("Only JPEG, PNG, or WebP photos are allowed.");
+  return { buffer, format, fileName };
+}
+
+export async function saveProofPhoto(file: File): Promise<string> {
+  const { buffer, format } = await readValidatedPhoto(file);
 
   const uniqueName = `return-proof-${Date.now()}-${crypto.randomBytes(16).toString("hex")}${format.ext}`;
 

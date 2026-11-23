@@ -104,6 +104,85 @@ model ShopConnection {
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   parcels            ReturnParcel[]
+  chats              ChatConversation[]
+  /// First time the shop's chats loaded from the platform. Until then Chats shows sample chats.
+  chatAccessAt       DateTime?
+  /// Last time we asked the platform for changed chats (throttles the checks).
+  chatsCheckedAt     DateTime?
+}
+
+enum ChatSender {
+  BUYER
+  SELLER
+  /// The platform's auto-reply bot (TikTok "ROBOT").
+  ROBOT
+  /// Platform notices ("Chat assigned to an agent").
+  SYSTEM
+}
+
+enum ChatMessageKind {
+  TEXT
+  IMAGE
+  ORDER_CARD
+  PRODUCT_CARD
+  OTHER
+}
+
+enum ChatMessageStatus {
+  SENDING
+  SENT
+  FAILED
+}
+
+/// One buyer chat on a shop. Sample chats belong to the demo shops and are
+/// removed with them. Deleted 90 days after the last message.
+model ChatConversation {
+  id                 String         @id @default(cuid())
+  shopConnectionId   String
+  shopConnection     ShopConnection @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
+  platform           Platform
+  /// Shopee conversation_id / TikTok conversation id ("demo-..." for sample chats).
+  externalId         String
+  buyerName          String
+  buyerAvatarUrl     String?
+  /// Order the chat is about, when the platform tells us.
+  orderSn            String?
+  /// Sample chats only: the order card shown beside the chat.
+  sampleOrder        Json?
+  lastMessageAt      DateTime
+  lastMessagePreview String         @default("")
+  unreadCount        Int            @default(0)
+  /// False when the platform no longer lets the shop reply in this chat.
+  canReply           Boolean        @default(true)
+  /// Last time this chat's messages were fetched from the platform.
+  remoteCheckedAt    DateTime?
+  messages           ChatMessage[]
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@unique([shopConnectionId, externalId])
+  @@index([platform, lastMessageAt])
+}
+
+model ChatMessage {
+  id             String            @id @default(cuid())
+  conversationId String
+  conversation   ChatConversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  /// Platform message id; null until a reply is accepted by the shop.
+  externalId     String?
+  sender         ChatSender
+  kind           ChatMessageKind
+  text           String?
+  imageUrl       String?
+  /// Order or product card details (name, photo, order number).
+  cardData       Json?
+  sentAt         DateTime
+  status         ChatMessageStatus @default(SENT)
+  /// Set by the app for replies, so a retried send never posts twice.
+  clientKey      String?           @unique
+
+  @@unique([conversationId, externalId])
+  @@index([conversationId, sentAt])
 }
 
 model ReturnParcel {

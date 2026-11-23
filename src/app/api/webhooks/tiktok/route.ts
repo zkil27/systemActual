@@ -5,6 +5,8 @@ import { verifyTikTokWebhookSignature } from "@/lib/connectors/tiktok";
 import { syncSingleOrder } from "@/lib/ledger/sync";
 import { notifyCancelledPrintedOrder } from "@/lib/shipping/outbound";
 import { runTick } from "@/lib/worker/tick";
+import { isChatWebhook } from "@/lib/chats/webhook";
+import { syncAllTikTokChats } from "@/lib/chats/tiktok-sync";
 
 export const maxDuration = 120;
 
@@ -28,8 +30,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  // Fast-track urgent cancellations before any in-flight wave ships the order.
   const data = (payload?.data ?? {}) as Record<string, unknown>;
+
+  // Buyer chat events (New conversation / New message) only touch Chats, never the order sync.
+  if (isChatWebhook(data)) {
+    after(() =>
+      syncAllTikTokChats(Date.now() + 50_000, 5_000).catch((err) =>
+        console.error("[TikTok chat webhook]", err instanceof Error ? err.message : err)
+      )
+    );
+    return NextResponse.json({ ok: true });
+  }
+
+  // Fast-track urgent cancellations before any in-flight wave ships the order.
   const orderSn = typeof data.order_id === "string" ? data.order_id : "";
   const status = String(data.order_status ?? "").toUpperCase();
   const cancelStatus = String(data.cancel_status ?? "").toUpperCase();

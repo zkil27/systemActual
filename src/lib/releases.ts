@@ -21,11 +21,11 @@ export const RELEASES: Release[] = [
   {
     id: 3,
     date: "2026-11-24",
-    title: "New date picker",
+    title: "Chats and new date picker",
     changes: [
-      "Pick date on Today now opens a calendar that looks the same on every phone and computer.",
-      "Custom dates in Returns: tap the first day, then the last day, then Apply.",
-      "Track returns from in Settings uses the same calendar.",
+      "New Chats tab: read and reply to your TikTok buyers, with photos, and see each buyer's order and tracking beside the chat.",
+      "Scan moved to the top bar, next to Settings.",
+      "Pick date on Today and custom dates in Returns open a new calendar that looks the same on every phone and computer.",
       "Tap the month name at the top of the calendar to jump straight to any month or year.",
     ],
   },

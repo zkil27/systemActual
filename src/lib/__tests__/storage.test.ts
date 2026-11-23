@@ -3,6 +3,10 @@ import {
   detectImageFormat,
   InvalidProofPhotoError,
   MAX_PROOF_BYTES,
+  isOwnBlobUrl,
+  readChatPhoto,
+  SAFE_CHAT_PHOTO_FILE,
+  saveChatPhoto,
   saveProofPhoto,
 } from "@/lib/storage";
 
@@ -29,6 +33,31 @@ describe("detectImageFormat", () => {
     expect(detectImageFormat(Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'></svg>"))).toBeNull();
     expect(detectImageFormat(Buffer.from("<html><script>alert(1)</script></html>"))).toBeNull();
     expect(detectImageFormat(Buffer.from("tiny"))).toBeNull();
+  });
+});
+
+describe("saveChatPhoto", () => {
+  it("uses the same checks as proof photos", async () => {
+    const fake = new File(["<svg onload=alert(1)></svg>"], "evil.jpg", { type: "image/jpeg" });
+    await expect(saveChatPhoto(fake)).rejects.toThrow(InvalidProofPhotoError);
+    const big = new File([new Uint8Array(MAX_PROOF_BYTES + 1)], "huge.jpg", { type: "image/jpeg" });
+    await expect(saveChatPhoto(big)).rejects.toThrow(InvalidProofPhotoError);
+  });
+
+  it("only reads back our own chat photos when passing them to a shop", async () => {
+    expect(isOwnBlobUrl("https://abc.public.blob.vercel-storage.com/chat-photos/chat-photo-1-ab.jpg")).toBe(true);
+    expect(isOwnBlobUrl("https://abc.public.blob.vercel-storage.com/return-proofs/a.jpg")).toBe(false);
+    expect(isOwnBlobUrl("https://evil.example/chat-photos/a.jpg")).toBe(false);
+    expect(isOwnBlobUrl("http://abc.public.blob.vercel-storage.com/chat-photos/a.jpg")).toBe(false);
+    await expect(readChatPhoto("https://evil.example/x.jpg")).rejects.toThrow(InvalidProofPhotoError);
+    await expect(readChatPhoto("/api/chats/photos/..%2F.env")).rejects.toThrow(InvalidProofPhotoError);
+    await expect(readChatPhoto("http://169.254.169.254/latest")).rejects.toThrow(InvalidProofPhotoError);
+  });
+
+  it("only serves safe local file names", () => {
+    expect(SAFE_CHAT_PHOTO_FILE.test("chat-photo-1732400000000-ab12cd.jpg")).toBe(true);
+    expect(SAFE_CHAT_PHOTO_FILE.test("../.env")).toBe(false);
+    expect(SAFE_CHAT_PHOTO_FILE.test("return-proof-1-ab.jpg")).toBe(false);
   });
 });
 

@@ -37,6 +37,20 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/api/printer")).toBe(false);
   });
 
+  it("keeps buyer chats owner-only (they show prices)", () => {
+    for (const path of [
+      "/chats",
+      "/chats/abc",
+      "/api/chats",
+      "/api/chats/unread",
+      "/api/chats/abc/messages",
+      "/api/chats/photos/chat-photo-1-ab.jpg",
+      "/api/demo/chats/incoming",
+    ]) {
+      expect(isPublicPath(path), path).toBe(false);
+    }
+  });
+
   it("protects owner pages and raw /uploads/ paths while letting authenticated proof route pass Edge", () => {
     for (const path of ["/", "/returns", "/settings", "/imports", "/api/dashboard", "/api/returns/abc", "/uploads/return-proof-1.jpg"]) {
       expect(isPublicPath(path), path).toBe(false);

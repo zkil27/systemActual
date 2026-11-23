@@ -2,6 +2,7 @@ import { DigitalStatus, Prisma, PrintJobStatus, StockReason, WaveStatus } from "
 import { del } from "@vercel/blob";
 import { prisma } from "@/lib/prisma";
 import { pruneOldOrders } from "@/lib/ledger/store";
+import { pruneOldChats } from "@/lib/chats/prune";
 import { getManilaDateString } from "@/lib/time";
 
 const DAILY_PRUNE_LOCK_ID = "daily-prune";
@@ -144,6 +145,12 @@ export async function pruneDailyData(now: Date = new Date()): Promise<DailyPrune
     prisma.walletTransaction.deleteMany({ where: { occurredAt: { lt: walletCutoff } } }).then((r) => r.count),
     prisma.alertLog.deleteMany({ where: { sentAt: { lt: alertCutoff } } }).then((r) => r.count),
   ]);
+
+  try {
+    await pruneOldChats(now);
+  } catch (err) {
+    console.error("[prune] chats", err);
+  }
 
   let movementsRolledUp = 0;
   try {

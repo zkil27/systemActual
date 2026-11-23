@@ -124,6 +124,7 @@ Each screen answers one question with as few words as possible:
 - **Home:** how much money was credited, is anything missing, and what came back today? "Credited" means money in the Shopee wallet or a paid TikTok statement; orders placed are shown muted underneath because they aren't money yet.
 - **Returns:** find a parcel.
 - **Scan:** check this parcel in.
+- **Chats:** who needs a reply? Buyer bubbles are white on the left; the owner's replies are pastel pink (`brand-solid`, `on-brand` text) on the right. TikTok's auto-replies sit on the right in grey (`surface-muted`) under a small "TikTok auto-reply" label, and platform notices are centred grey lines, not bubbles. Unread uses the brand pink, never crimson, which stays reserved for Missing.
 - **Settings:** change a rule.
 
 Anything secondary sits one tap away in a sheet or a folded row. Nothing was removed. It moved.
@@ -180,15 +181,18 @@ Inputs are 16px or larger, which stops iOS from zooming in on focus.
 - **Phone & tablet (`< 1024px`):**
   - 20px side margins and 32px between sections.
   - A 48px top bar holds icon actions. It's transparent at rest, and turns white at 80% with blur and a hairline once the large title scrolls under it.
-  - A 60px translucent tab bar holds Today, Missing, Scan and More, with safe-area padding.
+  - A floating translucent pill tab bar holds Today, Ship, Returns (crimson Missing badge), Stock and Chats (pastel pink unread badge, `brand-solid` with `on-brand` text), with safe-area padding.
+  - Scan sits in the top bar as an icon next to the Settings gear on every owner screen. Staff open `/scan` directly; it has its own header and no tab bar.
+  - An open chat (`/chats/[id]`) fills the screen with no tab bar: back button and buyer name on top, the order card folded to one row under it, messages, then the reply box pinned above the keyboard (`visualViewport`) and the home indicator.
 - **Desktop (`>= 1024px`):**
-  - A fixed 240px left sidebar replaces the bottom tab bar, grouped into Today, Returns (with the Missing badge) and Scan; Items & stock, Waves & pick lists and Upload a file; and Settings pinned at the bottom.
+  - A fixed 240px left sidebar replaces the bottom tab bar, grouped into Today, Returns (with the Missing badge), Chats (with the unread badge), Scan and Find an order; Items & stock, Waves & pick lists and Upload a file; and Settings pinned at the bottom.
   - A 64px sticky top bar holds page actions and the compact title once the large title scrolls under it.
   - Content sits at `max-w-3xl` by default (Items, Upload) or `max-w-6xl` (`width="wide"`):
     - **Today:** 12-column grid — Money credited (5) next to Missing (7); Failed delivery and Buyer return side by side (6 / 6); To check up to 8 rows (7) next to an inline top-5 Most returned list (5).
     - **Returns:** Two-pane master–detail — filter bar and parcel list on the left alongside a sticky 420px (`xl`: 460px) parcel panel on the right, with `/`, `↑`, `↓` and `Esc` keyboard shortcuts.
     - **Settings:** Two equal columns — Stores and Printer on the left; Costs, Telegram, Warehouse staff and Sign out on the right.
     - **Waves:** 400px controls column on the left and the latest wave and pick groups on the right.
+    - **Chats:** Shopee / TikTok switch and chat list on the left (320–380px), the open chat on the right in a card that fills the window height.
   - Scan, Stock-in and Login stay phone-width.
 - **Home-screen app:**
   - `display: standalone` manifest with 192, 512 and maskable icons, generated in code.

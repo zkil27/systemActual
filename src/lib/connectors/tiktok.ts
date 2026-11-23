@@ -127,6 +127,43 @@ export async function tiktokRequest(opts: {
   return data.data;
 }
 
+/**
+ * Signed TikTok Shop file upload (multipart/form-data). For uploads TikTok
+ * signs the path and query only, not the file body.
+ */
+export async function tiktokUploadRequest(opts: {
+  path: string;
+  accessToken: string;
+  shopCipher?: string | null;
+  field: string;
+  file: Blob;
+  fileName: string;
+  query?: Record<string, string>;
+  fetchFn?: typeof fetch;
+}) {
+  const cfg = getTikTokConfig();
+  const accessToken = decryptSecret(opts.accessToken);
+  const shopCipher = opts.shopCipher ? decryptSecret(opts.shopCipher) : null;
+  const query: Record<string, string> = {
+    app_key: cfg.appKey,
+    timestamp: String(Math.floor(Date.now() / 1000)),
+    ...(shopCipher ? { shop_cipher: shopCipher } : {}),
+    ...(opts.query ?? {}),
+  };
+  const sign = signTikTokRequest({ appSecret: cfg.appSecret, path: opts.path, query });
+  const form = new FormData();
+  form.append(opts.field, opts.file, opts.fileName);
+  const res = await (opts.fetchFn ?? fetch)(
+    `${cfg.apiBaseUrl}${opts.path}?${new URLSearchParams({ ...query, sign }).toString()}`,
+    { method: "POST", headers: { "x-tts-access-token": accessToken }, body: form, signal: AbortSignal.timeout(30_000) }
+  );
+  const data = await res.json();
+  if (!res.ok || data.code !== 0) {
+    throw new Error(data.message || `TikTok API error on ${opts.path}`);
+  }
+  return data.data;
+}
+
 export interface AuthorizedShop {
   id: string;
   name: string;
