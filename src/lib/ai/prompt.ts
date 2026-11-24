@@ -1,4 +1,5 @@
 import type { ChatCard, OrderPanel } from "@/lib/chats/types";
+import { listingBlock, type ListingFacts } from "./listing";
 import type { ChatMessage } from "./providers";
 import { redactPersonal } from "./redact";
 
@@ -36,9 +37,11 @@ How to reply:
 - Match the language of the buyer's newest message. English → reply in English. Tagalog or Taglish → reply in natural Taglish. Use "po" in Tagalog and Taglish.
 - Be warm and polite. 1 to 3 short sentences, under 60 words. Plain text, at most one emoji.
 - Answer every question in the buyer's newest messages.
-- State only what is in SHOP FACTS or ORDER. Don't guess stock, sizes, prices, colors, dates, delivery times or shop steps that aren't there.
+- State only what is in SHOP FACTS, ORDER or PRODUCT DETAILS. Don't guess stock, sizes, prices, colors, measurements, dates, delivery times or shop steps that aren't there.
+- PRODUCT DETAILS is the item's own TikTok listing. Use it for the product: fabric, fit, sizes and their ranges, length, colors, price and stock. Use SHOP FACTS for shipping, delivery, returns and payment, even if the listing says something else.
+- Stock: use only the words in PRODUCT DETAILS: "available", "few left" or "sold out". Never give a number of pieces, never promise to hold or reserve an item, and for "few left" suggest checking out soon. If a color or size isn't listed, say the team will check.
 - Never say what the shop can or can't do (notes, gift wrap, pickup, someone else receiving, special requests) unless SHOP FACTS says it. Say the team will check instead.
-- Sizes differ per item. Unless the buyer shared the product and its size chart is in the facts, explain how to pick a size from the facts instead of naming one.
+- Sizes differ per item. When PRODUCT DETAILS shows size ranges (like "M (27-30)"), pick the size whose range fits the buyer's measurement and name it. Otherwise explain how to pick a size from the facts instead of naming one.
 - Asked for a discount or "less": say kindly that the price is as listed in the shop.
 - Upset or worried buyer: say sorry first, then speak to their exact problem using ORDER (for example, the order still shows "To ship"), and say the team will check. Don't argue or defend the shop.
 - Returns, refunds, damaged, missing or wrong items: say sorry, and tell them how to request it in the TikTok app exactly as the facts say. Don't say the shop will refund, replace or review it.
@@ -47,7 +50,7 @@ How to reply:
 Mark replies the owner must check: when the facts don't answer a question, when it's about a return, refund, damage or complaint, or when the buyer wants a person, write ${CHECK_MARK} alone on the first line, then the reply. If the facts don't answer, the reply says the team will check and reply soon.
 
 Never:
-- promise discounts, freebies, vouchers, refunds, exchanges, stock or delivery dates
+- promise discounts, freebies, vouchers, refunds, exchanges, reserved items or delivery dates
 - share or ask for phone numbers, payment details, email or links, or suggest any app outside TikTok
 - write the words GCash, Maya, bank, Facebook, Messenger, Viber or WhatsApp, even to say no
 - ask the buyer to pay, send money or chat outside TikTok
@@ -148,12 +151,19 @@ export function replyLanguage(messages: PromptMessage[]): "English" | "Taglish" 
   return words >= 4 && tagalog <= Math.floor(words / 12) ? "English" : "Taglish";
 }
 
+function detailsBlock(listings: ListingFacts[] | undefined): string {
+  return (listings ?? []).map(listingBlock).join("\n\n");
+}
+
 export function buildPrompt(opts: {
   answers: PromptAnswer[];
   order: OrderPanel | null;
   messages: PromptMessage[];
+  /** The TikTok listings the chat is about (product cards, order items). */
+  listings?: ListingFacts[];
 }): ChatMessage[] {
   const products = productsBlock(opts.messages);
+  const details = detailsBlock(opts.listings);
   const user = [
     "SHOP FACTS:",
     factsBlock(opts.answers),
@@ -161,6 +171,7 @@ export function buildPrompt(opts: {
     "ORDER:",
     orderBlock(opts.order),
     ...(products ? ["", "PRODUCTS THE BUYER SHARED:", products] : []),
+    ...(details ? ["", "PRODUCT DETAILS:", details] : []),
     "",
     "CHAT (oldest first):",
     "<<<",
@@ -178,11 +189,17 @@ export function buildPrompt(opts: {
 }
 
 /** Everything the reply may state, for the grounding checks. */
-export function groundingText(opts: { answers: PromptAnswer[]; order: OrderPanel | null; messages: PromptMessage[] }): string {
+export function groundingText(opts: {
+  answers: PromptAnswer[];
+  order: OrderPanel | null;
+  messages: PromptMessage[];
+  listings?: ListingFacts[];
+}): string {
   return [
     factsBlock(opts.answers),
     orderBlock(opts.order),
     productsBlock(opts.messages),
+    detailsBlock(opts.listings),
     ...opts.messages.filter((m) => m.sender === "BUYER").map((m) => m.text ?? ""),
   ].join("\n");
 }

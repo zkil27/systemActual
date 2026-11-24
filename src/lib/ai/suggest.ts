@@ -1,5 +1,8 @@
-import { ChatDraftStatus } from "@prisma/client";
+import { ChatDraftStatus, Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { tiktokRequest } from "@/lib/connectors/tiktok";
+import { ensureFreshToken } from "@/lib/connectors/tokens";
+import { getListingFacts, listingIdsForChat, type ListingFacts } from "./listing";
 import { toCard } from "@/lib/chats/service";
 import { expirePending, loadOrderPanel, NEEDS_CHECK_SUFFIX, toView, type DraftView } from "./drafts";
 import { needsAnswer, type GateMessage } from "./gate";
@@ -68,6 +71,45 @@ async function logEvent(data: {
   await prisma.aiEvent.create({ data }).catch(() => {});
 }
 
+type ChatShop = Parameters<typeof ensureFreshToken>[0] & { isDemo: boolean; shopCipher: string | null };
+
+/** The TikTok listings this chat is about, read live from the shop. Sample chats have none. */
+async function chatListings(
+  shop: ChatShop,
+  platform: string,
+  orderSn: string | null,
+  messages: PromptMessage[]
+): Promise<ListingFacts[]> {
+  if (shop.isDemo || platform !== Platform.TIKTOK) return [];
+  try {
+    const cards = messages
+      .filter((m) => m.kind === "PRODUCT_CARD" && m.card)
+      .map((m) => ({ productId: m.card!.productId ?? null, itemName: m.card!.itemName }));
+    const ids = await listingIdsForChat({ shopConnectionId: shop.id, cards, orderSn });
+    if (ids.length === 0) return [];
+    let token: string | null = null;
+    try {
+      token = await ensureFreshToken(shop);
+    } catch {
+      // Reconnect needed: the stored copy still has sizes and the last stock.
+    }
+    const fetcher = token
+      ? (productId: string) =>
+          tiktokRequest({
+            method: "GET",
+            path: `/product/202309/products/${encodeURIComponent(productId)}`,
+            accessToken: token!,
+            shopCipher: shop.shopCipher,
+          })
+      : null;
+    const facts = await Promise.all(ids.map((productId) => getListingFacts({ shopConnectionId: shop.id, productId, fetcher })));
+    return facts.filter((f): f is ListingFacts => Boolean(f));
+  } catch (err) {
+    console.error("[assistant] listings", err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
 export async function suggestReply(conversationId: string, deps: CompletionDeps = {}): Promise<SuggestResult> {
   const settings = await getAiSettings();
   if (!settings.enabled) return fail("off");
@@ -81,7 +123,20 @@ export async function suggestReply(conversationId: string, deps: CompletionDeps 
       sampleOrder: true,
       canReply: true,
       aiPausedUntil: true,
-      shopConnection: { select: { isDemo: true } },
+      shopConnection: {
+        select: {
+          id: true,
+          isDemo: true,
+          platform: true,
+          shopId: true,
+          shopName: true,
+          shopCipher: true,
+          accessToken: true,
+          refreshToken: true,
+          tokenExpiresAt: true,
+          tokenErrorAt: true,
+        },
+      },
       messages: {
         orderBy: [{ sentAt: "desc" }, { id: "desc" }],
         take: WINDOW,
@@ -122,8 +177,10 @@ export async function suggestReply(conversationId: string, deps: CompletionDeps 
     holding: m.sender === "SELLER" && m.kind === "TEXT" && !m.clientKey && isHoldingReply(m.text),
   }));
 
-  const prompt = buildPrompt({ answers, order, messages });
-  const facts = groundingText({ answers, order, messages });
+  const listings = await chatListings(conv.shopConnection, conv.platform, conv.orderSn, messages);
+  const stockKnown = listings.some((l) => l.skus.some((s) => s.stock !== null));
+  const prompt = buildPrompt({ answers, order, messages, listings });
+  const facts = groundingText({ answers, order, messages, listings });
   let accepted: { text: string; needsCheck: boolean; usage: Usage } | null = null;
   let lastLabel = "";
 
@@ -151,7 +208,7 @@ export async function suggestReply(conversationId: string, deps: CompletionDeps 
       latencyMs: result.latencyMs,
     };
     const parsed = parseReply(result.text);
-    const verdict = checkReply(parsed.text, { facts });
+    const verdict = checkReply(parsed.text, { facts, stockKnown });
     if (verdict.ok) {
       accepted = { ...parsed, usage };
     } else {

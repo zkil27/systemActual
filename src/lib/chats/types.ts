@@ -27,6 +27,8 @@ export interface ChatCard {
   pricePhp: number | null;
   /** Delivery-status card: courier and tracking go in `variation`. */
   logistics?: boolean;
+  /** TikTok product id of a product card (for the assistant's listing lookup). */
+  productId?: string | null;
 }
 
 export interface ChatMessageView {

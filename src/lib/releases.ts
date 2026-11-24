@@ -24,7 +24,7 @@ export const RELEASES: Release[] = [
     date: "2026-11-24",
     title: "Suggested chat replies",
     changes: [
-      "In a TikTok chat, tap Suggest a reply to get a reply written from your shop answers and the order. Check it, then send it yourself.",
+      "In a TikTok chat, tap Suggest a reply to get a reply written from your shop answers, the order and the item's listing (fabric, sizes, price and stock). Check it, then send it yourself.",
       "New Chats assistant page in Settings: turn suggested replies on or off and write your shop's answers.",
       "When you open the app after an update, a What's new sheet shows what changed. Tap Got it to close it.",
       "In Chats, the reply box now sits right on top of the keyboard, without the empty gap.",

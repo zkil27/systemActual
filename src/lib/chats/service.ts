@@ -135,6 +135,7 @@ export function toCard(raw: Prisma.JsonValue | null): ChatCard | null {
     orderSn: str(r.orderSn),
     pricePhp: typeof r.pricePhp === "number" ? r.pricePhp : null,
     ...(r.logistics === true ? { logistics: true } : {}),
+    ...(str(r.productId) ? { productId: str(r.productId) } : {}),
   };
 }
 

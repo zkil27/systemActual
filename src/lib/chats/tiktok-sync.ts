@@ -112,7 +112,8 @@ async function buildCards(messages: NormalizedMessage[]): Promise<Map<string, Ca
       }
     } else if (m.kind === "PRODUCT_CARD") {
       const l = m.productId ? listingById.get(m.productId) : undefined;
-      cards.set(m.externalId, { itemName: l?.name ?? "Product", imageUrl: l?.imageUrl ?? null });
+      // productId lets the Chats assistant read the listing (sizes, stock) later.
+      cards.set(m.externalId, { itemName: l?.name ?? "Product", imageUrl: l?.imageUrl ?? null, productId: m.productId });
     }
   }
   return cards;

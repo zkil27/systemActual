@@ -35,9 +35,11 @@ const PROMISE_WORDS = [
   /\breplacement\b/i,
   /\bpapalitan\b/i,
   /\bguarantee(d)?\b|\bsigurado\b|\bpromise\b|\bpangako\b/i,
+  // Holding stock for one buyer.
+  /\b(i-?reserve|reserve(d)?|itatabi|itabi|i-?hold|hold\s+(it|for))\b/i,
 ];
 
-// Saying something is in stock: Kyna Ops has no stock facts for chats.
+// Saying something is in stock. Only allowed when the listing's stock is in the facts.
 const STOCK_CLAIM =
   /\b(may|meron|mayroon)\s+(pa\s+)?(po\s+)?(pa(ng)?|stock|kami(ng)?|tayo(ng)?)\b|\bin\s+stock\b|\bavailable\s+(pa|na)\b|\bwe\s+(still\s+)?have\b|\bstill\s+available\b|\brestock(ed|ing)?\b|\bsold\s*out\b|\bubos\s+na\b|\bwala\s+na(ng)?\s+(stock|kami)\b/gi;
 const HEDGE_BEFORE = /\b(kung|if|whether|check|tingnan|alamin)\b[^.!?]{0,25}$/i;
@@ -58,7 +60,14 @@ function digitsOf(s: string): string[] {
   return (s.match(/\d+(?:[.,]\d+)?/g) ?? []).map((n) => n.replace(/,/g, ""));
 }
 
-export function checkReply(reply: string, opts: { facts: string }): CheckResult {
+export function checkReply(
+  reply: string,
+  opts: {
+    facts: string;
+    /** A listing's stock (available / few left / sold out) was in the facts. */
+    stockKnown?: boolean;
+  }
+): CheckResult {
   const text = reply.trim();
   if (!text) return { ok: false, reason: "empty", label: "it was empty" };
   if (text.length > MAX_REPLY_CHARS) return { ok: false, reason: "too_long", label: "it was too long" };
@@ -73,9 +82,11 @@ export function checkReply(reply: string, opts: { facts: string }): CheckResult 
     if (m && !grounded(m[0], opts.facts)) return { ok: false, reason: "promise", label: `it promised "${m[0]}"` };
   }
 
-  for (const m of text.matchAll(STOCK_CLAIM)) {
-    const before = text.slice(0, m.index ?? 0);
-    if (!HEDGE_BEFORE.test(before)) return { ok: false, reason: "stock", label: "it guessed the stock" };
+  if (!opts.stockKnown) {
+    for (const m of text.matchAll(STOCK_CLAIM)) {
+      const before = text.slice(0, m.index ?? 0);
+      if (!HEDGE_BEFORE.test(before)) return { ok: false, reason: "stock", label: "it guessed the stock" };
+    }
   }
 
   for (const m of text.matchAll(DAY_WORDS)) {
