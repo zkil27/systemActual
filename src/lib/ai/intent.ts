@@ -33,8 +33,21 @@ export function isAckOrGreeting(text: string | null | undefined): boolean {
   const s = normalizeText(text);
   if (!s) return true;
   if (/^[\p{Extended_Pictographic}\p{Emoji_Component}\s\p{P}]+$/u.test(s)) return true;
-  return ACK.test(s) || GREETING.test(s) || (s.length <= 12 && /^(salamat|thank|ok|sige)/i.test(s));
+  if (ACK.test(s) || GREETING.test(s) || (s.length <= 12 && /^(salamat|thank|ok|sige)/i.test(s))) return true;
+  // "Done na po, thank you!", "ok na po salamat": every word is a thanks or filler.
+  const words = s
+    .toLowerCase()
+    .replace(/[\p{Extended_Pictographic}\p{Emoji_Component}]/gu, " ")
+    .split(/[^\p{L}']+/u)
+    .filter(Boolean);
+  return words.length > 0 && words.length <= 8 && words.every((w) => ACK_WORDS.has(w));
 }
+
+const ACK_WORDS = new Set([
+  "ok", "okay", "oki", "okie", "k", "sige", "noted", "salamat", "maraming", "thank", "thanks", "you", "ty", "thx", "tnx",
+  "po", "na", "ho", "yes", "yup", "opo", "oo", "done", "received", "nareceive", "natanggap", "ko", "got", "it",
+  "nice", "ganda", "ayos", "great", "so", "much", "again", "din", "rin", "naman", "ate", "kuya", "miss", "maam", "sir",
+]);
 
 /** TikTok's notice that the buyer asked for a person. */
 export function isHandoffNotice(text: string | null | undefined): boolean {

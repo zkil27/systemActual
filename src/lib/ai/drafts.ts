@@ -5,6 +5,7 @@ import { buildOrderPanel } from "@/lib/chats/order-panel";
 import type { OrderPanel } from "@/lib/chats/types";
 import { needsAnswer, type GateMessage, type GateResult } from "./gate";
 import { classifyIntents } from "./intent";
+import { configuredProviders } from "./providers/catalog";
 import { topicMode, type AiTopic } from "./settings";
 import { activeShopAnswers, getAiSettings } from "./settings-store";
 import { answerTopicsFor, templateDraftFor } from "./templates";
@@ -44,15 +45,21 @@ const TOPIC_WORDS: Record<string, string> = {
   returns: "a return or complaint",
 };
 
+/** AI drafts that couldn't answer everything keep this on their model name. */
+export const NEEDS_CHECK_SUFFIX = "#check";
+
 /** "From your shop answers. Doesn't answer: stock" */
-export function basisLabel(provider: string | null, model: string | null): string {
+export function basisLabel(provider: string | null, model: string | null, source: string = "TEMPLATE"): string {
+  if (source === "AI") {
+    return model?.endsWith(NEEDS_CHECK_SUFFIX) ? "AI reply. Needs your check" : "AI reply from your shop answers";
+  }
   const base = BASIS[provider ?? ""] ?? "Suggested reply";
   const missing = model?.startsWith("missing:") ? model.slice(8).split(",").filter(Boolean) : [];
   if (missing.length === 0) return base;
   return `${base}. Doesn't answer: ${missing.map((m) => TOPIC_WORDS[m] ?? m).join(", ")}`;
 }
 
-function toView(d: {
+export function toView(d: {
   id: string;
   text: string;
   source: string;
@@ -66,12 +73,12 @@ function toView(d: {
     text: d.text,
     source: (d.source as DraftView["source"]) ?? "TEMPLATE",
     intent: d.intent,
-    basis: basisLabel(d.provider, d.model),
+    basis: basisLabel(d.provider, d.model, d.source),
     rating: d.rating === "good" || d.rating === "bad" ? d.rating : null,
   };
 }
 
-async function loadOrderPanel(conv: {
+export async function loadOrderPanel(conv: {
   platform: "SHOPEE" | "TIKTOK";
   orderSn: string | null;
   sampleOrder: Prisma.JsonValue;
@@ -92,7 +99,7 @@ async function loadOrderPanel(conv: {
   return buildOrderPanel({ order });
 }
 
-async function expirePending(conversationId: string, exceptId?: string) {
+export async function expirePending(conversationId: string, exceptId?: string) {
   await prisma.chatDraft.updateMany({
     where: { conversationId, status: ChatDraftStatus.PENDING, ...(exceptId ? { id: { not: exceptId } } : {}) },
     data: { status: ChatDraftStatus.EXPIRED },
@@ -103,6 +110,14 @@ export interface RefreshResult {
   draft: DraftView | null;
   gate: GateResult | { pending: false; reason: "off" };
   topic?: AiTopic;
+  /** The owner may ask the AI for a reply (no draft yet, or the draft leaves questions out). */
+  canSuggest: boolean;
+}
+
+/** A template draft that leaves a question unanswered, or no usable draft at all. */
+function suggestable(draft: { source: string; model: string | null } | null): boolean {
+  if (!draft) return true;
+  return draft.source === "TEMPLATE" && Boolean(draft.model?.startsWith("missing:"));
 }
 
 /**
@@ -114,8 +129,9 @@ export async function refreshDraft(conversationId: string, now: Date = new Date(
   const settings = await getAiSettings();
   if (!settings.enabled) {
     await expirePending(conversationId);
-    return { draft: null, gate: { pending: false, reason: "off" } };
+    return { draft: null, gate: { pending: false, reason: "off" }, canSuggest: false };
   }
+  const aiReady = configuredProviders().some((p) => p.spec.privateOk);
 
   const conv = await prisma.chatConversation.findUnique({
     where: { id: conversationId },
@@ -134,13 +150,13 @@ export async function refreshDraft(conversationId: string, now: Date = new Date(
       },
     },
   });
-  if (!conv) return { draft: null, gate: { pending: false, reason: "no_buyer" } };
+  if (!conv) return { draft: null, gate: { pending: false, reason: "no_buyer" }, canSuggest: false };
 
   const messages: GateMessage[] = [...conv.messages].reverse();
   const gate = needsAnswer(messages, { pausedUntil: conv.aiPausedUntil, canReply: conv.canReply, now });
   if (!gate.pending) {
     await expirePending(conversationId);
-    return { draft: null, gate };
+    return { draft: null, gate, canSuggest: false };
   }
 
   // Already handled this buyer message (pending, used, dismissed or sent)?
@@ -150,15 +166,17 @@ export async function refreshDraft(conversationId: string, now: Date = new Date(
   });
   await expirePending(conversationId, existing?.status === ChatDraftStatus.PENDING ? existing.id : undefined);
   if (existing) {
+    const pending = existing.status === ChatDraftStatus.PENDING;
     return {
-      draft: existing.status === ChatDraftStatus.PENDING ? toView(existing) : null,
+      draft: pending ? toView(existing) : null,
       gate,
       topic: existing.intent as AiTopic,
+      canSuggest: aiReady && suggestable(pending ? existing : null),
     };
   }
 
   // Photos and videos need a person to look; no draft.
-  if (gate.hasMedia && !gate.buyerText) return { draft: null, gate };
+  if (gate.hasMedia && !gate.buyerText) return { draft: null, gate, canSuggest: false };
 
   const order = await loadOrderPanel({
     platform: conv.platform,
@@ -170,13 +188,13 @@ export async function refreshDraft(conversationId: string, now: Date = new Date(
   const topics = classifyIntents(gate.buyerTexts, { hasOrder: Boolean(order) }).filter(
     (t) => topicMode(settings.topicModes, t) !== "off"
   );
-  if (topics.length === 0) return { draft: null, gate };
+  if (topics.length === 0) return { draft: null, gate, canSuggest: false };
   // Money and complaints decide who answers, so they lead.
   const topic: AiTopic = topics.includes("returns") ? "returns" : topics[0];
 
   const answers = await activeShopAnswers([...new Set(topics.flatMap(answerTopicsFor))]);
   const t = templateDraftFor({ topics, order, answers });
-  if (!t) return { draft: null, gate, topic };
+  if (!t) return { draft: null, gate, topic, canSuggest: aiReady };
 
   const id = draftId(conversationId, gate.lastBuyerMessageId, "TEMPLATE");
   try {
@@ -196,12 +214,13 @@ export async function refreshDraft(conversationId: string, now: Date = new Date(
     await prisma.aiEvent
       .create({ data: { conversationId, decision: "template", intent: topic, provider: t.basis } })
       .catch(() => {});
-    return { draft: toView(row), gate, topic };
+    return { draft: toView(row), gate, topic, canSuggest: aiReady && suggestable(row) };
   } catch (err) {
     // A parallel poll made the same draft first.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       const row = await prisma.chatDraft.findUnique({ where: { id } });
-      return { draft: row && row.status === ChatDraftStatus.PENDING ? toView(row) : null, gate, topic };
+      const pending = row && row.status === ChatDraftStatus.PENDING ? row : null;
+      return { draft: pending ? toView(pending) : null, gate, topic, canSuggest: aiReady && suggestable(pending) };
     }
     throw err;
   }

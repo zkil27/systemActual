@@ -10,7 +10,7 @@ import { describeFound, findOffPlatformDetails } from "@/lib/chats/contact-check
 import { newClientKey, shrinkPhoto, timeoutSignal } from "@/lib/chats/client";
 import { platformName, shopParam, withDaySeparators } from "@/lib/chats/format";
 import type { ChatDraftView, ChatMessageView, ChatThread } from "@/lib/chats/types";
-import { DraftCard } from "./DraftCard";
+import { DraftCard, SuggestBar } from "./DraftCard";
 import { BuyerAvatar } from "./BuyerAvatar";
 import { Composer } from "./Composer";
 import { MessageBubble, type DisplayMessage } from "./MessageBubble";
@@ -29,7 +29,9 @@ const NEAR_BOTTOM_PX = 96;
 /** Viewport shrinking by more than this counts as the on-screen keyboard being open. */
 const KEYBOARD_MIN_PX = 120;
 
-type Meta = Omit<ChatThread, "messages" | "draft">;
+type Meta = Omit<ChatThread, "messages" | "draft" | "canSuggest">;
+/** The AI chain gives up after 40 s on the server. */
+const SUGGEST_TIMEOUT_MS = 50_000;
 type Outgoing = { text: string } | { file: File | null };
 
 /** The phone keyboard shrinks the visual viewport, not the layout one. Keep the composer above it. */
@@ -70,6 +72,8 @@ export function ChatThreadView({
 }) {
   const [meta, setMeta] = useState<Meta | null>(null);
   const [draft, setDraft] = useState<ChatDraftView | null>(null);
+  const [canSuggest, setCanSuggest] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
   /** Drafts used or dismissed on this screen, so a poll that crossed the request can't bring one back. */
   const handledDrafts = useRef(new Set<string>());
   const [messages, setMessages] = useState<ChatMessageView[]>([]);
@@ -130,9 +134,10 @@ export function ChatThreadView({
         if (res.status === 404) return setState("missing");
         const data = (await res.json().catch(() => null)) as ChatThread | null;
         if (!res.ok || !data) return setState("error");
-        const { messages: first, draft: firstDraft, ...rest } = data;
+        const { messages: first, draft: firstDraft, canSuggest: firstCanSuggest, ...rest } = data;
         setMeta(rest);
         setDraft(firstDraft ?? null);
+        setCanSuggest(Boolean(firstCanSuggest));
         scrollMode.current = "jump";
         setMessages(first);
         setState("ready");
@@ -163,6 +168,7 @@ export function ChatThreadView({
         const data = (await res.json()) as ChatThread;
         const next = data.draft && !handledDrafts.current.has(data.draft.id) ? data.draft : null;
         setDraft((d) => (d?.id === next?.id ? d : next));
+        setCanSuggest(Boolean(data.canSuggest));
         const known = new Set(messagesRef.current.map((m) => m.id));
         const fresh = data.messages.filter((m) => !known.has(m.id));
         if (fresh.length === 0) return;
@@ -361,6 +367,29 @@ export function ChatThreadView({
     }
   }
 
+  async function suggest() {
+    if (suggesting) return;
+    setSuggesting(true);
+    try {
+      const res = await fetch(`/api/chats/${encodeURIComponent(id)}/suggest`, {
+        method: "POST",
+        signal: timeoutSignal(SUGGEST_TIMEOUT_MS),
+      });
+      const data = (await res.json().catch(() => null)) as { draft?: ChatDraftView; error?: string } | null;
+      if (res.ok && data?.draft) {
+        handledDrafts.current.delete(data.draft.id);
+        setDraft(data.draft);
+        setCanSuggest(false);
+      } else {
+        toast(data?.error ?? "Couldn't write a reply. Try again.", "error");
+      }
+    } catch {
+      toast("Couldn't write a reply. Check your connection and try again.", "error");
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
   async function sendTestMessage() {
     if (!meta) return;
     setTesting(true);
@@ -519,8 +548,11 @@ export function ChatThreadView({
               setDraft({ ...draft, rating });
               void draftAction(draft.id, "rate", rating);
             }}
+            onSuggest={canSuggest && draft.source === "TEMPLATE" ? suggest : undefined}
+            suggesting={suggesting}
           />
         )}
+        {meta.canReply && !draft && canSuggest && <SuggestBar suggesting={suggesting} onSuggest={suggest} />}
         {meta.canReply ? (
           <Composer
             ref={textareaRef}

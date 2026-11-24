@@ -102,8 +102,9 @@ export function configuredProviders(env: Env = process.env): ConfiguredProvider[
       baseUrl: "https://api.groq.com/openai/v1",
       apiKey: groqKey,
       models: [
-        { provider: "groq", model: "openai/gpt-oss-20b", ...GROQ_LIMITS, extra: GPT_OSS_GROQ, thinkingTokens: 300 },
+        // 120b follows the language and "only the facts" rules better; same free limits, ~1-2 s.
         { provider: "groq", model: "openai/gpt-oss-120b", ...GROQ_LIMITS, extra: GPT_OSS_GROQ, thinkingTokens: 300 },
+        { provider: "groq", model: "openai/gpt-oss-20b", ...GROQ_LIMITS, extra: GPT_OSS_GROQ, thinkingTokens: 300 },
         { provider: "groq", model: "qwen/qwen3.8-27b", ...GROQ_LIMITS, extra: { reasoning_effort: "none" } },
       ],
     });

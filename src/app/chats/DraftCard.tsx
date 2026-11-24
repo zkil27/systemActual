@@ -1,7 +1,35 @@
 "use client";
 
-import { Sparkles, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { Loader2, Sparkles, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import type { ChatDraftView } from "@/lib/chats/types";
+
+function SuggestButton({ label, suggesting, onSuggest }: { label: string; suggesting: boolean; onSuggest: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onSuggest}
+      disabled={suggesting}
+      aria-busy={suggesting}
+      className="pressable inline-flex min-h-11 items-center gap-2 rounded-full px-3 text-[14px] font-bold text-brand hover:bg-brand-soft disabled:opacity-70"
+    >
+      {suggesting ? (
+        <Loader2 className="anim-spin h-4 w-4" aria-hidden="true" />
+      ) : (
+        <Sparkles className="h-4 w-4" aria-hidden="true" />
+      )}
+      {suggesting ? "Writing a reply…" : label}
+    </button>
+  );
+}
+
+/** No draft yet: ask the AI for one. It only fills a draft; the owner still sends. */
+export function SuggestBar({ suggesting, onSuggest }: { suggesting: boolean; onSuggest: () => void }) {
+  return (
+    <div className="shrink-0 border-t border-hairline bg-surface px-2 py-1">
+      <SuggestButton label="Suggest a reply" suggesting={suggesting} onSuggest={onSuggest} />
+    </div>
+  );
+}
 
 /** The assistant's suggested reply, above the reply box. Nothing is sent until the owner sends it. */
 export function DraftCard({
@@ -9,11 +37,16 @@ export function DraftCard({
   onUse,
   onDismiss,
   onRate,
+  onSuggest,
+  suggesting = false,
 }: {
   draft: ChatDraftView;
   onUse: () => void;
   onDismiss: () => void;
   onRate: (rating: "good" | "bad") => void;
+  /** Shown when the draft leaves a question unanswered and the AI can try. */
+  onSuggest?: () => void;
+  suggesting?: boolean;
 }) {
   return (
     <div className="anim-rise-in shrink-0 border-t border-hairline bg-brand-soft/60 px-3 pb-2 pt-2.5">
@@ -64,6 +97,11 @@ export function DraftCard({
         </span>
         <span className="mt-1.5 block text-[13px] font-bold text-brand">Use this reply</span>
       </button>
+      {onSuggest && (
+        <div className="mt-0.5">
+          <SuggestButton label="Write a fuller reply with AI" suggesting={suggesting} onSuggest={onSuggest} />
+        </div>
+      )}
     </div>
   );
 }

@@ -82,6 +82,8 @@ export interface ChatThread {
   messages: ChatMessageView[];
   /** Chats assistant draft for the newest buyer question, if any. */
   draft: ChatDraftView | null;
+  /** "Suggest a reply" shows: a question is waiting and the AI can try. */
+  canSuggest: boolean;
 }
 
 /** Preview line for the chat list. `from` true means the shop (old callers). */

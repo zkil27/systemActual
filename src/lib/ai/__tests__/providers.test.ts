@@ -161,39 +161,39 @@ describe("usage ledger", () => {
 
 describe("complete", () => {
   it("answers from the first service that works and counts its tokens", async () => {
-    const { fn, calls } = fakeFetch({ "openai/gpt-oss-20b": ok("<think>hmm</think>Opo, may COD po.") });
+    const { fn, calls } = fakeFetch({ "openai/gpt-oss-120b": ok("<think>hmm</think>Opo, may COD po.") });
     const store = memoryUsageStore();
     const r = await complete({ messages: MSG, privacy: "private" }, deps(fn, store));
-    expect(r).toMatchObject({ ok: true, text: "Opo, may COD po.", provider: "groq", model: "openai/gpt-oss-20b", tokensIn: 100, tokensOut: 20 });
+    expect(r).toMatchObject({ ok: true, text: "Opo, may COD po.", provider: "groq", model: "openai/gpt-oss-120b", tokensIn: 100, tokensOut: 20 });
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe("https://api.groq.com/openai/v1/chat/completions");
     expect(calls[0].auth).toBe("Bearer gsk_test");
     expect(calls[0].body).toMatchObject({ reasoning_effort: "low", include_reasoning: false, max_tokens: 650 });
-    const row = [...store.rows.values()].find((x) => x.model === "openai/gpt-oss-20b");
+    const row = [...store.rows.values()].find((x) => x.model === "openai/gpt-oss-120b");
     expect(row).toMatchObject({ requests: 1, tokensIn: 100, tokensOut: 20 });
   });
 
   it("moves on when a service is busy, and rests that model", async () => {
     const busy: Reply = { status: 429, body: { error: { message: "Rate limit reached for requests per minute (RPM)" } }, headers: { "retry-after": "40" } };
-    const { fn, calls } = fakeFetch({ "openai/gpt-oss-20b": [busy], "openai/gpt-oss-120b": ok("Sagot") });
+    const { fn, calls } = fakeFetch({ "openai/gpt-oss-120b": [busy], "openai/gpt-oss-20b": ok("Sagot") });
     const d = deps(fn);
     const r = await complete({ messages: MSG, privacy: "private" }, d);
-    expect(r.ok && r.model).toBe("openai/gpt-oss-120b");
+    expect(r.ok && r.model).toBe("openai/gpt-oss-20b");
     expect(r.attempts.map((a) => a.outcome)).toEqual(["rate_limit", "ok"]);
-    expect(d.breaker.waitMs("groq", "openai/gpt-oss-20b", MORNING.getTime())).toBeGreaterThan(30_000);
+    expect(d.breaker.waitMs("groq", "openai/gpt-oss-120b", MORNING.getTime())).toBeGreaterThan(30_000);
     // Next question skips the resting model without calling it.
     await complete({ messages: MSG, privacy: "private" }, d);
-    expect(calls.filter((c) => c.model === "openai/gpt-oss-20b")).toHaveLength(1);
+    expect(calls.filter((c) => c.model === "openai/gpt-oss-120b")).toHaveLength(1);
   });
 
   it("skips the rest of a service when its key is wrong", async () => {
     const { fn, calls } = fakeFetch({
-      "openai/gpt-oss-20b": { status: 401, body: { error: { message: "Invalid API Key" } } },
+      "openai/gpt-oss-120b": { status: 401, body: { error: { message: "Invalid API Key" } } },
       "@cf/openai/gpt-oss-120b": ok("Galing sa Cloudflare"),
     });
     const r = await complete({ messages: MSG, privacy: "private" }, deps(fn));
     expect(r.ok && r.provider).toBe("cloudflare");
-    expect(calls.map((c) => c.model)).toEqual(["openai/gpt-oss-20b", "@cf/openai/gpt-oss-120b"]);
+    expect(calls.map((c) => c.model)).toEqual(["openai/gpt-oss-120b", "@cf/openai/gpt-oss-120b"]);
   });
 
   it("treats a used-up shared allowance as the whole service out until its next day", async () => {
@@ -227,7 +227,7 @@ describe("complete", () => {
   });
 
   it("gives up on a slow service and tries the next", async () => {
-    const { fn } = fakeFetch({ "openai/gpt-oss-20b": "timeout", "openai/gpt-oss-120b": ok("Mabilis") });
+    const { fn } = fakeFetch({ "openai/gpt-oss-120b": "timeout", "openai/gpt-oss-20b": ok("Mabilis") });
     const r = await complete({ messages: MSG, privacy: "private" }, deps(fn));
     expect(r.ok && r.text).toBe("Mabilis");
     expect(r.attempts[0].outcome).toBe("timeout");
@@ -239,7 +239,7 @@ describe("complete", () => {
   });
 
   it("doesn't call anything when usage can't be counted", async () => {
-    const { fn, calls } = fakeFetch({ "openai/gpt-oss-20b": ok("x") });
+    const { fn, calls } = fakeFetch({ "openai/gpt-oss-120b": ok("x") });
     const broken: UsageStore = {
       takeRequest: async () => {
         throw new Error("db down");
@@ -266,10 +266,10 @@ describe("complete", () => {
   it("counts an empty reply as a failure but keeps its tokens", async () => {
     const empty: Reply = { status: 200, body: { choices: [{ message: { content: "<think>long</think>" }, finish_reason: "length" }], usage: { prompt_tokens: 50, completion_tokens: 650 } } };
     const store = memoryUsageStore();
-    const { fn } = fakeFetch({ "openai/gpt-oss-20b": empty, "openai/gpt-oss-120b": ok("Ayos") });
+    const { fn } = fakeFetch({ "openai/gpt-oss-120b": empty, "openai/gpt-oss-20b": ok("Ayos") });
     const r = await complete({ messages: MSG, privacy: "private" }, deps(fn, store));
     expect(r.ok).toBe(true);
-    const row = [...store.rows.values()].find((x) => x.model === "openai/gpt-oss-20b");
+    const row = [...store.rows.values()].find((x) => x.model === "openai/gpt-oss-120b");
     expect(row).toMatchObject({ requests: 1, errors: 1, tokensOut: 650 });
   });
 });

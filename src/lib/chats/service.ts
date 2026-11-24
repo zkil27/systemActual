@@ -122,7 +122,7 @@ export async function unreadTotals(): Promise<ChatUnread> {
   );
 }
 
-function toCard(raw: Prisma.JsonValue | null): ChatCard | null {
+export function toCard(raw: Prisma.JsonValue | null): ChatCard | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const r = raw as Record<string, unknown>;
   const str = (v: unknown) => (typeof v === "string" && v.trim() ? v : null);
@@ -167,12 +167,13 @@ export function toMessageView(m: MessageRow): ChatMessageView {
   };
 }
 
-async function draftFor(conversationId: string): Promise<ChatThread["draft"]> {
+async function draftFor(conversationId: string): Promise<Pick<ChatThread, "draft" | "canSuggest">> {
   try {
-    return (await refreshDraft(conversationId)).draft;
+    const r = await refreshDraft(conversationId);
+    return { draft: r.draft, canSuggest: r.canSuggest };
   } catch (err) {
     console.error("[assistant] draft", conversationId, err instanceof Error ? err.message : err);
-    return null;
+    return { draft: null, canSuggest: false };
   }
 }
 
@@ -253,7 +254,7 @@ export async function getThread(id: string, afterId?: string | null): Promise<Ch
     ...replyState(conv.canReply, conv.shopConnection, conv.externalId),
     order: buildOrderPanel({ order, sampleOrder: conv.shopConnection.isDemo ? conv.sampleOrder : null }),
     messages: messages.map(toMessageView),
-    draft: await draftFor(conv.id),
+    ...(await draftFor(conv.id)),
   };
 }
 

@@ -43,10 +43,12 @@ describe("classifyIntent (phrasing from real chats)", () => {
 
 describe("acks, notices and Duoke", () => {
   it("knows messages that need no answer", () => {
-    for (const t of ["ok po", "Ok po😊", "salamat po!", "thank you", "👍", "Hi", "hello po", "good morning", ""]) {
+    for (const t of ["ok po", "Ok po😊", "salamat po!", "thank you", "👍", "Hi", "hello po", "good morning", "", "Done na po, thank you!", "Noted po, maraming salamat ate!"]) {
       expect(isAckOrGreeting(t), t).toBe(true);
     }
-    for (const t of ["ok po pero kelan darating?", "hi po may M pa?", "COD po?"]) expect(isAckOrGreeting(t), t).toBe(false);
+    for (const t of ["ok po pero kelan darating?", "hi po may M pa?", "COD po?", "ok na po ba order ko?", "thank you pero mali size"]) {
+      expect(isAckOrGreeting(t), t).toBe(false);
+    }
   });
 
   it("recognises TikTok's handoff and Duoke's please-wait message", () => {
