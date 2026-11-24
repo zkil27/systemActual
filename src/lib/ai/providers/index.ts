@@ -30,6 +30,8 @@ export interface CompletionRequest {
   deadlineMs?: number;
   /** Percent of each daily limit held back until 6 PM Manila. */
   reservePct?: number;
+  /** Never use more than this share (0–1) of a daily limit, whatever the time. */
+  maxShare?: number;
 }
 
 export interface Attempt {
@@ -107,6 +109,7 @@ export async function complete(req: CompletionRequest, deps: CompletionDeps = {}
         estimateIn,
         estimateOut: maxTokens + (model.thinkingTokens ?? 0),
         reservePct: req.reservePct ?? 15,
+        maxShare: req.maxShare,
         now: at,
         store,
       }).catch(() => null);

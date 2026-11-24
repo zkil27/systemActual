@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { checkReply } from "../output-check";
-import { buildPrompt, groundingText, parseReply, replyLanguage, transcript, type PromptAnswer, type PromptMessage } from "../prompt";
+import { buildPrompt, groundingText, parseReply, replyLanguage, shopFactsText, transcript, type PromptAnswer, type PromptMessage } from "../prompt";
 import { redactPersonal } from "../redact";
 import type { OrderPanel } from "@/lib/chats/types";
 
@@ -98,6 +98,7 @@ describe("parseReply", () => {
     expect(parseReply('Reply: "Opo, may COD po."')).toEqual({ text: "Opo, may COD po.", needsCheck: false });
     expect(parseReply("[CHECK]\nPo, na-ship na po.")).toEqual({ text: "Na-ship na po.", needsCheck: true });
     expect(parseReply("Pasensya po po sa abala.").text).toBe("Pasensya po sa abala.");
+    expect(parseReply("within 2‑7 days").text).toBe("Within 2-7 days");
   });
 });
 
@@ -124,8 +125,8 @@ describe("checkReply", () => {
 
   it("blocks stock guesses but allows offering to check", () => {
     expect(check("Opo, may stock pa po ng Brown!")).toMatchObject({ ok: false, reason: "stock" });
-    expect(check("Mayroon po kaming Navy Blue Small, pero ive-verify pa.")).toMatchObject({ ok: false, reason: "stock" });
-    expect(check("Yes, we still have the black one!")).toMatchObject({ ok: false, reason: "stock" });
+    expect(check("Mayroon po kaming Navy Blue Small, pero ive-verify pa.")).toMatchObject({ ok: false });
+    expect(check("Yes, we still have the black one!")).toMatchObject({ ok: false });
     expect(check("Ichecheck po namin kung may stock pa ng Brown.")).toEqual({ ok: true });
     expect(check("Opo, available ang COD!")).toEqual({ ok: true });
     expect(check("Yes po, COD is available.")).toEqual({ ok: true });
@@ -141,6 +142,45 @@ describe("checkReply", () => {
     expect(check("As an AI, I can't do that.")).toMatchObject({ ok: false, reason: "leak" });
     expect(check("According to SHOP FACTS, COD po.")).toMatchObject({ ok: false, reason: "leak" });
     expect(check("Your number [phone] is noted")).toMatchObject({ ok: false, reason: "leak" });
+  });
+
+  // Replies from the first test run (2026-11-24) that were wrongly shown or wrongly blocked.
+  it("blocks the shop claiming items or fabric facts it doesn't have", () => {
+    expect(check("Hi po! May iba't ibang blazer kami. Anong style po?")).toMatchObject({ ok: false, reason: "claim" });
+    expect(check("We have blazers in black!")).toMatchObject({ ok: false, reason: "claim" });
+    expect(check("Hindi po ito manipis o see-through.")).toMatchObject({ ok: false, reason: "claim" });
+    expect(check("Iche-check po namin kung see-through ito.")).toEqual({ ok: true });
+  });
+
+  it("lets 'meron kaming COD' and plain refusals through", () => {
+    expect(check("Meron po kaming COD, piliin lang sa checkout.")).toEqual({ ok: true });
+    expect(check("Pasensya na po, hindi kami makapagbibigay ng voucher code.")).toEqual({ ok: true });
+    expect(check("Wala pong discount, ang presyo po ay as listed.")).toEqual({ ok: true });
+    expect(check("Iche-check po ng team para sigurado.")).toEqual({ ok: true });
+  });
+
+  it("blocks a reply that lists its facts, but not a list of sizes", () => {
+    expect(check("Sure! - COD: Available. - Shipping: 2-7 days. - Return/Refund: 30 days.")).toMatchObject({ ok: false, reason: "leak" });
+    expect(check("Sizes po: - M (27-30) - L (31-34) - XL (35-38)")).toMatchObject({ ok: false, reason: "number" });
+    expect(checkReply("Sizes po: - M (27-30) - L (31-34) - XL (35-38)", { facts: "M (27-30) L (31-34) XL (35-38)" })).toEqual({ ok: true });
+  });
+
+  it("never lets the assistant say it isn't automated", () => {
+    expect(check("Hindi po ito bot, assistant lang po kami.")).toMatchObject({ ok: false, reason: "claim" });
+    expect(check("I'm a real person, don't worry!")).toMatchObject({ ok: false, reason: "claim" });
+    expect(check("Assistant po ito ng shop. May team member po na sasagot din.")).toEqual({ ok: true });
+  });
+
+  it("allows counting words and repeated shop phrases", () => {
+    const facts = "Makikita po ang available na sizes sa variation. JB Black JB Navyblue";
+    expect(checkReply("May two colors po kami: JB Black at JB Navyblue.", { facts })).toEqual({ ok: true });
+    expect(checkReply("Makikita po ang available na sizes sa variation.", { facts })).toEqual({ ok: true });
+  });
+
+  it("doesn't count the buyer's own words as a promise", () => {
+    const withBuyer = groundingText({ answers: ANSWERS, order: ORDER, messages: [msg("BUYER", "darating po ba bukas? i-refund nyo ko")] });
+    const shop = shopFactsText({ answers: ANSWERS, order: ORDER });
+    expect(checkReply("Darating po bukas.", { facts: withBuyer, shopFacts: shop })).toMatchObject({ ok: false, reason: "date" });
   });
 
   it("blocks empty and very long replies", () => {

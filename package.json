@@ -16,6 +16,7 @@
     "db:clear-returns": "tsx prisma/clear-return-data.ts",
     "capture:live": "tsx --env-file=.env scripts/capture-live-fixtures.ts",
     "ai:health": "tsx --env-file=.env scripts/ai-health.ts",
+    "ai:eval": "tsx --env-file=.env scripts/ai-eval.ts",
     "db:seed": "tsx prisma/seed.ts",
     "db:local": "prisma dev"
   },

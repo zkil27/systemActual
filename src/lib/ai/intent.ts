@@ -7,12 +7,19 @@ import type { AiTopic } from "./settings";
  */
 
 const RETURNS =
-  /(\b(return|refund|ibalik|ibabalik|isauli|palit|papalitan|exchange|sira|sirang|damaged?|defect(ive)?|punit|butas|wrong\s+(item|size|color|order)|kulang|missing\s+item|complain|reklamo|scam|manloloko|cancel|i-?cancel|cancelled|bwisit|walang\s+kwenta|report|dispute)\b|\bmali(ng)?\b[^?.!]{0,25}\b(item|size|kulay|color|order|padala|dumating|naipadala)\b)/i;
+  /(\b(return|refund|ibalik|ibabalik|isauli|palit|papalitan|exchange|sira|sirang|damaged?|defect(ive)?|punit|butas|mantsa|wrong\s+(item|size|color|order)|kulang|missing\s+item|complain|reklamo|scam|manloloko|cancel|i-?cancel|cancelled|bwisit|walang\s+kwenta|report|dispute|singil|siningil|sinisingil|overcharged?|double\s+charged?|sobra(ng)?\s+(bayad|singil))\b|\bmali(ng)?\b[^?.!]{0,25}\b(item|size|kulay|color|order|padala|dumating|naipadala)\b)/i;
 const ORDER =
   /\b(asan|nasaan|saan\s+na|where('?s| is)?\s+(my\s+)?(order|parcel|package)|order\s+ko|parcel\s+ko|tracking|track|status|na-?ship|naship|shipped|ship\s+na|na-?padala|pinadala|out\s+for\s+delivery|rider|courier|j&t|jnt|spx|flash\s+express|dumating|darating|dadating|kelan|kailan|when\s+(will|is|po)|arrive|deliver(ed|y)?)\b/i;
 const SHIPPING =
   /\b(ilang\s+araw|how\s+many\s+days|gaano\s+katagal|how\s+long|shipping\s+fee|\bsf\b|shipping|ship\s+to|lead\s+time|province|probinsya|cebu|davao|iloilo|mindanao|visayas|luzon|metro\s+manila|ncr)\b/i;
-const COD = /\b(cod|c\.o\.d|cash\s+on\s+delivery|payment|bayad|magbayad|pay\s+(later|via|thru|through)|installment|card)\b/i;
+const COD =
+  /\b(cod|c\.o\.d|cash\s+on\s+delivery|payment|bayad|magbayad|bayaran|babayaran|pay\s+(later|via|thru|through|when|upon|on\s+delivery)|installment|card)\b/i;
+// The buyer's own existing order, not one they're thinking of placing.
+const OWN_ORDER =
+  /\b(order|parcel|package|item)\s+(ko|namin|nyo|ninyo)\b|\bmy\s+(order|parcel|package)\b|\b(tracking|track)\b|\binorder\b|\bnaka-?order\b/i;
+const HYPOTHETICAL = /\b(pag|kapag|kung|if|once)\s+(po\s+)?(ako\s+)?(nag|mag|um)?-?\s*order/i;
+// How long shipping takes in general.
+const DURATION = /\b(ilang\s+araw|how\s+many\s+days|gaano\s+(po\s+)?katagal|how\s+long|lead\s+time)\b/i;
 const STOCK =
   /(\b(may|meron|mayroon)\b[^?.!]{0,40}?\bpa\b|\b(available|avail|in\s+stock|stock|restock|sold\s*out|out\s+of\s+stock|ubos|wala\s+na)\b)/i;
 const SIZE =
@@ -67,6 +74,10 @@ const ACK_WORDS = new Set([
 export function isHandoffNotice(text: string | null | undefined): boolean {
   return /requested manual customer service|assigned to/i.test(text ?? "");
 }
+
+/** Duoke's holding message as the shop receives it (for tests and the test run). */
+export const HOLDING_SAMPLE =
+  "Salamat sa iyong mensahe. Sa kasalukuyan, maraming mensahe ang natatanggap namin, kaya maaaring medyo matagalan ang aming tugon.";
 
 /**
  * The fixed "we're busy, please wait" message Duoke sends. It isn't an
@@ -125,8 +136,11 @@ export function classifyIntent(text: string, opts: { hasOrder?: boolean } = {}):
   if (RETURNS.test(s)) return "returns";
   if (isPriceAskOrTrick(s)) return "other";
   if (COD.test(s)) return "cod";
+  const own = OWN_ORDER.test(s) && !HYPOTHETICAL.test(s);
+  // "QC po ako, gaano katagal delivery?" / "kelan ma-ship pag nag order ako?"
+  if ((DURATION.test(s) || HYPOTHETICAL.test(s)) && !own) return "shipping";
   const asksArrival = /\b(kelan|kailan|when|arrive|darating|dadating|dumating|ilang\s+araw|how\s+many\s+days)\b/i.test(s);
-  if (ORDER.test(s) && !(asksArrival && !opts.hasOrder && !/order|parcel|package|tracking|track/i.test(s))) {
+  if (ORDER.test(s) && !(asksArrival && !opts.hasOrder && !own && !/\border\b/i.test(s))) {
     return "order";
   }
   if (SHIPPING.test(s) || asksArrival) return "shipping";

@@ -127,12 +127,15 @@ export async function takeBudget(opts: {
   estimateIn: number;
   estimateOut: number;
   reservePct: number;
+  /** Cap on the share of each daily limit (e.g. 0.5 for test runs). */
+  maxShare?: number;
   now: Date;
   store: UsageStore;
 }): Promise<BudgetResult> {
   const { provider, model, store } = opts;
   const dayKey = providerDayKey(provider.spec.dayZone, opts.now);
-  const share = allowanceShare(provider.spec.dayZone, opts.reservePct, opts.now);
+  const cap = opts.maxShare !== undefined ? Math.min(1, Math.max(0, opts.maxShare)) : 1;
+  const share = Math.min(cap, allowanceShare(provider.spec.dayZone, opts.reservePct, opts.now));
   const key: UsageKey = { provider: provider.spec.id, model: model.model, dayKey };
   const rows = await store.read(provider.spec.id, dayKey);
   const mine = rows.find((r) => r.model === model.model);
@@ -154,7 +157,7 @@ export async function takeBudget(opts: {
       return { ok: false, reason: "shared_requests" };
     }
   }
-  const cap = model.requestsPerDay ? pacedCap(model.requestsPerDay, share) : undefined;
-  if (!(await store.takeRequest(key, cap))) return { ok: false, reason: "requests" };
+  const requestCap = model.requestsPerDay ? pacedCap(model.requestsPerDay, share) : undefined;
+  if (!(await store.takeRequest(key, requestCap))) return { ok: false, reason: "requests" };
   return { ok: true, key };
 }

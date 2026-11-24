@@ -7,9 +7,9 @@ import { toCard } from "@/lib/chats/service";
 import { expirePending, loadOrderPanel, NEEDS_CHECK_SUFFIX, toView, type DraftView } from "./drafts";
 import { needsAnswer, type GateMessage } from "./gate";
 import { classifyIntents, isHoldingReply } from "./intent";
-import { checkReply } from "./output-check";
-import { buildPrompt, groundingText, parseReply, type PromptMessage } from "./prompt";
-import { complete, type CompletionDeps } from "./providers";
+import { generateReply } from "./generate";
+import type { PromptMessage } from "./prompt";
+import type { CompletionDeps } from "./providers";
 import { topicMode, type AiTopic } from "./settings";
 import { activeShopAnswers, getAiSettings } from "./settings-store";
 
@@ -47,14 +47,6 @@ function fail(reason: Exclude<SuggestResult, { ok: true }>["reason"], message?: 
 
 function blockedMessage(label: string): string {
   return `The AI's reply wasn't shown because ${label}. Reply yourself, or try again.`;
-}
-
-interface Usage {
-  provider: string;
-  model: string;
-  tokensIn: number;
-  tokensOut: number;
-  latencyMs: number;
 }
 
 async function logEvent(data: {
@@ -178,49 +170,19 @@ export async function suggestReply(conversationId: string, deps: CompletionDeps 
   }));
 
   const listings = await chatListings(conv.shopConnection, conv.platform, conv.orderSn, messages);
-  const stockKnown = listings.some((l) => l.skus.some((s) => s.stock !== null));
-  const prompt = buildPrompt({ answers, order, messages, listings });
-  const facts = groundingText({ answers, order, messages, listings });
-  let accepted: { text: string; needsCheck: boolean; usage: Usage } | null = null;
-  let lastLabel = "";
-
-  // One retry when the reply breaks a rule, telling the AI which one.
-  for (let attempt = 0; attempt < 2 && !accepted; attempt++) {
-    const retry =
-      attempt === 0
-        ? []
-        : [{ role: "user" as const, content: `Your reply was rejected because ${lastLabel}. Write a new reply that follows every rule.` }];
-    const result = await complete(
-      { messages: [...prompt, ...retry], privacy: "private", reservePct: settings.eveningReservePct },
-      deps
-    );
-    if (!result.ok) {
-      const reason = result.reason === "no_keys" || result.reason === "no_private" ? "no_keys" : result.reason;
-      await logEvent({ conversationId, decision: reason === "quota_out" ? "quota_out" : "ai_failed", intent: topic });
-      // A rejected first reply is still the better message to show.
-      return attempt === 0 ? fail(reason) : fail("blocked", blockedMessage(lastLabel));
-    }
-    const usage: Usage = {
-      provider: result.provider,
-      model: result.model,
-      tokensIn: result.tokensIn,
-      tokensOut: result.tokensOut,
-      latencyMs: result.latencyMs,
-    };
-    const parsed = parseReply(result.text);
-    const verdict = checkReply(parsed.text, { facts, stockKnown });
-    if (verdict.ok) {
-      accepted = { ...parsed, usage };
-    } else {
-      lastLabel = verdict.label;
-      await logEvent({ conversationId, decision: "blocked", intent: topic, blockedReason: verdict.reason, ...usage });
-    }
+  const result = await generateReply({ answers, order, messages, listings, reservePct: settings.eveningReservePct }, deps);
+  for (const b of result.blocked) {
+    await logEvent({ conversationId, decision: "blocked", intent: topic, blockedReason: b.reason, ...b.usage });
   }
-  if (!accepted) return fail("blocked", blockedMessage(lastLabel));
+  if (!result.ok) {
+    if (result.reason === "blocked") return fail("blocked", blockedMessage(result.label ?? "it broke a shop rule"));
+    await logEvent({ conversationId, decision: result.reason === "quota_out" ? "quota_out" : "ai_failed", intent: topic });
+    return fail(result.reason);
+  }
 
-  const { text, usage } = accepted;
-  // Returns and complaints always need the owner's eye.
-  const check = accepted.needsCheck || topic === "returns";
+  const { text, usage } = result;
+  // Returns, complaints and "I want a person" always need the owner's eye.
+  const check = result.needsCheck || topic === "returns" || gate.handoff;
 
   const row = await prisma.chatDraft.create({
     data: {
