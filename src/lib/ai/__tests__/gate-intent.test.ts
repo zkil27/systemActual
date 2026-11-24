@@ -1,3 +1,4 @@
+import { buyerWritesEnglish } from "@/lib/ai/drafts";
 import { describe, expect, it } from "vitest";
 import { needsAnswer, type GateMessage } from "@/lib/ai/gate";
 import { classifyIntent, classifyIntents, isAckOrGreeting, isHandoffNotice, isHoldingReply, splitQuestions } from "@/lib/ai/intent";
@@ -163,6 +164,21 @@ describe("templates", () => {
     expect(classifyIntents(["Hi po, pwede COD?"])).toEqual(["cod"]);
     // Tracking with J&T isn't split on the "&".
     expect(classifyIntents(["asan na po order ko sa J&T"], { hasOrder: true })).toEqual(["order"]);
+  });
+
+  it("reads restock questions as stock, not delivery", () => {
+    expect(classifyIntents(["when will you restock the plus size plain colors?"])).toEqual(["stock"]);
+    expect(classifyIntents(["kelan po mag restock ng M?"])).toEqual(["stock"]);
+    expect(classifyIntents(["sold out na po ba yung black?"])).toEqual(["stock"]);
+    // Delivery questions are unchanged.
+    expect(classifyIntents(["when will my order arrive?"], { hasOrder: true })).toEqual(["order"]);
+    expect(classifyIntents(["kelan po ma-ship pag nag order ako?"])).toEqual(["shipping"]);
+  });
+
+  it("skips Taglish shop answers for English questions", () => {
+    expect(buyerWritesEnglish(["Hi, do you accept cash on delivery?"])).toBe(true);
+    expect(buyerWritesEnglish(["pwede po COD?"])).toBe(false);
+    expect(buyerWritesEnglish(["COD?"])).toBe(false);
   });
 
   it("never lets a discount ask or a trick hide behind a topic word", () => {

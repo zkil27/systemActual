@@ -20,6 +20,15 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    id: 5,
+    date: "2026-11-24",
+    title: "Smarter suggested replies",
+    changes: [
+      "Questions about restocking or sold-out items no longer get the shipping answer.",
+      "Buyers who write in English now get a suggested reply in English.",
+    ],
+  },
+  {
     id: 4,
     date: "2026-11-24",
     title: "Suggested chat replies",

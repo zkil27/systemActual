@@ -5,10 +5,17 @@ import { buildOrderPanel } from "@/lib/chats/order-panel";
 import type { OrderPanel } from "@/lib/chats/types";
 import { needsAnswer, type GateMessage, type GateResult } from "./gate";
 import { classifyIntents } from "./intent";
+import { replyLanguage } from "./prompt";
 import { configuredProviders } from "./providers/catalog";
 import { topicMode, type AiTopic } from "./settings";
 import { activeShopAnswers, getAiSettings } from "./settings-store";
 import { answerTopicsFor, templateDraftFor } from "./templates";
+
+/** The buyer's newest question is in English. */
+export function buyerWritesEnglish(buyerTexts: string[]): boolean {
+  const last = buyerTexts[buyerTexts.length - 1];
+  return Boolean(last) && replyLanguage([{ sender: "BUYER", kind: "TEXT", text: last, card: null }]) === "English";
+}
 
 /** Messages the gate looks at (newest). */
 const GATE_WINDOW = 30;
@@ -191,6 +198,9 @@ export async function refreshDraft(conversationId: string, now: Date = new Date(
   if (topics.length === 0) return { draft: null, gate, canSuggest: false };
   // Money and complaints decide who answers, so they lead.
   const topic: AiTopic = topics.includes("returns") ? "returns" : topics[0];
+
+  // Shop answers are written in Taglish; an English question gets the AI, which replies in English.
+  if (buyerWritesEnglish(gate.buyerTexts)) return { draft: null, gate, topic, canSuggest: aiReady };
 
   const answers = await activeShopAnswers([...new Set(topics.flatMap(answerTopicsFor))]);
   const t = templateDraftFor({ topics, order, answers });

@@ -1,5 +1,6 @@
 import { findOffPlatformDetails } from "@/lib/chats/contact-check";
 import type { ChatCard } from "@/lib/chats/types";
+import { buyerWritesEnglish } from "../drafts";
 import { needsAnswer, type GateMessage, type GateResult } from "../gate";
 import { generateReply, type GenerateResult } from "../generate";
 import { classifyIntents, HOLDING_SAMPLE } from "../intent";
@@ -58,7 +59,8 @@ export function routeCase(c: EvalCase, answers: PromptAnswer[]): Route {
   const topics = classifyIntents(gate.buyerTexts, { hasOrder: Boolean(order) });
   const topic = topics.includes("returns") ? "returns" : (topics[0] ?? null);
   const wanted = new Set(topics.flatMap(answerTopicsFor));
-  const t = templateDraftFor({ topics, order, answers: answers.filter((a) => wanted.has(a.topic)) });
+  // Same rule as the app (drafts.ts): English questions skip the Taglish shop answers.
+  const t = buyerWritesEnglish(gate.buyerTexts) ? null : templateDraftFor({ topics, order, answers: answers.filter((a) => wanted.has(a.topic)) });
   return { gate, topics, topic, templateCovers: Boolean(t && t.missing.length === 0), messages: msgs, listings };
 }
 

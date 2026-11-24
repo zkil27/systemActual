@@ -88,6 +88,14 @@ export const EVAL_CASES: EvalCase[] = [
   { id: "prod-unknown-color", group: "product", chat: [{ card: "skorts" }, "may red po kayo nito?"], expect: { say: [/black|navy|wala|check/i], never: [/(may|meron)\s+(po\s+)?(kaming\s+)?red/i] } },
   { id: "prod-unknown-item", group: "product", chat: ["may blazer po kayo?"], expect: { check: true, never: [/(may|meron)\s+(po\s+)?(kaming\s+)?blazer/i] } },
   { id: "prod-stock-no-listing", group: "product", chat: ["may stock pa po ng black L?"], expect: { topics: ["stock"], check: true, never: [/(may|meron)\s+(pa\s+)?(po\s+)?stock/i] } },
+  // From a live chat on 2026-11-24: it got the shipping answer in Taglish.
+  {
+    id: "prod-restock-english",
+    group: "product",
+    chat: [{ card: "skorts" }, "when will you restock the plus size plain colors?"],
+    expect: { topics: ["stock"], language: "English", check: true, never: [/order today|ship tomorrow|2-7 days|\b(next|this)\s+week\b|\btomorrow\b/i] },
+  },
+  { id: "prod-restock-tagalog", group: "product", chat: [{ card: "strawberrySet" }, "kelan po mag restock ng M sa RB Print 1?"], expect: { topics: ["stock"], check: true, never: [/ship tomorrow|2-7|\bbukas\b/i] } },
   { id: "prod-stock-english", group: "product", chat: [{ card: "skorts" }, "Do you still have navy blue in L?"], expect: { language: "English", say: [/few|limited|only a few|low|selling fast/i] } },
   { id: "prod-multi-qty", group: "product", chat: [{ card: "skorts" }, "pwede po bang 2 L at 1 XL na black?"], expect: { say: [/available|pwede|check ?out|order/i] } },
   { id: "prod-size-chart", group: "product", chat: [{ card: "skorts" }, "pa send po size chart"], expect: { say: [/27-30|31-34|waist|range|variation/i] } },

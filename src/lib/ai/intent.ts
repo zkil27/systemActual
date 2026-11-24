@@ -18,6 +18,8 @@ const COD =
 const OWN_ORDER =
   /\b(order|parcel|package|item)\s+(ko|namin|nyo|ninyo)\b|\bmy\s+(order|parcel|package)\b|\b(tracking|track)\b|\binorder\b|\bnaka-?order\b/i;
 const HYPOTHETICAL = /\b(pag|kapag|kung|if|once)\s+(po\s+)?(ako\s+)?(nag|mag|um)?-?\s*order/i;
+const RESTOCK =
+  /\b(re-?stock(ed|ing|s)?|replenish(ed|ment)?|back\s+in\s+stock|sold\s*out|out\s+of\s+stock|ubos\s+na|wala\s+na\s+(po\s+)?stock|magkaka-?stock|mag-?stock\s+ulit|babalik\s+(ang\s+)?stock)\b/i;
 // How long shipping takes in general.
 const DURATION = /\b(ilang\s+araw|how\s+many\s+days|gaano\s+(po\s+)?katagal|how\s+long|lead\s+time)\b/i;
 const STOCK =
@@ -121,7 +123,8 @@ export function classifyIntents(texts: string[], opts: { hasOrder?: boolean } = 
  */
 export function splitQuestions(text: string): string[] {
   const parts = normalizeText(text)
-    .split(/[?!.;,\n]+|\s(?:and|tapos|at\s+saka|atsaka|saka|also|plus|\+|&)\s/i)
+    // Not "plus": "plus size" is one thing.
+    .split(/[?!.;,\n]+|\s(?:and|tapos|at\s+saka|atsaka|saka|also|\+|&)\s/i)
     .map((p) => p.trim())
     .filter((p) => p.replace(/\b(po|ba|pa|na)\b/gi, "").trim().length >= 3);
   return parts.length ? parts : [normalizeText(text)];
@@ -136,6 +139,8 @@ export function classifyIntent(text: string, opts: { hasOrder?: boolean } = {}):
   if (RETURNS.test(s)) return "returns";
   if (isPriceAskOrTrick(s)) return "other";
   if (COD.test(s)) return "cod";
+  // "When will you restock…" asks about stock, not delivery.
+  if (RESTOCK.test(s)) return "stock";
   const own = OWN_ORDER.test(s) && !HYPOTHETICAL.test(s);
   // "QC po ako, gaano katagal delivery?" / "kelan ma-ship pag nag order ako?"
   if ((DURATION.test(s) || HYPOTHETICAL.test(s)) && !own) return "shipping";
