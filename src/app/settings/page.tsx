@@ -91,6 +91,9 @@ async function postSettings(body: Record<string, unknown>): Promise<{ ok: boolea
   }
 }
 
+/** Costs, Return tracking and Telegram sit in different columns but save together. */
+const SETTINGS_FORM_ID = "settings-form";
+
 const fieldClass =
   "h-12 w-full rounded-[var(--radius-control)] bg-surface-muted px-3.5 text-[16px] text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none";
 
@@ -370,6 +373,7 @@ function NumberRow({
         {prefix}
         <input
           type="number"
+          form={SETTINGS_FORM_ID}
           inputMode="numeric"
           min={0}
           value={value}
@@ -694,8 +698,10 @@ export default function SettingsPage() {
 
   return (
     <AppShell title="Settings" width="wide">
-      <div className="space-y-8 lg:grid lg:grid-cols-2 lg:items-start lg:gap-8 lg:space-y-0">
-        <div className="space-y-8">
+      {/* Costs, Return tracking, Telegram and the save bar are one form that spans both columns. */}
+      <form id={SETTINGS_FORM_ID} onSubmit={saveGeneral} />
+      <div className="space-y-10 lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-8 lg:space-y-0">
+        <div className="space-y-10">
           <section>
             <GroupLabel>Stores</GroupLabel>
             <Group className="divide-y divide-hairline">
@@ -774,80 +780,9 @@ export default function SettingsPage() {
                   </button>
                 ))}
             </Group>
-            <Group className="mt-4 divide-y divide-hairline lg:hidden">
-              <Link href="/items" className={rowLinkClass}>
-                <span className="text-[17px] text-ink">Items &amp; stock</span>
-                <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
-              </Link>
-              <Link href="/waves" className={rowLinkClass}>
-                <span className="text-[17px] text-ink">Waves &amp; pick lists</span>
-                <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
-              </Link>
-              <Link href="/imports" className={rowLinkClass}>
-                <span className="text-[17px] text-ink">Upload a file</span>
-                <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
-              </Link>
-            </Group>
-            <Group className="mt-4 divide-y divide-hairline">
-              <Link href="/settings/assistant" className={rowLinkClass}>
-                <span className="text-[17px] text-ink">Chats assistant</span>
-                <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
-              </Link>
-            </Group>
           </section>
 
-          <section>
-            <GroupLabel>Appearance</GroupLabel>
-            <Group className="space-y-3.5 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <span className="flex flex-col">
-                  <span className="text-[17px] text-ink">Dark mode</span>
-                  <span className="text-[13px] text-ink-3">{THEME_HINT[preference]}</span>
-                </span>
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface-muted text-brand">
-                  <ThemeIcon key={preference} className="anim-pop h-[18px] w-[18px]" strokeWidth={2.2} />
-                </span>
-              </div>
-              <SegmentedControl
-                label="Theme"
-                options={THEME_OPTIONS}
-                value={preference}
-                onChange={setPreference}
-              />
-            </Group>
-          </section>
-
-          <section>
-            <GroupLabel>Labels</GroupLabel>
-            <Group className="divide-y divide-hairline">
-              <div className={rowClass}>
-                <span className="flex flex-col">
-                  <span className="text-[17px] text-ink">One sticker per parcel</span>
-                  <span className="text-[13px] text-ink-3">
-                    {data?.settings.customWaybillEnabled
-                      ? "On: shop's label as is, never split · big orders get a packing slip"
-                      : "Off: prints the shop's label as it is"}
-                  </span>
-                </span>
-                <Switch
-                  checked={Boolean(data?.settings.customWaybillEnabled)}
-                  onChange={setCustomWaybill}
-                  label="One sticker per parcel"
-                />
-              </div>
-            </Group>
-          </section>
-
-          <PrinterSettings />
-
-          <section>
-            <GroupLabel>Health</GroupLabel>
-            <HealthPanel />
-          </section>
-        </div>
-
-        <div className="space-y-8">
-          <form onSubmit={saveGeneral} className="space-y-8">
+          <div className="space-y-5">
             <section>
               <GroupLabel>Costs</GroupLabel>
               <Group className="divide-y divide-hairline">
@@ -898,73 +833,7 @@ export default function SettingsPage() {
                 </button>
               </Group>
             </section>
-
-            <section>
-              <GroupLabel>Telegram summary at 8 PM</GroupLabel>
-              <Group className="divide-y divide-hairline">
-                <label className={rowClass}>
-                  <span className="shrink-0 text-[17px] text-ink">Chat ID</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={telegramChatId}
-                    onChange={(e) => setTelegramChatId(e.target.value)}
-                    placeholder="Send /start to the bot"
-                    className="tabular-nums min-w-0 flex-1 bg-transparent text-right text-[17px] text-ink focus:outline-none"
-                  />
-                </label>
-                <button type="button" onClick={handleGeneratePairCode} className={`${rowLinkClass} w-full text-left`}>
-                  <span className="text-[17px] text-brand">Link Telegram with 1-time code</span>
-                </button>
-                {pairCode && (
-                  <div className="space-y-1 bg-brand-soft px-4 py-3">
-                    <p className="text-[14px] text-ink-2">Send this to your Kyna Ops Telegram bot within 10 minutes:</p>
-                    <code className="block select-all font-mono text-[15px] font-bold text-ink">/start {pairCode}</code>
-                  </div>
-                )}
-                <label className={rowClass}>
-                  <span className="text-[17px] text-ink">Send the summary at</span>
-                  <input
-                    type="time"
-                    aria-label="Daily summary time (Manila)"
-                    value={briefTime}
-                    onChange={(e) => setBriefTime(e.target.value)}
-                    className="tabular-nums h-11 rounded-lg bg-surface-muted px-2.5 text-[16px] font-semibold text-ink focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
-                  />
-                </label>
-                <button type="button" onClick={handleSendTestTelegram} className={`${rowLinkClass} w-full text-left`}>
-                  <span className="text-[17px] text-brand">Send a test</span>
-                </button>
-                <Disclosure
-                  summaryClassName={rowLinkClass}
-                  label={<span className="text-[17px] text-ink">Tonight&apos;s message</span>}
-                  onOpenChange={(open) => {
-                    if (open) void loadTelegramPreview();
-                  }}
-                >
-                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap px-4 pb-4 font-sans text-[15px] leading-relaxed text-ink-2">
-                    {loadingPreview
-                      ? "Loading preview…"
-                      : telegramPreview || "No preview available."}
-                  </pre>
-                </Disclosure>
-              </Group>
-            </section>
-
-            {dirty && (
-              <div className="anim-rise-in sticky bottom-[calc(env(safe-area-inset-bottom)+76px)] z-20 lg:bottom-4">
-                <div className="flex items-center gap-2 rounded-[var(--radius-card)] bg-surface p-2 shadow-[var(--shadow-sheet)]">
-                  <span className="flex-1 px-2 text-[15px] font-semibold text-ink-2">Unsaved changes</span>
-                  <Button type="button" variant="plain" onClick={() => void loadSettings()} disabled={saving}>
-                    Undo
-                  </Button>
-                  <Button type="submit" disabled={saving}>
-                    {saving ? "Saving…" : "Save"}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </form>
+          </div>
 
           <section>
             <GroupLabel>Warehouse staff</GroupLabel>
@@ -1016,39 +885,194 @@ export default function SettingsPage() {
               </form>
             </Group>
           </section>
+        </div>
 
-          {data?.hasDemoData && (
-            <Group>
-              <button
-                type="button"
-                disabled={clearingDemo}
-                onClick={handleClearDemo}
-                className={`${rowLinkClass} w-full disabled:opacity-50`}
-              >
-                <span className="text-[17px] text-missing-ink">
-                  {clearingDemo ? "Clearing sample data…" : "Clear sample data"}
-                </span>
-              </button>
-            </Group>
-          )}
+        <div className="space-y-10">
+          <div className="space-y-5">
+            <section>
+              <GroupLabel>Labels</GroupLabel>
+              <Group className="divide-y divide-hairline">
+                <div className={rowClass}>
+                  <span className="flex flex-col">
+                    <span className="text-[17px] text-ink">One sticker per parcel</span>
+                    <span className="text-[13px] text-ink-3">
+                      {data?.settings.customWaybillEnabled
+                        ? "On: shop's label as is, never split · big orders get a packing slip"
+                        : "Off: prints the shop's label as it is"}
+                    </span>
+                  </span>
+                  <Switch
+                    checked={Boolean(data?.settings.customWaybillEnabled)}
+                    onChange={setCustomWaybill}
+                    label="One sticker per parcel"
+                  />
+                </div>
+              </Group>
+            </section>
 
-          <section>
-            <GroupLabel>Your account</GroupLabel>
-            <Group className="divide-y divide-hairline">
-              <button type="button" onClick={() => setAccountOpen(true)} className={`${rowLinkClass} w-full text-left`}>
-                <span className="flex min-w-0 flex-col">
-                  <span className="text-[17px] text-ink">Email &amp; password</span>
-                  {data?.owner?.email && <span className="truncate text-[13px] text-ink-3">{data.owner.email}</span>}
-                </span>
-                <ChevronRight className="chevron-nudge h-5 w-5 shrink-0 text-ink-3" />
-              </button>
-              <button type="button" onClick={handleLogout} className={`${rowLinkClass} w-full`}>
-                <span className="text-[17px] text-missing">Sign out</span>
-              </button>
-            </Group>
-          </section>
+            <PrinterSettings />
+          </div>
+
+          <div className="space-y-5">
+            <section>
+              <GroupLabel>Telegram summary at 8 PM</GroupLabel>
+              <Group className="divide-y divide-hairline">
+                <label className={rowClass}>
+                  <span className="shrink-0 text-[17px] text-ink">Chat ID</span>
+                  <input
+                    type="text"
+                    form={SETTINGS_FORM_ID}
+                    inputMode="numeric"
+                    value={telegramChatId}
+                    onChange={(e) => setTelegramChatId(e.target.value)}
+                    placeholder="Send /start to the bot"
+                    className="tabular-nums min-w-0 flex-1 bg-transparent text-right text-[17px] text-ink focus:outline-none"
+                  />
+                </label>
+                <button type="button" onClick={handleGeneratePairCode} className={`${rowLinkClass} w-full text-left`}>
+                  <span className="text-[17px] text-brand">Link Telegram with 1-time code</span>
+                </button>
+                {pairCode && (
+                  <div className="space-y-1 bg-brand-soft px-4 py-3">
+                    <p className="text-[14px] text-ink-2">Send this to your Kyna Ops Telegram bot within 10 minutes:</p>
+                    <code className="block select-all font-mono text-[15px] font-bold text-ink">/start {pairCode}</code>
+                  </div>
+                )}
+                <label className={rowClass}>
+                  <span className="text-[17px] text-ink">Send the summary at</span>
+                  <input
+                    type="time"
+                    form={SETTINGS_FORM_ID}
+                    aria-label="Daily summary time (Manila)"
+                    value={briefTime}
+                    onChange={(e) => setBriefTime(e.target.value)}
+                    className="tabular-nums h-11 rounded-lg bg-surface-muted px-2.5 text-[16px] font-semibold text-ink focus:shadow-[0_0_0_1.5px_var(--color-brand)] focus:outline-none"
+                  />
+                </label>
+                <button type="button" onClick={handleSendTestTelegram} className={`${rowLinkClass} w-full text-left`}>
+                  <span className="text-[17px] text-brand">Send a test</span>
+                </button>
+                <Disclosure
+                  summaryClassName={rowLinkClass}
+                  label={<span className="text-[17px] text-ink">Tonight&apos;s message</span>}
+                  onOpenChange={(open) => {
+                    if (open) void loadTelegramPreview();
+                  }}
+                >
+                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap px-4 pb-4 font-sans text-[15px] leading-relaxed text-ink-2">
+                    {loadingPreview
+                      ? "Loading preview…"
+                      : telegramPreview || "No preview available."}
+                  </pre>
+                </Disclosure>
+              </Group>
+            </section>
+
+            <section>
+              <GroupLabel>Chats</GroupLabel>
+              <Group className="divide-y divide-hairline">
+                <Link href="/settings/assistant" className={rowLinkClass}>
+                  <span className="text-[17px] text-ink">Chats assistant</span>
+                  <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
+                </Link>
+              </Group>
+            </section>
+          </div>
+
+          <div className="space-y-5">
+            <section>
+              <GroupLabel>Appearance</GroupLabel>
+              <Group className="space-y-3.5 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="flex flex-col">
+                    <span className="text-[17px] text-ink">Dark mode</span>
+                    <span className="text-[13px] text-ink-3">{THEME_HINT[preference]}</span>
+                  </span>
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface-muted text-brand">
+                    <ThemeIcon key={preference} className="anim-pop h-[18px] w-[18px]" strokeWidth={2.2} />
+                  </span>
+                </div>
+                <SegmentedControl
+                  label="Theme"
+                  options={THEME_OPTIONS}
+                  value={preference}
+                  onChange={setPreference}
+                />
+              </Group>
+            </section>
+
+            <section>
+              <GroupLabel>Health</GroupLabel>
+              <HealthPanel />
+            </section>
+
+            <section className="lg:hidden">
+              <GroupLabel>Shortcuts</GroupLabel>
+              <Group className="divide-y divide-hairline">
+                <Link href="/items" className={rowLinkClass}>
+                  <span className="text-[17px] text-ink">Items &amp; stock</span>
+                  <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
+                </Link>
+                <Link href="/waves" className={rowLinkClass}>
+                  <span className="text-[17px] text-ink">Waves &amp; pick lists</span>
+                  <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
+                </Link>
+                <Link href="/imports" className={rowLinkClass}>
+                  <span className="text-[17px] text-ink">Upload a file</span>
+                  <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
+                </Link>
+              </Group>
+            </section>
+          </div>
+
+          <div className="space-y-5">
+            {data?.hasDemoData && (
+              <Group>
+                <button
+                  type="button"
+                  disabled={clearingDemo}
+                  onClick={handleClearDemo}
+                  className={`${rowLinkClass} w-full disabled:opacity-50`}
+                >
+                  <span className="text-[17px] text-missing-ink">
+                    {clearingDemo ? "Clearing sample data…" : "Clear sample data"}
+                  </span>
+                </button>
+              </Group>
+            )}
+
+            <section>
+              <GroupLabel>Your account</GroupLabel>
+              <Group className="divide-y divide-hairline">
+                <button type="button" onClick={() => setAccountOpen(true)} className={`${rowLinkClass} w-full text-left`}>
+                  <span className="flex min-w-0 flex-col">
+                    <span className="text-[17px] text-ink">Email &amp; password</span>
+                    {data?.owner?.email && <span className="truncate text-[13px] text-ink-3">{data.owner.email}</span>}
+                  </span>
+                  <ChevronRight className="chevron-nudge h-5 w-5 shrink-0 text-ink-3" />
+                </button>
+                <button type="button" onClick={handleLogout} className={`${rowLinkClass} w-full`}>
+                  <span className="text-[17px] text-missing">Sign out</span>
+                </button>
+              </Group>
+            </section>
+          </div>
         </div>
       </div>
+
+      {dirty && (
+        <div className="anim-rise-in sticky bottom-[calc(env(safe-area-inset-bottom)+76px)] z-20 mt-8 lg:bottom-4 lg:mx-auto lg:max-w-md">
+          <div className="flex items-center gap-2 rounded-[var(--radius-card)] bg-surface p-2 shadow-[var(--shadow-sheet)]">
+            <span className="flex-1 px-2 text-[15px] font-semibold text-ink-2">Unsaved changes</span>
+            <Button type="button" variant="plain" onClick={() => void loadSettings()} disabled={saving}>
+              Undo
+            </Button>
+            <Button type="submit" form={SETTINGS_FORM_ID} disabled={saving}>
+              {saving ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {loadError && !data && (
         <div className="mt-6 space-y-3 text-center">

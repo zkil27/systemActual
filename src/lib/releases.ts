@@ -22,12 +22,12 @@ export const RELEASES: Release[] = [
   {
     id: 5,
     date: "2026-11-24",
-    title: "Smarter suggested replies",
+    title: "Smarter replies, tidier Settings",
     changes: [
       "A suggested reply now appears by itself when you open a chat with a new question. No need to tap.",
-      "Every suggestion is written for the buyer's exact message, so complaints, order changes and restock questions no longer get a mismatched saved answer.",
+      "Every suggestion is written for the buyer's exact message, in English when they write in English, so complaints, order changes and restock questions no longer get a mismatched saved answer.",
       "Deadlines, photo requests, order changes and reviews are marked Needs your check, and the assistant won't promise an order arrives in time.",
-      "Buyers who write in English now get a suggested reply in English.",
+      "Settings is tidier. Related options now sit together: shops, costs, printing, Telegram and staff.",
     ],
   },
   {
