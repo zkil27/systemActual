@@ -44,7 +44,7 @@ export function DraftCard({
   onUse: () => void;
   onDismiss: () => void;
   onRate: (rating: "good" | "bad") => void;
-  /** Shown when the draft leaves a question unanswered and the AI can try. */
+  /** Shown on a saved-answer draft (AI was busy): try the AI again. */
   onSuggest?: () => void;
   suggesting?: boolean;
 }) {
@@ -99,7 +99,7 @@ export function DraftCard({
       </button>
       {onSuggest && (
         <div className="mt-0.5">
-          <SuggestButton label="Write a fuller reply with AI" suggesting={suggesting} onSuggest={onSuggest} />
+          <SuggestButton label="Ask the AI instead" suggesting={suggesting} onSuggest={onSuggest} />
         </div>
       )}
     </div>

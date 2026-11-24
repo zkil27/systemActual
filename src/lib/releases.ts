@@ -24,7 +24,9 @@ export const RELEASES: Release[] = [
     date: "2026-11-24",
     title: "Smarter suggested replies",
     changes: [
-      "Questions about restocking or sold-out items no longer get the shipping answer.",
+      "A suggested reply now appears by itself when you open a chat with a new question. No need to tap.",
+      "Every suggestion is written for the buyer's exact message, so complaints, order changes and restock questions no longer get a mismatched saved answer.",
+      "Deadlines, photo requests, order changes and reviews are marked Needs your check, and the assistant won't promise an order arrives in time.",
       "Buyers who write in English now get a suggested reply in English.",
     ],
   },

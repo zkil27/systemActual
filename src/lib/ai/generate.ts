@@ -1,4 +1,5 @@
 import type { OrderPanel } from "@/lib/chats/types";
+import { sizeRangesOf } from "./fact-check";
 import type { ListingFacts } from "./listing";
 import { checkReply, type CheckReason } from "./output-check";
 import { buildPrompt, groundingText, parseReply, shopFactsText, type PromptAnswer, type PromptMessage } from "./prompt";
@@ -53,6 +54,14 @@ export async function generateReply(
   const prompt = buildPrompt({ answers: input.answers, order: input.order, messages: input.messages, listings });
   const facts = groundingText({ answers: input.answers, order: input.order, messages: input.messages, listings });
   const shopFacts = shopFactsText({ answers: input.answers, order: input.order, listings });
+  const sizeRanges = sizeRangesOf(listings);
+  // The buyer's messages since the shop last spoke.
+  const lastShop = input.messages.map((m) => m.sender).lastIndexOf("SELLER");
+  const buyerText = input.messages
+    .slice(lastShop + 1)
+    .filter((m) => m.sender === "BUYER" && m.text)
+    .map((m) => m.text)
+    .join("\n");
   const blocked: BlockedReply[] = [];
   const attempts: Attempt[] = [];
 
@@ -80,7 +89,14 @@ export async function generateReply(
       latencyMs: result.latencyMs,
     };
     const parsed = parseReply(result.text);
-    const verdict = checkReply(parsed.text, { facts, shopFacts, stockKnown });
+    const verdict = checkReply(parsed.text, {
+      facts,
+      shopFacts,
+      stockKnown,
+      buyerText,
+      sizeRanges,
+      orderStatus: input.order?.statusLabel ?? null,
+    });
     if (verdict.ok) return { ok: true, ...parsed, usage, blocked, attempts };
     blocked.push({ reason: verdict.reason, label: verdict.label, text: parsed.text, usage });
   }

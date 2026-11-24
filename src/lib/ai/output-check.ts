@@ -1,4 +1,5 @@
 import { findOffPlatformDetails } from "@/lib/chats/contact-check";
+import { checkInTime, checkSize, checkStatus, refusesCertainty, type FactCheck, type SizeRange } from "./fact-check";
 
 /**
  * Checks an AI reply before the owner sees it (and before any automatic send).
@@ -111,9 +112,24 @@ export function checkReply(
     shopFacts?: string;
     /** A listing's stock (available / few left / sold out) was in the facts. */
     stockKnown?: boolean;
+    /** The buyer's waiting messages, for the size checks. */
+    buyerText?: string;
+    /** Size ranges from the listings the chat is about. */
+    sizeRanges?: SizeRange[];
+    /** Status of the linked order; null = no order. Leave out to skip the status check. */
+    orderStatus?: string | null;
   }
 ): CheckResult {
   const shopFacts = opts.shopFacts ?? opts.facts;
+  const facts: Array<() => FactCheck> = [
+    () => checkInTime(reply),
+    () => (opts.buyerText !== undefined ? checkSize(reply, { buyerText: opts.buyerText, ranges: opts.sizeRanges ?? [] }) : { ok: true }),
+    () => (opts.orderStatus !== undefined ? checkStatus(reply, opts.orderStatus) : { ok: true }),
+  ];
+  for (const f of facts) {
+    const r = f();
+    if (!r.ok) return { ok: false, reason: "claim", label: r.label };
+  }
   const text = reply.trim();
   if (!text) return { ok: false, reason: "empty", label: "it was empty" };
   if (text.length > MAX_REPLY_CHARS) return { ok: false, reason: "too_long", label: "it was too long" };
@@ -151,6 +167,8 @@ export function checkReply(
 
   for (const m of text.matchAll(PRODUCT_CLAIM)) {
     if (grounded(m[0], shopFacts)) continue;
+    // "Stretchy" is fine when the listing says stretch or spandex. An elastic waist says nothing about the fabric.
+    if (/stretch|nababanat/i.test(m[0]) && /\b(stretch\w*|spandex|lycra)\b/i.test(shopFacts)) continue;
     // "Iche-check po namin kung manipis" is fine; "hindi po manipis" is a made-up fact.
     if (HEDGE_BEFORE.test(text.slice(0, m.index ?? 0))) continue;
     return { ok: false, reason: "claim", label: `it described the item ("${m[0]}") without a fact saying so` };
@@ -166,7 +184,10 @@ export function checkReply(
   }
 
   for (const m of text.matchAll(DAY_WORDS)) {
-    if (!grounded(m[0], shopFacts)) return { ok: false, reason: "date", label: `it promised a day ("${m[0]}")` };
+    if (grounded(m[0], shopFacts)) continue;
+    // "Hindi po namin masisiguro kung aabot bago ang Friday" says the opposite of a promise.
+    if (refusesCertainty(text, m.index ?? 0)) continue;
+    return { ok: false, reason: "date", label: `it promised a day ("${m[0]}")` };
   }
 
   // Every number must come from the facts, the order or the buyer.

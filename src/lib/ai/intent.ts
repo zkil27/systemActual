@@ -7,7 +7,7 @@ import type { AiTopic } from "./settings";
  */
 
 const RETURNS =
-  /(\b(return|refund|ibalik|ibabalik|isauli|palit|papalitan|exchange|sira|sirang|damaged?|defect(ive)?|punit|butas|mantsa|wrong\s+(item|size|color|order)|kulang|missing\s+item|complain|reklamo|scam|manloloko|cancel|i-?cancel|cancelled|bwisit|walang\s+kwenta|report|dispute|singil|siningil|sinisingil|overcharged?|double\s+charged?|sobra(ng)?\s+(bayad|singil))\b|\bmali(ng)?\b[^?.!]{0,25}\b(item|size|kulay|color|order|padala|dumating|naipadala)\b)/i;
+  /(\b(?:smaller|bigger|maliit|malaki|liit|laki|masikip|maluwag)\b[^.!?]{0,40}\b(?:naipadala|dumating|natanggap|pinadala|padala|sent|received|arrived|nareceive)\b|\b(?:naipadala|dumating|natanggap|pinadala|sent|received|arrived|nareceive)\b[^.!?]{0,40}\b(?:smaller|bigger|maliit|malaki|masikip|maluwag|hindi\s+kasya|di\s+kasya)\b|\b(?:di|hindi)\s+(?:po\s+)?(?:na\s+)?kasya\b|\b(return|refund|ibalik|ibabalik|isauli|palit|palitan|papalitan|pa-?palit|exchange|sira|sirang|damaged?|defect(ive)?|punit|butas|mantsa|wrong\s+(item|size|color|order)|kulang|missing\s+item|complain|reklamo|scam|manloloko|cancel|i-?cancel|cancelled|bwisit|walang\s+kwenta|report|dispute|singil|siningil|sinisingil|overcharged?|double\s+charged?|sobra(ng)?\s+(bayad|singil))\b|\bmali(ng)?\b[^?.!]{0,25}\b(item|size|kulay|color|order|padala|dumating|naipadala)\b)/i;
 const ORDER =
   /\b(asan|nasaan|saan\s+na|where('?s| is)?\s+(my\s+)?(order|parcel|package)|order\s+ko|parcel\s+ko|tracking|track|status|na-?ship|naship|shipped|ship\s+na|na-?padala|pinadala|out\s+for\s+delivery|rider|courier|j&t|jnt|spx|flash\s+express|dumating|darating|dadating|kelan|kailan|when\s+(will|is|po)|arrive|deliver(ed|y)?)\b/i;
 const SHIPPING =
@@ -36,6 +36,26 @@ const PRICE_ASK =
 // Trying to get the assistant to drop its rules.
 const TRICK =
   /\b(ignore|disregard|forget)\b[^.!?]{0,30}\b(rules?|instructions?|prompt|previous|above)\b|\bsystem\s+prompt\b|\byou\s+are\s+now\b|\bpretend\s+(to\s+be|you)\b|\bact\s+as\b/i;
+
+// Requests only a person can grant or check. Replies to these always need the owner's eye.
+const OWNER_ONLY: RegExp[] = [
+  // A date or event the order must reach in time.
+  /\b(agad|asap|urgent|rush|need(ed)?\s+(it\s+)?by|in\s+time|before\s+(the\s+)?\d|bago\s+(mag\s+)?(ang\s+)?(pasko|christmas|bday|birthday|\d)|this\s+(mon|tues|wednes|thurs|fri|satur|sun)day|(sa|this|on)\s+(lunes|martes|miyerkules|huwebes|biyernes|sabado|linggo|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|birthday|bday|party|okasyon|occasion|byahe|biyahe|pauwi|uuwi|aalis)\b/i,
+  // Photos or videos of the actual item.
+  /\b(pa-?pic|picturan|kunan|litrato|actual\s+(pic|photo|picture)|real\s+(pic|photo)|send\s+(a\s+)?(pic|photo|picture|video)|video\s+(po|nga))\b/i,
+  // Changing an order already placed.
+  /\b(pa-?change|change|palitan|pa-?palit|i-?update|edit)\b[^.!?]{0,30}\b(order|size|kulay|color|colour|address|item|design)\b/i,
+  // Checking an order carefully before it ships.
+  /\b(pki|paki|pa)-?\s*check\b[^.!?]{0,20}\b(mabuti|maigi|maayos|ng\s+mabuti)\b/i,
+  // Reviews, reselling, going live, bulk.
+  /\b(review|reviews|5\s*-?\s*stars?|five\s+stars?|rating|reseller|resell|wholesale|bulk|maramihan|i-?live|mag-?live)\b/i,
+  /\b(pwede|pwedi|pwd|can)\b[^.!?]{0,20}\blive\b/i,
+];
+
+/** The buyer asks for something only a person can grant: a deadline, photos, an order change, a review reward. */
+export function needsOwner(texts: string[]): boolean {
+  return texts.some((t) => OWNER_ONLY.some((re) => re.test(normalizeText(t))));
+}
 
 /** A discount or freebie request, or an attempt to trick the assistant. */
 export function isPriceAskOrTrick(text: string | null | undefined): boolean {

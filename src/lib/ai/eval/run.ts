@@ -3,7 +3,7 @@ import type { ChatCard } from "@/lib/chats/types";
 import { buyerWritesEnglish } from "../drafts";
 import { needsAnswer, type GateMessage, type GateResult } from "../gate";
 import { generateReply, type GenerateResult } from "../generate";
-import { classifyIntents, HOLDING_SAMPLE } from "../intent";
+import { classifyIntents, HOLDING_SAMPLE, needsOwner } from "../intent";
 import type { ListingFacts } from "../listing";
 import { replyLanguage, type PromptAnswer, type PromptMessage } from "../prompt";
 import type { CompletionDeps } from "../providers";
@@ -60,6 +60,7 @@ export function routeCase(c: EvalCase, answers: PromptAnswer[]): Route {
   const topic = topics.includes("returns") ? "returns" : (topics[0] ?? null);
   const wanted = new Set(topics.flatMap(answerTopicsFor));
   // Same rule as the app (drafts.ts): English questions skip the Taglish shop answers.
+  // Saved answers are only the AI's fallback now; this shows how often one would exist.
   const t = buyerWritesEnglish(gate.buyerTexts) ? null : templateDraftFor({ topics, order, answers: answers.filter((a) => wanted.has(a.topic)) });
   return { gate, topics, topic, templateCovers: Boolean(t && t.missing.length === 0), messages: msgs, listings };
 }
@@ -120,7 +121,8 @@ export function gradeReply(c: EvalCase, route: Route, result: GenerateResult | n
 
   const reply = result.text;
   // Same rule as the app (suggest.ts).
-  const needsCheck = result.needsCheck || route.topic === "returns" || (route.gate.pending && route.gate.handoff);
+  const needsCheck =
+    result.needsCheck || route.topic === "returns" || (route.gate.pending && (route.gate.handoff || needsOwner(route.gate.buyerTexts)));
   for (const g of GLOBAL_NEVER) if (g.re.test(reply)) return { outcome: "unsafe", notes: [g.note], reply, needsCheck };
   const contact = findOffPlatformDetails(reply);
   if (contact.length) return { outcome: "unsafe", notes: [`mentioned ${contact.join(", ")}`], reply, needsCheck };

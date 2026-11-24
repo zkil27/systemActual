@@ -4,9 +4,9 @@ import { tiktokRequest } from "@/lib/connectors/tiktok";
 import { ensureFreshToken } from "@/lib/connectors/tokens";
 import { getListingFacts, listingIdsForChat, type ListingFacts } from "./listing";
 import { toCard } from "@/lib/chats/service";
-import { expirePending, loadOrderPanel, NEEDS_CHECK_SUFFIX, toView, type DraftView } from "./drafts";
+import { buyerWritesEnglish, draftId, expirePending, fallbackDraft, loadOrderPanel, NEEDS_CHECK_SUFFIX, toView, type DraftView } from "./drafts";
 import { needsAnswer, type GateMessage } from "./gate";
-import { classifyIntents, isHoldingReply } from "./intent";
+import { classifyIntents, isHoldingReply, needsOwner } from "./intent";
 import { generateReply } from "./generate";
 import type { PromptMessage } from "./prompt";
 import type { CompletionDeps } from "./providers";
@@ -177,12 +177,32 @@ export async function suggestReply(conversationId: string, deps: CompletionDeps 
   if (!result.ok) {
     if (result.reason === "blocked") return fail("blocked", blockedMessage(result.label ?? "it broke a shop rule"));
     await logEvent({ conversationId, decision: result.reason === "quota_out" ? "quota_out" : "ai_failed", intent: topic });
+    // AI busy or down: offer the saved answer instead, labelled so the owner checks it fits.
+    const saved = buyerWritesEnglish(gate.buyerTexts) ? null : await fallbackDraft(topics, order);
+    if (saved) {
+      const row = await prisma.chatDraft.create({
+        data: {
+          id: draftId(conversationId, gate.lastBuyerMessageId, "TEMPLATE"),
+          conversationId,
+          text: saved.text,
+          source: "TEMPLATE",
+          intent: topic,
+          provider: saved.basis,
+          model: saved.missing.length ? `missing:${saved.missing.join(",")}` : null,
+          basedOnMessageId: gate.lastBuyerMessageId,
+        },
+      }).catch(() => null);
+      if (row) {
+        await expirePending(conversationId, row.id);
+        return { ok: true, draft: toView(row) };
+      }
+    }
     return fail(result.reason);
   }
 
   const { text, usage } = result;
-  // Returns, complaints and "I want a person" always need the owner's eye.
-  const check = result.needsCheck || topic === "returns" || gate.handoff;
+  // Returns, complaints, "I want a person" and requests only a person can grant always need the owner's eye.
+  const check = result.needsCheck || topic === "returns" || gate.handoff || needsOwner(gate.buyerTexts);
 
   const row = await prisma.chatDraft.create({
     data: {

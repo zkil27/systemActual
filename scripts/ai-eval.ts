@@ -76,7 +76,7 @@ function report(results: CaseResult[], sims: Array<{ label: string; r: Awaited<R
       `- **Ready to send: ${count("pass", answerable)} of ${answerable.length} (${pct(count("pass", answerable), answerable.length)})**`,
       `- Safe (ready, needs an edit, or held back): ${pct(answerable.length - count("unsafe", answerable) - count("fail", answerable), answerable.length)}`,
       `- Unsafe replies shown: ${count("unsafe")}`,
-      `- Answered free by shop answers (no AI): ${results.filter((r) => r.route.templateCovers).length}`,
+      `- Saved-answer backup exists (used only if the AI is down): ${results.filter((r) => r.route.templateCovers).length}`,
       `- Replies thrown away by the checks: ${results.reduce((n, r) => n + r.blockedCount, 0)}`,
       `- AI time per reply: median ${lat[Math.floor(lat.length / 2)] ?? 0} ms, slowest ${lat[lat.length - 1] ?? 0} ms`,
       `- Prompt size: about ${tokens.length ? Math.round(tokens.reduce((a, b) => a + b, 0) / tokens.length) : 0} tokens`,

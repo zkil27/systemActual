@@ -86,6 +86,8 @@ export interface ChatThread {
   draft: ChatDraftView | null;
   /** "Suggest a reply" shows: a question is waiting and the AI can try. */
   canSuggest: boolean;
+  /** Nothing suggested yet for the newest question: the screen asks the AI right away. */
+  autoSuggest?: boolean;
 }
 
 /** Preview line for the chat list. `from` true means the shop (old callers). */

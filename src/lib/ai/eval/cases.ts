@@ -174,6 +174,27 @@ export const EVAL_CASES: EvalCase[] = [
   { id: "lang-caps", group: "language", order: "shipped", chat: ["ASAN NA ORDER KO??? ANG TAGAL"], expect: { say: [/732600011122|tracking|ship|padala/i] } },
   { id: "lang-shorthand", group: "language", chat: ["cod b? ilng arw s mindanao"], expect: { say: [/cod/i, /2-7|2–7/] } },
 
+  // ---- Real buyer messages from stored chats (2026-11-24), names removed ----
+  { id: "real-sent-small", group: "complaint", order: "delivered", chat: ["hello po parang smaller size po un naipadala nyo, 21 inches lang po un size ng thighs ko pero di po kasya sa thigh hole"], expect: { topics: ["returns"], check: true, say: [/sorry|pasensya|paumanhin/i, /return|refund|my orders/i], never: [/papalitan\s+(po\s+)?namin|ire-?refund\s+(po\s+)?namin/i] } },
+  { id: "real-check-carefully", group: "complex", order: "toShip", chat: ["good pm po!!pki check po mabuti sana tamang size color at design Ang ipapaship nyo,salamat...."], expect: { check: true, never: [/sigurado|guarantee|promise|siguradong/i] } },
+  { id: "real-change-color", group: "complaint", order: "toShip", chat: ["Pwd palitan mo ng ibang kulay miron na pla ako ganitong kulay", "Ung kulay gray baka pwd ma palitan ng ibang kulay"], expect: { check: true, say: [/cancel|team|check/i], never: [/papalitan\s+(po\s+)?namin|sige\s+po,?\s+papalitan/i] } },
+  { id: "real-live-resell", group: "complex", order: "delivered", chat: ["Good day po recieve na po ang item. Thank you so much po ang ganda.pwedi q po ba live ang item nyo?"], expect: { check: true, say: [/salamat|thank/i] } },
+  { id: "real-ordered-black", group: "complex", chat: ["hi nag order po aq black"], expect: { say: [/salamat|thank|ano|paano|help|tulong/i] } },
+  { id: "real-cancel-english", group: "complaint", order: "toShip", chat: ["pls cancel my order"], expect: { topics: ["returns"], language: "English", check: true, say: [/cancel/i] } },
+  { id: "real-variant-no-photo", group: "product", chat: ["hera 15 ang order ko walang photo po"], expect: { say: [/order|ano|which|alin|check|send/i] } },
+  { id: "real-print-available", group: "product", chat: [{ card: "floralSkort" }, "print 2 available? medium size"], expect: { say: [/available|few|konti|meron|may/i] } },
+  { id: "real-other-colors", group: "product", chat: [{ card: "skorts" }, "may plain black or red po ba nito"], expect: { never: [/(may|meron)\s+(po\s+)?(kaming\s+)?red/i] } },
+  { id: "real-change-large", group: "order", order: "toShip", chat: ["pa change po ng large yun order ko,salamat"], expect: { check: true, say: [/cancel/i], never: [/papalitan\s+(po\s+)?namin/i] } },
+  { id: "real-trip-deadline", group: "complex", order: "toShip", chat: ["sana po maship agad KC 25 po Ng 5pm byahe kmi pauwi bicol matatagalan po kmi dun at Wala mgrecieve Nyan dto"], expect: { check: true, never: [/aabot|bago\s+(ang\s+)?25|before\s+the\s+25/i] } },
+  { id: "real-photo-request", group: "complex", order: "toShip", chat: ["Paki picturan po kasi susuutin yan sa Christmas party sa municipyo", "Paki check din po mabuti ang items para hndi po ireturn salamat"], expect: { check: true, never: [/aabot|in time/i] } },
+  { id: "real-waist-bust", group: "product", chat: [{ card: "strawberrySet" }, "31 waist, 38 bust", "I don't understand the sizing po"], expect: { language: "English", say: [/\bXL\b|36-40|33-36|\bL\b/] } },
+  { id: "real-33-waist", group: "product", chat: [{ card: "skorts" }, "Kasya po ba sa 33 waistline ?"], expect: { say: [/\bL\b|31-34/] } },
+  { id: "real-70kg", group: "product", chat: [{ card: "skorts" }, "70kg po Anu size"], expect: { say: [/waist|bewang|inches|sukat/i] } },
+  { id: "real-30-stretchy", group: "product", chat: [{ card: "skorts" }, "best fit po sa 30 waist.. stretchy po ba?"], expect: { say: [/\bM\b|27-30|medium/i, /elastic|garter|check/i], never: [/\b(very\s+)?stretchy\b(?![^.]*\b(check|confirm)\b)/i] } },
+  { id: "real-bday-friday", group: "complex", chat: [{ card: "longSkirt" }, "need ko yan agad for my tita bday this Friday"], expect: { check: true, say: [/2-7|team|check/i], never: [/aabot|in time|bago\s+(ang\s+|mag\s+)?(friday|biyernes)|before\s+friday|by\s+friday/i] } },
+  { id: "real-reviews", group: "complex", order: "delivered", chat: ["done with my 5star reviews"], expect: { check: true, say: [/salamat|thank/i], never: [/voucher|discount|freebie|reward/i] } },
+  { id: "real-menswear", group: "product", chat: ["Hi may panglalake po ba kayo?"], expect: { never: [/(may|meron)\s+(po\s+)?(kaming\s+)?(panlalake|panglalake|men)/i] } },
+
   // ---- Nothing to answer ----
   { id: "none-thanks", group: "no_answer", chat: ["ok po salamat!"], expect: { pending: false } },
   { id: "none-done", group: "no_answer", chat: ["Done na po, thank you!"], expect: { pending: false } },

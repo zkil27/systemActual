@@ -168,13 +168,13 @@ export function toMessageView(m: MessageRow): ChatMessageView {
   };
 }
 
-async function draftFor(conversationId: string): Promise<Pick<ChatThread, "draft" | "canSuggest">> {
+async function draftFor(conversationId: string): Promise<Pick<ChatThread, "draft" | "canSuggest" | "autoSuggest">> {
   try {
     const r = await refreshDraft(conversationId);
-    return { draft: r.draft, canSuggest: r.canSuggest };
+    return { draft: r.draft, canSuggest: r.canSuggest, autoSuggest: Boolean(r.autoSuggest) };
   } catch (err) {
     console.error("[assistant] draft", conversationId, err instanceof Error ? err.message : err);
-    return { draft: null, canSuggest: false };
+    return { draft: null, canSuggest: false, autoSuggest: false };
   }
 }
 

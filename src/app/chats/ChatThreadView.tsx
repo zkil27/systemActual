@@ -29,7 +29,7 @@ const NEAR_BOTTOM_PX = 96;
 /** Viewport shrinking by more than this counts as the on-screen keyboard being open. */
 const KEYBOARD_MIN_PX = 120;
 
-type Meta = Omit<ChatThread, "messages" | "draft" | "canSuggest">;
+type Meta = Omit<ChatThread, "messages" | "draft" | "canSuggest" | "autoSuggest">;
 /** The AI chain gives up after 40 s on the server. */
 const SUGGEST_TIMEOUT_MS = 50_000;
 type Outgoing = { text: string } | { file: File | null };
@@ -74,6 +74,12 @@ export function ChatThreadView({
   const [draft, setDraft] = useState<ChatDraftView | null>(null);
   const [canSuggest, setCanSuggest] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
+  /** The server says nothing was suggested yet for the newest buyer question. */
+  const [autoSuggest, setAutoSuggest] = useState(false);
+  /** Buyer messages already auto-suggested for on this screen (one try each). */
+  const autoTried = useRef(new Set<string>());
+  const justSuggested = useRef({ id: "", at: 0 });
+  const suggestingRef = useRef(false);
   /** Drafts used or dismissed on this screen, so a poll that crossed the request can't bring one back. */
   const handledDrafts = useRef(new Set<string>());
   const [messages, setMessages] = useState<ChatMessageView[]>([]);
@@ -134,10 +140,11 @@ export function ChatThreadView({
         if (res.status === 404) return setState("missing");
         const data = (await res.json().catch(() => null)) as ChatThread | null;
         if (!res.ok || !data) return setState("error");
-        const { messages: first, draft: firstDraft, canSuggest: firstCanSuggest, ...rest } = data;
+        const { messages: first, draft: firstDraft, canSuggest: firstCanSuggest, autoSuggest: firstAuto, ...rest } = data;
         setMeta(rest);
         setDraft(firstDraft ?? null);
         setCanSuggest(Boolean(firstCanSuggest));
+        setAutoSuggest(Boolean(firstAuto));
         scrollMode.current = "jump";
         setMessages(first);
         setState("ready");
@@ -167,8 +174,11 @@ export function ChatThreadView({
         if (!res.ok) return;
         const data = (await res.json()) as ChatThread;
         const next = data.draft && !handledDrafts.current.has(data.draft.id) ? data.draft : null;
-        setDraft((d) => (d?.id === next?.id ? d : next));
+        // A poll that left before a fresh suggestion was saved mustn't wipe it.
+        const recent = Date.now() - justSuggested.current.at < 10_000;
+        setDraft((d) => (d?.id === next?.id ? d : !next && recent && d?.id === justSuggested.current.id ? d : next));
         setCanSuggest(Boolean(data.canSuggest));
+        setAutoSuggest(Boolean(data.autoSuggest));
         const known = new Set(messagesRef.current.map((m) => m.id));
         const fresh = data.messages.filter((m) => !known.has(m.id));
         if (fresh.length === 0) return;
@@ -367,8 +377,9 @@ export function ChatThreadView({
     }
   }
 
-  async function suggest() {
-    if (suggesting) return;
+  async function suggest(silent = false) {
+    if (suggestingRef.current) return;
+    suggestingRef.current = true;
     setSuggesting(true);
     try {
       const res = await fetch(`/api/chats/${encodeURIComponent(id)}/suggest`, {
@@ -378,17 +389,31 @@ export function ChatThreadView({
       const data = (await res.json().catch(() => null)) as { draft?: ChatDraftView; error?: string } | null;
       if (res.ok && data?.draft) {
         handledDrafts.current.delete(data.draft.id);
+        justSuggested.current = { id: data.draft.id, at: Date.now() };
         setDraft(data.draft);
-        setCanSuggest(false);
-      } else {
+        setCanSuggest(data.draft.source === "TEMPLATE");
+      } else if (!silent) {
         toast(data?.error ?? "Couldn't write a reply. Try again.", "error");
       }
     } catch {
-      toast("Couldn't write a reply. Check your connection and try again.", "error");
+      if (!silent) toast("Couldn't write a reply. Check your connection and try again.", "error");
     } finally {
+      suggestingRef.current = false;
       setSuggesting(false);
+      setAutoSuggest(false);
     }
   }
+
+  // A new buyer question: have a suggestion ready without a tap (once per question).
+  const lastBuyerId = useMemo(() => [...messages].reverse().find((m) => m.sender === "BUYER")?.id ?? null, [messages]);
+  useEffect(() => {
+    if (state !== "ready" || !autoSuggest || draft || !lastBuyerId || !meta?.canReply) return;
+    if (autoTried.current.has(lastBuyerId)) return;
+    autoTried.current.add(lastBuyerId);
+    void suggest(true);
+    // suggest() only reads refs and stable values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, autoSuggest, draft, lastBuyerId, meta?.canReply]);
 
   async function sendTestMessage() {
     if (!meta) return;
@@ -548,11 +573,11 @@ export function ChatThreadView({
               setDraft({ ...draft, rating });
               void draftAction(draft.id, "rate", rating);
             }}
-            onSuggest={canSuggest && draft.source === "TEMPLATE" ? suggest : undefined}
+            onSuggest={canSuggest && draft.source === "TEMPLATE" ? () => void suggest() : undefined}
             suggesting={suggesting}
           />
         )}
-        {meta.canReply && !draft && canSuggest && <SuggestBar suggesting={suggesting} onSuggest={suggest} />}
+        {meta.canReply && !draft && canSuggest && <SuggestBar suggesting={suggesting} onSuggest={() => void suggest()} />}
         {meta.canReply ? (
           <Composer
             ref={textareaRef}

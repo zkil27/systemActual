@@ -159,6 +159,14 @@ describe("checkReply", () => {
     expect(check("Iche-check po ng team para sigurado.")).toEqual({ ok: true });
   });
 
+  it("allows refusing a day and stretchy when the listing says elastic", () => {
+    expect(checkReply("Hindi po namin masisiguro kung darating bago ang Friday.", { facts: "", shopFacts: "" })).toEqual({ ok: true });
+    expect(checkReply("Darating po bago ang Friday.", { facts: "", shopFacts: "" })).toMatchObject({ ok: false });
+    expect(checkReply("Stretchy po ang tela.", { facts: "Soft ribbed stretch fabric" })).toEqual({ ok: true });
+    expect(checkReply("Hindi po ito stretchy, pero elastic ang waist.", { facts: "Closure type: Elastic waist" })).toMatchObject({ reason: "claim" });
+    expect(checkReply("Stretchy po siya.", { facts: "Material: Jacquard" })).toMatchObject({ reason: "claim" });
+  });
+
   it("blocks a reply that lists its facts, but not a list of sizes", () => {
     expect(check("Sure! - COD: Available. - Shipping: 2-7 days. - Return/Refund: 30 days.")).toMatchObject({ ok: false, reason: "leak" });
     expect(check("Sizes po: - M (27-30) - L (31-34) - XL (35-38)")).toMatchObject({ ok: false, reason: "number" });

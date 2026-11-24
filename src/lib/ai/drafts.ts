@@ -17,6 +17,9 @@ export function buyerWritesEnglish(buyerTexts: string[]): boolean {
   return Boolean(last) && replyLanguage([{ sender: "BUYER", kind: "TEXT", text: last, card: null }]) === "English";
 }
 
+/** Chats with a buyer question newer than this get an AI suggestion as soon as they're opened. */
+const AUTO_SUGGEST_MAX_AGE_MS = 3 * 24 * 3600_000;
+
 /** Messages the gate looks at (newest). */
 const GATE_WINDOW = 30;
 
@@ -35,12 +38,6 @@ export function draftId(conversationId: string, buyerMessageId: string, source: 
   return "d_" + crypto.createHash("sha1").update(`${conversationId}:${buyerMessageId}:${source}`).digest("hex").slice(0, 24);
 }
 
-const BASIS: Record<string, string> = {
-  order: "From the order details",
-  shop_answer: "From your shop answers",
-  "order+shop_answer": "From the order and your shop answers",
-};
-
 const TOPIC_WORDS: Record<string, string> = {
   order: "the order",
   shipping: "shipping time",
@@ -56,11 +53,12 @@ const TOPIC_WORDS: Record<string, string> = {
 export const NEEDS_CHECK_SUFFIX = "#check";
 
 /** "From your shop answers. Doesn't answer: stock" */
-export function basisLabel(provider: string | null, model: string | null, source: string = "TEMPLATE"): string {
+export function basisLabel(_provider: string | null, model: string | null, source: string = "TEMPLATE"): string {
   if (source === "AI") {
     return model?.endsWith(NEEDS_CHECK_SUFFIX) ? "AI reply. Needs your check" : "AI reply from your shop answers";
   }
-  const base = BASIS[provider ?? ""] ?? "Suggested reply";
+  // Saved answers are picked by keywords, so they may not fit the question.
+  const base = "Saved answer (AI was busy). Check it fits";
   const missing = model?.startsWith("missing:") ? model.slice(8).split(",").filter(Boolean) : [];
   if (missing.length === 0) return base;
   return `${base}. Doesn't answer: ${missing.map((m) => TOPIC_WORDS[m] ?? m).join(", ")}`;
@@ -117,14 +115,15 @@ export interface RefreshResult {
   draft: DraftView | null;
   gate: GateResult | { pending: false; reason: "off" };
   topic?: AiTopic;
-  /** The owner may ask the AI for a reply (no draft yet, or the draft leaves questions out). */
+  /** The owner may ask the AI for a reply (no draft yet, or only a saved-answer fallback). */
   canSuggest: boolean;
+  /** Nothing was suggested for this buyer message yet: the screen asks the AI right away. */
+  autoSuggest?: boolean;
 }
 
-/** A template draft that leaves a question unanswered, or no usable draft at all. */
-function suggestable(draft: { source: string; model: string | null } | null): boolean {
-  if (!draft) return true;
-  return draft.source === "TEMPLATE" && Boolean(draft.model?.startsWith("missing:"));
+/** No draft, or only a saved-answer fallback: the AI may (re)try. */
+function suggestable(draft: { source: string } | null): boolean {
+  return !draft || draft.source === "TEMPLATE";
 }
 
 /**
@@ -199,12 +198,18 @@ export async function refreshDraft(conversationId: string, now: Date = new Date(
   // Money and complaints decide who answers, so they lead.
   const topic: AiTopic = topics.includes("returns") ? "returns" : topics[0];
 
-  // Shop answers are written in Taglish; an English question gets the AI, which replies in English.
-  if (buyerWritesEnglish(gate.buyerTexts)) return { draft: null, gate, topic, canSuggest: aiReady };
+  // The AI writes every suggestion: it reads the whole message, while saved answers
+  // are picked by keywords and answered "you sent the wrong size" with the size guide.
+  // Saved answers are only a fallback, used when the AI can't answer (no keys here,
+  // or quota/errors in suggest.ts). Older chats wait for a tap, to save free AI use.
+  if (aiReady) {
+    const fresh = now.getTime() - gate.lastBuyerAt.getTime() < AUTO_SUGGEST_MAX_AGE_MS;
+    return { draft: null, gate, topic, canSuggest: true, autoSuggest: fresh };
+  }
+  if (buyerWritesEnglish(gate.buyerTexts)) return { draft: null, gate, topic, canSuggest: false };
 
-  const answers = await activeShopAnswers([...new Set(topics.flatMap(answerTopicsFor))]);
-  const t = templateDraftFor({ topics, order, answers });
-  if (!t) return { draft: null, gate, topic, canSuggest: aiReady };
+  const t = await fallbackDraft(topics, order);
+  if (!t) return { draft: null, gate, topic, canSuggest: false };
 
   const id = draftId(conversationId, gate.lastBuyerMessageId, "TEMPLATE");
   try {
@@ -234,6 +239,12 @@ export async function refreshDraft(conversationId: string, now: Date = new Date(
     }
     throw err;
   }
+}
+
+/** The saved-answer reply for these topics, or null. Only used when the AI can't answer. */
+export async function fallbackDraft(topics: AiTopic[], order: OrderPanel | null) {
+  const answers = await activeShopAnswers([...new Set(topics.flatMap(answerTopicsFor))]);
+  return templateDraftFor({ topics, order, answers });
 }
 
 /** The owner used, dismissed or rated a draft. */

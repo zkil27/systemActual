@@ -148,7 +148,7 @@ describe("templates", () => {
     expect(t.text).toContain("JT0987112354");
     expect(t.text.match(/Hi po!/g)).toHaveLength(1);
     expect(t).toMatchObject({ basis: "order+shop_answer", covered: ["cod", "order"], missing: ["stock"] });
-    expect(basisLabel("order+shop_answer", "missing:stock")).toBe("From the order and your shop answers. Doesn't answer: stock");
+    expect(basisLabel("order+shop_answer", "missing:stock")).toBe("Saved answer (AI was busy). Check it fits. Doesn't answer: stock");
     expect(templateDraftFor({ topics: ["stock"], order: null, answers })).toBeNull();
   });
 
