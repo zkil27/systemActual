@@ -40,6 +40,18 @@ export interface ChatMessageView {
   sentAt: string;
   status: "SENDING" | "SENT" | "FAILED";
   clientKey: string | null;
+  /** A shop-side message sent by a tool, not a person (Duoke's "please wait"). */
+  autoBy?: "duoke" | null;
+}
+
+/** The assistant's suggested reply (never sent without the owner, except in test chats). */
+export interface ChatDraftView {
+  id: string;
+  text: string;
+  source: "TEMPLATE" | "AI" | "SAVED";
+  intent: string;
+  basis: string;
+  rating: "good" | "bad" | null;
 }
 
 export interface OrderPanel {
@@ -68,6 +80,8 @@ export interface ChatThread {
   replyNote: string | null;
   order: OrderPanel | null;
   messages: ChatMessageView[];
+  /** Chats assistant draft for the newest buyer question, if any. */
+  draft: ChatDraftView | null;
 }
 
 /** Preview line for the chat list. `from` true means the shop (old callers). */

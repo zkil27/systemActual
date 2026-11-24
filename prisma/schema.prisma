@@ -157,6 +157,9 @@ model ChatConversation {
   /// Last time this chat's messages were fetched from the platform.
   remoteCheckedAt    DateTime?
   messages           ChatMessage[]
+  drafts             ChatDraft[]
+  /// The assistant leaves this chat alone until then (a person replied, or a trick attempt).
+  aiPausedUntil      DateTime?
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
 
@@ -671,4 +674,102 @@ model WaveItem {
   @@index([waveId, position])
   @@index([status, nextAttemptAt])
   @@index([packageId])
+}
+
+/// Chats assistant settings (one row, id "default"). Off until the owner turns it on.
+model AiSettings {
+  id                String   @id @default("default")
+  enabled           Boolean  @default(false)
+  /// Per topic: "off" | "draft" | "auto". Topics missing here are "draft".
+  topicModes        Json     @default("{}")
+  /// Added to every automatic reply so buyers know it's automated.
+  autoLabel         String   @default("(Auto-reply)")
+  /// Sent when the assistant can't answer and a person will take over.
+  handoverText      String   @default("Salamat po! Our team will reply shortly.")
+  /// Share of the daily free AI allowance kept for 6 PM to midnight (Manila).
+  eveningReservePct Int      @default(15)
+  updatedAt         DateTime @updatedAt
+}
+
+/// Shop rules the assistant may quote (COD, shipping times, returns, sizes...).
+model ShopAnswer {
+  id             String   @id @default(cuid())
+  /// Topic key, e.g. "cod", "shipping", "returns", "size", "live", "never".
+  topic          String
+  title          String
+  answer         String
+  active         Boolean  @default(true)
+  /// The answer before the last edit, so a bad edit can be undone.
+  previousAnswer String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([topic, active])
+}
+
+/// Free AI use per provider, model and provider-day (each provider resets on its own clock).
+model AiUsage {
+  id           String   @id @default(cuid())
+  provider     String
+  model        String
+  /// Provider's own day, "YYYY-MM-DD" (UTC for Cloudflare/OpenRouter, Pacific for Gemini).
+  dayKey       String
+  requests     Int      @default(0)
+  tokensIn     Int      @default(0)
+  tokensOut    Int      @default(0)
+  cachedTokens Int      @default(0)
+  errors       Int      @default(0)
+  updatedAt    DateTime @updatedAt
+
+  @@unique([provider, model, dayKey])
+}
+
+/// What the assistant decided and why. No buyer text or personal details.
+model AiEvent {
+  id             String   @id @default(cuid())
+  conversationId String?
+  /// e.g. "skip_ack", "template", "ai_draft", "auto_sent", "handover", "blocked", "quota_out".
+  decision       String
+  intent         String?
+  provider       String?
+  model          String?
+  tokensIn       Int?
+  tokensOut      Int?
+  latencyMs      Int?
+  blockedReason  String?
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([conversationId, createdAt])
+}
+
+enum ChatDraftStatus {
+  PENDING
+  USED
+  DISMISSED
+  SENT
+  EXPIRED
+}
+
+/// A reply the assistant suggests. Real buyers only ever get drafts; the test chat may auto-send.
+model ChatDraft {
+  id               String           @id @default(cuid())
+  conversationId   String
+  conversation     ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  text             String
+  /// "TEMPLATE" | "AI" | "SAVED"
+  source           String
+  intent           String
+  provider         String?
+  model            String?
+  /// Newest buyer message this draft answers (stale when a newer one arrives).
+  basedOnMessageId String?
+  status           ChatDraftStatus  @default(PENDING)
+  /// Owner's rating: "good" | "bad".
+  rating           String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@index([conversationId, status])
+  @@index([createdAt])
 }

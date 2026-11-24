@@ -14,6 +14,8 @@ import {
 } from "./source";
 
 export { ChatSendDisabledError };
+import { refreshDraft } from "@/lib/ai/drafts";
+import { isHoldingReply } from "@/lib/ai/intent";
 import type { ChatCard, ChatListItem, ChatMessageView, ChatPlatform, ChatThread, ChatUnread } from "./types";
 
 export const CHAT_PAGE_SIZE = 30;
@@ -161,7 +163,17 @@ export function toMessageView(m: MessageRow): ChatMessageView {
     sentAt: m.sentAt.toISOString(),
     status: m.status,
     clientKey: m.clientKey,
+    autoBy: m.sender === "SELLER" && m.kind === "TEXT" && !m.clientKey && isHoldingReply(m.text) ? "duoke" : null,
   };
+}
+
+async function draftFor(conversationId: string): Promise<ChatThread["draft"]> {
+  try {
+    return (await refreshDraft(conversationId)).draft;
+  } catch (err) {
+    console.error("[assistant] draft", conversationId, err instanceof Error ? err.message : err);
+    return null;
+  }
 }
 
 /**
@@ -241,6 +253,7 @@ export async function getThread(id: string, afterId?: string | null): Promise<Ch
     ...replyState(conv.canReply, conv.shopConnection, conv.externalId),
     order: buildOrderPanel({ order, sampleOrder: conv.shopConnection.isDemo ? conv.sampleOrder : null }),
     messages: messages.map(toMessageView),
+    draft: await draftFor(conv.id),
   };
 }
 

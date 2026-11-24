@@ -9,7 +9,8 @@ import { toast, Toaster } from "@/components/ui/Toast";
 import { describeFound, findOffPlatformDetails } from "@/lib/chats/contact-check";
 import { newClientKey, shrinkPhoto, timeoutSignal } from "@/lib/chats/client";
 import { platformName, shopParam, withDaySeparators } from "@/lib/chats/format";
-import type { ChatMessageView, ChatThread } from "@/lib/chats/types";
+import type { ChatDraftView, ChatMessageView, ChatThread } from "@/lib/chats/types";
+import { DraftCard } from "./DraftCard";
 import { BuyerAvatar } from "./BuyerAvatar";
 import { Composer } from "./Composer";
 import { MessageBubble, type DisplayMessage } from "./MessageBubble";
@@ -28,7 +29,7 @@ const NEAR_BOTTOM_PX = 96;
 /** Viewport shrinking by more than this counts as the on-screen keyboard being open. */
 const KEYBOARD_MIN_PX = 120;
 
-type Meta = Omit<ChatThread, "messages">;
+type Meta = Omit<ChatThread, "messages" | "draft">;
 type Outgoing = { text: string } | { file: File | null };
 
 /** The phone keyboard shrinks the visual viewport, not the layout one. Keep the composer above it. */
@@ -68,6 +69,9 @@ export function ChatThreadView({
   onChanged: () => void;
 }) {
   const [meta, setMeta] = useState<Meta | null>(null);
+  const [draft, setDraft] = useState<ChatDraftView | null>(null);
+  /** Drafts used or dismissed on this screen, so a poll that crossed the request can't bring one back. */
+  const handledDrafts = useRef(new Set<string>());
   const [messages, setMessages] = useState<ChatMessageView[]>([]);
   const [pending, setPending] = useState<DisplayMessage[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "missing" | "error">("loading");
@@ -126,8 +130,9 @@ export function ChatThreadView({
         if (res.status === 404) return setState("missing");
         const data = (await res.json().catch(() => null)) as ChatThread | null;
         if (!res.ok || !data) return setState("error");
-        const { messages: first, ...rest } = data;
+        const { messages: first, draft: firstDraft, ...rest } = data;
         setMeta(rest);
+        setDraft(firstDraft ?? null);
         scrollMode.current = "jump";
         setMessages(first);
         setState("ready");
@@ -156,6 +161,8 @@ export function ChatThreadView({
         );
         if (!res.ok) return;
         const data = (await res.json()) as ChatThread;
+        const next = data.draft && !handledDrafts.current.has(data.draft.id) ? data.draft : null;
+        setDraft((d) => (d?.id === next?.id ? d : next));
         const known = new Set(messagesRef.current.map((m) => m.id));
         const fresh = data.messages.filter((m) => !known.has(m.id));
         if (fresh.length === 0) return;
@@ -340,6 +347,20 @@ export function ChatThreadView({
     void deliver(m.clientKey, content);
   }
 
+  async function draftAction(draftId: string, action: "use" | "dismiss" | "rate", rating?: "good" | "bad") {
+    if (action !== "rate") handledDrafts.current.add(draftId);
+    try {
+      const res = await fetch(`/api/chats/${encodeURIComponent(id)}/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draftId, action, rating }),
+      });
+      if (!res.ok && action === "rate") toast("Couldn't save your rating", "error");
+    } catch {
+      // Using or dismissing still works on screen; the next poll catches up.
+    }
+  }
+
   async function sendTestMessage() {
     if (!meta) return;
     setTesting(true);
@@ -481,6 +502,25 @@ export function ChatThreadView({
             </button>
           )}
         </div>
+        {meta.canReply && draft && (
+          <DraftCard
+            draft={draft}
+            onUse={() => {
+              setText(draft.text);
+              void draftAction(draft.id, "use");
+              setDraft(null);
+              requestAnimationFrame(() => textareaRef.current?.focus());
+            }}
+            onDismiss={() => {
+              void draftAction(draft.id, "dismiss");
+              setDraft(null);
+            }}
+            onRate={(rating) => {
+              setDraft({ ...draft, rating });
+              void draftAction(draft.id, "rate", rating);
+            }}
+          />
+        )}
         {meta.canReply ? (
           <Composer
             ref={textareaRef}

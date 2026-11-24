@@ -45,10 +45,11 @@ export function MessageBubble({
     );
   }
 
-  const bot = m.sender === "ROBOT";
+  const bot = m.sender === "ROBOT" || m.autoBy === "duoke";
+  const botName = m.autoBy === "duoke" ? "Duoke auto-reply" : "TikTok auto-reply";
   // The shop's side: the owner's replies and the TikTok auto-reply.
   const mine = m.sender === "SELLER" || bot;
-  const who = bot ? "TikTok auto-reply" : m.sender === "SELLER" ? "You" : "Buyer";
+  const who = bot ? botName : m.sender === "SELLER" ? "You" : "Buyer";
   const label = `${who}, ${time}: ${describe(m)}`;
 
   const shape = bot
@@ -127,7 +128,7 @@ export function MessageBubble({
     <div role="group" aria-label={label} className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
       {bot && (
         <span aria-hidden="true" className="mb-1 px-1 text-[12px] font-semibold text-ink-3">
-          TikTok auto-reply
+          {botName}
         </span>
       )}
       {body}

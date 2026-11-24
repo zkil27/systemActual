@@ -18,6 +18,7 @@ import {
   type NormalizedMessage,
 } from "./tiktok-normalize";
 import { previewFor } from "./types";
+import { isHoldingReply } from "@/lib/ai/intent";
 
 /** Recent chats loaded the first time. Older ones stay in TikTok Seller Center. */
 export const FIRST_IMPORT_CONVERSATION_PAGES = 3;
@@ -162,7 +163,9 @@ async function latestStored(conversationId: string) {
   ]);
   if (!newest) return null;
   const p = meaningful ?? newest;
-  return { at: newest.sentAt, preview: previewFor(p.kind, p.text, p.sender) };
+  // Duoke's "please wait" message is an auto-reply, not the owner.
+  const from = p.sender === "SELLER" && p.kind === "TEXT" && isHoldingReply(p.text) ? "ROBOT" : p.sender;
+  return { at: newest.sentAt, preview: previewFor(p.kind, p.text, from) };
 }
 
 async function recentExternalIds(conversationId: string): Promise<Set<string>> {

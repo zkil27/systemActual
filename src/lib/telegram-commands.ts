@@ -29,6 +29,7 @@ export const HELP_TEXT = [
   `/staff — who scanned and packed today`,
   `/health — sync, printer and backup status`,
   `/pause · /resume — stop or restart printing`,
+  `/aioff · /aion — stop or restart the chats assistant`,
   `/sync — sync both shops now`,
 ].join("\n");
 
@@ -139,6 +140,14 @@ async function setPrintPaused(paused: boolean): Promise<string> {
     : `PRINTING RESUMED. The PC picks up queued labels within a minute.`;
 }
 
+async function setAssistant(on: boolean): Promise<string> {
+  const { setAiEnabled } = await import("@/lib/ai/settings-store");
+  await setAiEnabled(on);
+  return on
+    ? "Chats assistant is ON. It writes reply drafts in Chats (auto-replies only go to test chats)."
+    : "Chats assistant is OFF. No drafts or automatic replies until you send /aion.";
+}
+
 /**
  * Commands added for owner ops. Returns null when the text isn't one of them,
  * so the older keyword router handles it.
@@ -167,6 +176,10 @@ export async function buildOpsCommandReply(raw: string): Promise<string | null> 
       return setPrintPaused(true);
     case "resume":
       return setPrintPaused(false);
+    case "aioff":
+      return setAssistant(false);
+    case "aion":
+      return setAssistant(true);
     default:
       return null;
   }

@@ -788,6 +788,12 @@ export default function SettingsPage() {
                 <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
               </Link>
             </Group>
+            <Group className="mt-4 divide-y divide-hairline">
+              <Link href="/settings/assistant" className={rowLinkClass}>
+                <span className="text-[17px] text-ink">Chats assistant</span>
+                <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
+              </Link>
+            </Group>
           </section>
 
           <section>
