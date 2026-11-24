@@ -37,8 +37,10 @@ How to reply:
 - Be warm and polite. 1 to 3 short sentences, under 60 words. Plain text, at most one emoji.
 - Answer every question in the buyer's newest messages.
 - State only what is in SHOP FACTS or ORDER. Don't guess stock, sizes, prices, colors, dates, delivery times or shop steps that aren't there.
+- Never say what the shop can or can't do (notes, gift wrap, pickup, someone else receiving, special requests) unless SHOP FACTS says it. Say the team will check instead.
 - Sizes differ per item. Unless the buyer shared the product and its size chart is in the facts, explain how to pick a size from the facts instead of naming one.
 - Asked for a discount or "less": say kindly that the price is as listed in the shop.
+- Upset or worried buyer: say sorry first, then speak to their exact problem using ORDER (for example, the order still shows "To ship"), and say the team will check. Don't argue or defend the shop.
 - Returns, refunds, damaged, missing or wrong items: say sorry, and tell them how to request it in the TikTok app exactly as the facts say. Don't say the shop will refund, replace or review it.
 - If the buyer asks whether this is a bot, say this is the shop's assistant. If they want a person, say a team member will reply soon.
 
@@ -132,6 +134,20 @@ function ownerRules(answers: PromptAnswer[]): string {
   return rules.length ? `\n\nThe shop owner also says:\n${rules.join("\n")}` : "";
 }
 
+// Common Tagalog words; English messages have none of them.
+const TAGALOG =
+  /\b(po|opo|ba|ako|ko|ang|ng|mga|naman|pwede|puwede|yung|iyong|sa|kayo|ninyo|nyo|lang|pa|na|ito|iyan|yan|meron|may|wala|kasi|kelan|kailan|ilang|paano|pano|saan|asan|magkano|salamat|ate|kuya|sana|din|rin|talaga|diba|huhu)\b/gi;
+
+/** "English" when the buyer's newest text has no Tagalog words; otherwise "Taglish". */
+export function replyLanguage(messages: PromptMessage[]): "English" | "Taglish" {
+  const last = [...messages].reverse().find((m) => m.sender === "BUYER" && m.kind === "TEXT" && m.text?.trim());
+  const text = last?.text ?? "";
+  const words = text.split(/\s+/).filter(Boolean).length;
+  const tagalog = (text.match(TAGALOG) ?? []).length;
+  // One stray "po" in a long English sentence is still English.
+  return words >= 4 && tagalog <= Math.floor(words / 12) ? "English" : "Taglish";
+}
+
 export function buildPrompt(opts: {
   answers: PromptAnswer[];
   order: OrderPanel | null;
@@ -151,7 +167,9 @@ export function buildPrompt(opts: {
     transcript(opts.messages),
     ">>>",
     "",
-    "Write the shop's next reply to the buyer.",
+    replyLanguage(opts.messages) === "English"
+      ? "The buyer wrote in English. Write the shop's next reply in English."
+      : "Write the shop's next reply in natural Taglish, with \"po\".",
   ].join("\n");
   return [
     { role: "system", content: RULES + ownerRules(opts.answers) },
@@ -176,8 +194,8 @@ export function parseReply(raw: string): { text: string; needsCheck: boolean } {
   t = t.replace(/^["“](.*)["”]$/s, "$1").trim();
   const needsCheck = t.includes(CHECK_MARK);
   t = t.split(CHECK_MARK).join("").replace(/\s{2,}/g, " ").trim();
-  // "[CHECK] Po, …" leaves a stray "Po," in front.
-  if (needsCheck) t = t.replace(/^po[,.!]?\s+(?=\S)/i, "");
+  // A stray "Po," in front ("[CHECK] Po, …", or the model copying "po" too eagerly).
+  t = t.replace(/^po[,.!]?\s+(?=\S)/i, "");
   t = t.replace(/\b(po)(\s+po)+\b/gi, "$1");
   t = t.charAt(0).toUpperCase() + t.slice(1);
   return { text: t, needsCheck };
