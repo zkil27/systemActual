@@ -177,6 +177,21 @@ export function checkStatus(reply: string, orderStatus: string | null): FactChec
   return { ok: true };
 }
 
+// The buyer says the item reached them ("naipadala niyo", "dumating", "received").
+const ARRIVED =
+  /\b(naipadala|napadala|pinadala|dumating|dumting|natanggap|nareceive|na-?receive|nakuha|received|arrived|got\s+(my|the)\s+(order|item|parcel)|delivered\s+(na|already)|ang\s+dating)\b/i;
+const CANCEL = /\b(i-?cancel|cancel|ma-?cancel|cancellation)\b/i;
+
+/** An order the buyer already has can't be cancelled; offering it confuses them. */
+export function checkCancelAfterArrival(reply: string, buyerText: string): FactCheck {
+  if (!ARRIVED.test(buyerText) || /\b(pa\s+)?cancel\b/i.test(buyerText)) return { ok: true };
+  const m = reply.match(CANCEL);
+  if (!m) return { ok: true };
+  // "Hindi na po ma-cancel" / "it can't be cancelled anymore" is correct.
+  if (NO_BEFORE.test(reply.slice(0, m.index ?? 0)) || refusesCertainty(reply, m.index ?? 0)) return { ok: true };
+  return { ok: false, label: "it offered to cancel an order the buyer already received" };
+}
+
 const IN_TIME =
   /\b(aabot|aabutan|maaabot|maaabutan|aabot\s+po|makakarating\s+(po\s+)?bago|darating\s+(po\s+)?bago|dadating\s+(po\s+)?bago|matatanggap\s+(n(?:y|i)o\s+)?(po\s+)?bago|in\s+time\s+(for|before)|on\s+time\s+for|before\s+(your|the)\s+(event|party|birthday|trip|flight)|sakto\s+(po\s+)?(sa|bago))\b/gi;
 const NO_BEFORE = /\b(hindi|di|not|can'?t|cannot|won'?t|walang|no)\b(?:\s+\S+){0,4}\s*$/i;

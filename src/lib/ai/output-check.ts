@@ -1,5 +1,5 @@
 import { findOffPlatformDetails } from "@/lib/chats/contact-check";
-import { checkInTime, checkSize, checkStatus, refusesCertainty, type FactCheck, type SizeRange } from "./fact-check";
+import { checkCancelAfterArrival, checkInTime, checkSize, checkStatus, refusesCertainty, type FactCheck, type SizeRange } from "./fact-check";
 
 /**
  * Checks an AI reply before the owner sees it (and before any automatic send).
@@ -10,7 +10,7 @@ import { checkInTime, checkSize, checkStatus, refusesCertainty, type FactCheck, 
  * "₱150" is not if no fact or message has 150.
  */
 
-export type CheckReason = "empty" | "too_long" | "contact" | "leak" | "promise" | "stock" | "claim" | "number" | "date";
+export type CheckReason = "empty" | "too_long" | "contact" | "leak" | "promise" | "stock" | "claim" | "language" | "number" | "date";
 
 export type CheckResult = { ok: true } | { ok: false; reason: CheckReason; label: string };
 
@@ -123,6 +123,7 @@ export function checkReply(
   const shopFacts = opts.shopFacts ?? opts.facts;
   const facts: Array<() => FactCheck> = [
     () => checkInTime(reply),
+    () => (opts.buyerText !== undefined ? checkCancelAfterArrival(reply, opts.buyerText) : { ok: true }),
     () => (opts.buyerText !== undefined ? checkSize(reply, { buyerText: opts.buyerText, ranges: opts.sizeRanges ?? [] }) : { ok: true }),
     () => (opts.orderStatus !== undefined ? checkStatus(reply, opts.orderStatus) : { ok: true }),
   ];

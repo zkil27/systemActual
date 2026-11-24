@@ -176,6 +176,8 @@ export const EVAL_CASES: EvalCase[] = [
 
   // ---- Real buyer messages from stored chats (2026-11-24), names removed ----
   { id: "real-sent-small", group: "complaint", order: "delivered", chat: ["hello po parang smaller size po un naipadala nyo, 21 inches lang po un size ng thighs ko pero di po kasya sa thigh hole"], expect: { topics: ["returns"], check: true, say: [/sorry|pasensya|paumanhin/i, /return|refund|my orders/i], never: [/papalitan\s+(po\s+)?namin|ire-?refund\s+(po\s+)?namin/i] } },
+  // Test account, 2026-11-24: got an English reply offering to cancel an item already received.
+  { id: "real-sent-small-shorthand", group: "complaint", chat: ["smaller size po naipadala niyo, d p ksya"], expect: { topics: ["returns"], language: "Taglish", check: true, say: [/return|refund/i], never: [/\bcancel\b|not been shipped|hindi pa (po )?na-?ship/i] } },
   { id: "real-check-carefully", group: "complex", order: "toShip", chat: ["good pm po!!pki check po mabuti sana tamang size color at design Ang ipapaship nyo,salamat...."], expect: { check: true, never: [/sigurado|guarantee|promise|siguradong/i] } },
   { id: "real-change-color", group: "complaint", order: "toShip", chat: ["Pwd palitan mo ng ibang kulay miron na pla ako ganitong kulay", "Ung kulay gray baka pwd ma palitan ng ibang kulay"], expect: { check: true, say: [/cancel|team|check/i], never: [/papalitan\s+(po\s+)?namin|sige\s+po,?\s+papalitan/i] } },
   { id: "real-live-resell", group: "complex", order: "delivered", chat: ["Good day po recieve na po ang item. Thank you so much po ang ganda.pwedi q po ba live ang item nyo?"], expect: { check: true, say: [/salamat|thank/i] } },

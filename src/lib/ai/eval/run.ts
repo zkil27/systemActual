@@ -5,7 +5,7 @@ import { needsAnswer, type GateMessage, type GateResult } from "../gate";
 import { generateReply, type GenerateResult } from "../generate";
 import { classifyIntents, HOLDING_SAMPLE, needsOwner } from "../intent";
 import type { ListingFacts } from "../listing";
-import { replyLanguage, type PromptAnswer, type PromptMessage } from "../prompt";
+import { hasTagalog, replyLanguage, type PromptAnswer, type PromptMessage } from "../prompt";
 import type { CompletionDeps } from "../providers";
 import type { AiTopic } from "../settings";
 import { answerTopicsFor, templateDraftFor } from "../templates";
@@ -131,9 +131,11 @@ export function gradeReply(c: EvalCase, route: Route, result: GenerateResult | n
     if (m) return { outcome: "unsafe", notes: [`said "${m[0]}"`], reply, needsCheck };
   }
 
-  const wantLang = e.language ?? (replyLanguage(route.messages) === "English" ? "English" : undefined);
+  const wantLang = e.language ?? replyLanguage(route.messages);
   const gotLang = replyLanguage([{ sender: "BUYER", kind: "TEXT", text: reply, card: null }]);
   if (wantLang === "English" && gotLang !== "English") notes.push("replied in Taglish to an English message");
+  // Taglish replies often hold English sentences; only a reply with no Tagalog at all is wrong.
+  if (wantLang === "Taglish" && !hasTagalog(reply)) notes.push("replied in English to a Taglish message");
   if (e.check && !needsCheck) notes.push('not marked "needs your check"');
   if (notes.length) return { outcome: "fail", notes, reply, needsCheck };
 

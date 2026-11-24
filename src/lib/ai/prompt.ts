@@ -52,6 +52,7 @@ How to reply:
 - Sizes differ per item. When PRODUCT DETAILS shows size ranges (like "M (27-30)"), pick the size whose range fits the buyer's measurement and name it. Otherwise explain how to pick a size from the facts instead of naming one.
 - Asked for a discount or "less": say kindly that the price is as listed in the shop.
 - Upset or worried buyer: say sorry first, then speak to their exact problem using ORDER (for example, the order still shows "To ship"), and say the team will check. Don't argue or defend the shop.
+- If the buyer says the item already arrived ("naipadala niyo", "dumating", "natanggap", "received"), don't mention cancelling or "if not shipped yet". Go straight to Return/Refund.
 - Returns, refunds, damaged, missing or wrong items: say sorry, and tell them how to request it in the TikTok app exactly as the facts say. Don't say the shop will refund, replace or review it.
 - If the buyer asks whether this is a bot, say this is the shop's assistant. If they want a person, say a team member will reply soon.
 
@@ -147,16 +148,29 @@ function ownerRules(answers: PromptAnswer[]): string {
 
 // Common Tagalog words; English messages have none of them.
 const TAGALOG =
-  /\b(po|opo|ba|ako|ko|ang|ng|mga|naman|pwede|puwede|yung|iyong|sa|kayo|ninyo|nyo|lang|pa|na|ito|iyan|yan|meron|may|wala|kasi|kelan|kailan|ilang|paano|pano|saan|asan|magkano|salamat|ate|kuya|sana|din|rin|talaga|diba|huhu|pde|pwd|ilng|arw|araw|ung|yng|kc|nmn|lng|sna|b|s|dto|jan|pila|adlaw|unsa|asa)\b/gi;
+  /\b(po|opo|ba|ako|ko|ang|ng|mga|naman|pwede|puwede|yung|iyong|sa|kayo|ninyo|niyo|nyo|nio|lang|pa|na|ito|iyan|yan|meron|may|wala|kasi|kelan|kailan|ilang|paano|pano|saan|asan|magkano|salamat|ate|kuya|sana|din|rin|talaga|diba|huhu|pde|pwd|ilng|arw|araw|ung|yng|kc|nmn|lng|sna|b|s|d|p|dto|jan|pila|adlaw|unsa|asa|kasya|ksya|hindi|di|naipadala|dumating|natanggap|nag|mag|aq|q|sakin)\b/gi;
 
-/** "English" when the buyer's newest text has no Tagalog words; otherwise "Taglish". */
+// English sentence words. Product words ("size", "medium", "cod") are used in Taglish too, so they don't count.
+const ENGLISH =
+  /\b(the|a|an|is|are|was|were|am|i(?!-)|i'm|im|you|your|my|me|we|our|it|its|it's|this|that|these|those|do|does|did|can|could|will|would|should|have|has|had|what|when|where|which|why|how|who|to|for|of|with|from|about|and|but|or|if|not|don't|dont|please|pls|still|yet|already|any|there|here|be|been|get|got|want|need)\b/gi;
+
+/**
+ * "English" only when the buyer's newest text is clearly English: more English
+ * sentence words than Tagalog ones. Shorthand ("d p ksya") and product words
+ * alone stay "Taglish", the shop's usual language.
+ */
 export function replyLanguage(messages: PromptMessage[]): "English" | "Taglish" {
   const last = [...messages].reverse().find((m) => m.sender === "BUYER" && m.kind === "TEXT" && m.text?.trim());
   const text = last?.text ?? "";
-  const words = text.split(/\s+/).filter(Boolean).length;
+  const english = (text.match(ENGLISH) ?? []).length;
   // "po" alone doesn't make a message Tagalog: "Sorry po, the price is as listed" is English.
   const tagalog = (text.match(TAGALOG) ?? []).filter((w) => !/^(po|opo)$/i.test(w)).length;
-  return words >= 4 && tagalog <= Math.floor(words / 12) ? "English" : "Taglish";
+  return english >= 1 && english > tagalog * 2 ? "English" : "Taglish";
+}
+
+/** The text has a Tagalog word besides "po" (a Taglish reply, not English with "po" sprinkled in). */
+export function hasTagalog(text: string): boolean {
+  return (text.match(TAGALOG) ?? []).some((w) => !/^(po|opo|p|d|b|s|q)$/i.test(w));
 }
 
 function detailsBlock(listings: ListingFacts[] | undefined): string {
@@ -188,7 +202,7 @@ export function buildPrompt(opts: {
     "",
     replyLanguage(opts.messages) === "English"
       ? "The buyer wrote in English. Write the shop's next reply in English."
-      : "Write the shop's next reply in natural Taglish, with \"po\".",
+      : "The buyer wrote in Tagalog or Taglish. Answer their question in natural Taglish with \"po\", not in English.",
   ].join("\n");
   return [
     { role: "system", content: RULES + ownerRules(opts.answers) },

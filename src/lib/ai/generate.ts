@@ -2,7 +2,7 @@ import type { OrderPanel } from "@/lib/chats/types";
 import { sizeRangesOf } from "./fact-check";
 import type { ListingFacts } from "./listing";
 import { checkReply, type CheckReason } from "./output-check";
-import { buildPrompt, groundingText, parseReply, shopFactsText, type PromptAnswer, type PromptMessage } from "./prompt";
+import { buildPrompt, groundingText, hasTagalog, parseReply, replyLanguage, shopFactsText, type PromptAnswer, type PromptMessage } from "./prompt";
 import { complete, type Attempt, type CompletionDeps } from "./providers";
 
 /**
@@ -17,6 +17,20 @@ export interface ReplyUsage {
   tokensIn: number;
   tokensOut: number;
   latencyMs: number;
+}
+
+/** The reply is in the buyer's language: Taglish buyers get Tagalog words, English buyers get English. */
+export function checkLanguage(
+  reply: string,
+  want: "English" | "Taglish"
+): { ok: true } | { ok: false; reason: CheckReason; label: string } {
+  if (want === "Taglish" && !hasTagalog(reply)) {
+    return { ok: false, reason: "language", label: "it replied in English to a Taglish message (write it in Taglish with po)" };
+  }
+  if (want === "English" && replyLanguage([{ sender: "BUYER", kind: "TEXT", text: reply, card: null }]) !== "English") {
+    return { ok: false, reason: "language", label: "it replied in Taglish to an English message (write it in English)" };
+  }
+  return { ok: true };
 }
 
 export interface BlockedReply {
@@ -55,6 +69,7 @@ export async function generateReply(
   const facts = groundingText({ answers: input.answers, order: input.order, messages: input.messages, listings });
   const shopFacts = shopFactsText({ answers: input.answers, order: input.order, listings });
   const sizeRanges = sizeRangesOf(listings);
+  const wantLang = replyLanguage(input.messages);
   // The buyer's messages since the shop last spoke.
   const lastShop = input.messages.map((m) => m.sender).lastIndexOf("SELLER");
   const buyerText = input.messages
@@ -97,8 +112,9 @@ export async function generateReply(
       sizeRanges,
       orderStatus: input.order?.statusLabel ?? null,
     });
-    if (verdict.ok) return { ok: true, ...parsed, usage, blocked, attempts };
-    blocked.push({ reason: verdict.reason, label: verdict.label, text: parsed.text, usage });
+    const lang = verdict.ok ? checkLanguage(parsed.text, wantLang) : verdict;
+    if (lang.ok) return { ok: true, ...parsed, usage, blocked, attempts };
+    blocked.push({ reason: lang.reason, label: lang.label, text: parsed.text, usage });
   }
   return { ok: false, reason: "blocked", label: blocked[blocked.length - 1]?.label, blocked, attempts };
 }
