@@ -9,8 +9,10 @@ import {
   DEV_BUILD_ID,
   decideUpdate,
   isChunkLoadError,
+  parseSeenId,
   parseVersionResponse,
   releasesSince,
+  unseenReleases,
   type UpdateKind,
 } from "@/lib/update-check";
 
@@ -34,6 +36,25 @@ function formatDate(date: string) {
 }
 
 const PREVIEW_PARAM = "preview-update";
+/** Newest release id this device has already shown in the sheet. */
+const SEEN_KEY = "kyna_seen_release";
+
+function readSeen(): number | null {
+  try {
+    return parseSeenId(window.localStorage.getItem(SEEN_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function writeSeen(id: number) {
+  try {
+    const prev = readSeen();
+    if (prev === null || id > prev) window.localStorage.setItem(SEEN_KEY, String(id));
+  } catch {
+    // Private mode or storage full: worst case the notes show again.
+  }
+}
 
 function reloadApp() {
   // Drop the preview flag, or the reload would show the preview again.
@@ -49,18 +70,23 @@ function reloadApp() {
 /**
  * Home-screen apps and long-lived tabs keep running the old JS after a deploy.
  * This polls /api/version and, when a newer build is live, shows release notes
- * (major) or a small refresh banner (minor). Mount once in the root layout.
+ * (major) or a small refresh banner (minor). It also shows "What's new" once
+ * when the app loads a release this device hasn't shown yet, so people who
+ * open an already-updated app still see the notes. Mount once in the root layout.
  */
 export function UpdatePrompt() {
   const [kind, setKind] = useState<UpdateKind>("none");
   const [releases, setReleases] = useState<Release[]>([]);
   const [sheetOpen, setSheetOpen] = useState(false);
+  /** "update": a newer build is live. "whatsNew": already on it, just showing notes. */
+  const [mode, setMode] = useState<"update" | "whatsNew">("update");
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
   const snoozedUntil = useRef(0);
   const lastCheckAt = useRef(0);
   const hiddenAt = useRef<number | null>(null);
   const inFlight = useRef(false);
+  const serverReleaseId = useRef(0);
 
   const raise = useCallback((next: UpdateKind) => {
     setKind((prev) => (RANK[next] > RANK[prev] ? next : prev));
@@ -82,6 +108,8 @@ export function UpdatePrompt() {
         if (next === "none") return;
         raise(next);
         if (next === "major") {
+          serverReleaseId.current = server.releaseId;
+          setMode("update");
           setReleases(releasesSince(server.releases, CLIENT.releaseId));
           if (Date.now() >= snoozedUntil.current) setSheetOpen(true);
         }
@@ -94,16 +122,32 @@ export function UpdatePrompt() {
     [raise]
   );
 
-  // Preview without a deploy: add ?preview-update=major (or minor) to any URL.
+  // Preview without a deploy: add ?preview-update=major, minor, or new to any URL.
+  // Otherwise show "What's new" for releases this device hasn't shown yet.
   useEffect(() => {
     const preview = new URLSearchParams(window.location.search).get(PREVIEW_PARAM);
     if (preview === "major") {
       setReleases(RELEASES.slice(0, 3));
       setKind("major");
       setSheetOpen(true);
-    } else if (preview === "minor") {
-      setKind("minor");
+      return;
     }
+    if (preview === "minor") {
+      setKind("minor");
+      return;
+    }
+    if (preview === "new") {
+      setReleases(RELEASES.slice(0, 1));
+      setMode("whatsNew");
+      setSheetOpen(true);
+      return;
+    }
+    if (CLIENT.buildId === DEV_BUILD_ID) return;
+    const unseen = unseenReleases(RELEASES, readSeen());
+    if (unseen.length === 0) return;
+    setReleases(unseen);
+    setMode("whatsNew");
+    setSheetOpen(true);
   }, []);
 
   useEffect(() => {
@@ -167,13 +211,31 @@ export function UpdatePrompt() {
     setSheetOpen(false);
   }, []);
 
+  const gotIt = useCallback(() => {
+    writeSeen(LATEST_RELEASE_ID);
+    setSheetOpen(false);
+  }, []);
+
+  // They've just read these notes, so don't show them again after the reload.
+  const refreshFromSheet = useCallback(() => {
+    if (serverReleaseId.current) writeSeen(serverReleaseId.current);
+    reloadApp();
+  }, []);
+
+  const whatsNew = mode === "whatsNew";
   const showBanner = kind !== "none" && !sheetOpen && !bannerDismissed;
 
   return (
     <>
-      <Sheet open={sheetOpen} onClose={later} title="New update available">
+      <Sheet
+        open={sheetOpen}
+        onClose={whatsNew ? gotIt : later}
+        title={whatsNew ? "What's new" : "New update available"}
+      >
         <p className="text-[15px] leading-relaxed text-ink-2">
-          A newer version of Kyna Ops is ready. Refresh to start using it.
+          {whatsNew
+            ? "Kyna Ops has been updated. Here's what changed."
+            : "A newer version of Kyna Ops is ready. Refresh to start using it."}
         </p>
 
         {releases.length > 0 && (
@@ -195,13 +257,21 @@ export function UpdatePrompt() {
         )}
 
         <div className="mt-6 flex flex-col gap-2">
-          <Button full onClick={reloadApp}>
-            <RefreshCw className="h-[18px] w-[18px]" strokeWidth={2.4} />
-            Refresh now
-          </Button>
-          <Button full variant="plain" onClick={later}>
-            Later
-          </Button>
+          {whatsNew ? (
+            <Button full onClick={gotIt}>
+              Got it
+            </Button>
+          ) : (
+            <>
+              <Button full onClick={refreshFromSheet}>
+                <RefreshCw className="h-[18px] w-[18px]" strokeWidth={2.4} />
+                Refresh now
+              </Button>
+              <Button full variant="plain" onClick={later}>
+                Later
+              </Button>
+            </>
+          )}
         </div>
       </Sheet>
 

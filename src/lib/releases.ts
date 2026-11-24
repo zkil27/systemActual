@@ -3,7 +3,8 @@
  *
  * When you push a major update to main, add an entry at the TOP of this list
  * (next `id`, today's date) in the same commit. Open copies of the app will
- * show these notes and ask the user to refresh.
+ * show these notes and ask the user to refresh. Devices that open the new
+ * version directly see the same notes once, as "What's new".
  *
  * A deploy with no new entry counts as a minor update: open copies only get a
  * small "Update available · Refresh" banner.
@@ -18,6 +19,15 @@ export type Release = {
 };
 
 export const RELEASES: Release[] = [
+  {
+    id: 4,
+    date: "2026-11-24",
+    title: "What's new after updates",
+    changes: [
+      "When you open the app after an update, a What's new sheet shows what changed. Tap Got it to close it.",
+      "In Chats, the reply box now sits right on top of the keyboard, without the empty gap.",
+    ],
+  },
   {
     id: 3,
     date: "2026-11-24",

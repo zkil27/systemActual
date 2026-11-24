@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   decideUpdate,
   isChunkLoadError,
+  parseSeenId,
   parseVersionResponse,
   releasesSince,
+  unseenReleases,
 } from "@/lib/update-check";
 import type { Release } from "@/lib/releases";
 
@@ -40,6 +42,28 @@ describe("releasesSince", () => {
 
   it("returns nothing when the client is current", () => {
     expect(releasesSince([rel(2), rel(1)], 2)).toEqual([]);
+  });
+});
+
+describe("unseenReleases", () => {
+  it("shows only the newest release on a device that has never recorded one", () => {
+    expect(unseenReleases([rel(2), rel(4), rel(3)], null).map((r) => r.id)).toEqual([4]);
+  });
+  it("shows every release newer than the last one seen, newest first", () => {
+    expect(unseenReleases([rel(2), rel(5), rel(4), rel(3)], 3).map((r) => r.id)).toEqual([5, 4]);
+  });
+  it("shows nothing once the newest release has been seen", () => {
+    expect(unseenReleases([rel(3), rel(2)], 3)).toEqual([]);
+  });
+});
+
+describe("parseSeenId", () => {
+  it("reads stored ids and rejects junk", () => {
+    expect(parseSeenId("3")).toBe(3);
+    expect(parseSeenId(null)).toBeNull();
+    expect(parseSeenId("abc")).toBeNull();
+    expect(parseSeenId("-1")).toBeNull();
+    expect(parseSeenId("1.5")).toBeNull();
   });
 });
 

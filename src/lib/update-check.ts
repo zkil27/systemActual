@@ -26,6 +26,24 @@ export function releasesSince(releases: Release[], clientReleaseId: number): Rel
   return releases.filter((r) => r.id > clientReleaseId).sort((a, b) => b.id - a.id);
 }
 
+/**
+ * Release notes to show as "What's new" when the app is already up to date.
+ * `seenId` is the last release this device has shown; null means none recorded
+ * yet, in which case only the newest release is shown.
+ */
+export function unseenReleases(releases: Release[], seenId: number | null): Release[] {
+  const sorted = [...releases].sort((a, b) => b.id - a.id);
+  if (seenId === null) return sorted.slice(0, 1);
+  return sorted.filter((r) => r.id > seenId).slice(0, 5);
+}
+
+/** Parse a stored seen-release id; anything invalid counts as not recorded. */
+export function parseSeenId(raw: string | null): number | null {
+  if (raw === null) return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
 /** Errors thrown when an old bundle asks for a JS chunk the new deploy no longer serves. */
 export function isChunkLoadError(value: unknown): boolean {
   const text =

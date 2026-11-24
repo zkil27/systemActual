@@ -25,17 +25,26 @@ const POLL_TIMEOUT_MS = 10_000;
 const SHEET_CLOSE_MS = 320;
 /** Within this many px of the bottom counts as "reading the newest message". */
 const NEAR_BOTTOM_PX = 96;
+/** Viewport shrinking by more than this counts as the on-screen keyboard being open. */
+const KEYBOARD_MIN_PX = 120;
 
 type Meta = Omit<ChatThread, "messages">;
 type Outgoing = { text: string } | { file: File | null };
 
 /** The phone keyboard shrinks the visual viewport, not the layout one. Keep the composer above it. */
 function useVisualViewport(enabled: boolean) {
-  const [vv, setVv] = useState<{ height: number; top: number } | null>(null);
+  const [vv, setVv] = useState<{ height: number; top: number; keyboardOpen: boolean } | null>(null);
   useEffect(() => {
     const v = enabled ? window.visualViewport : null;
     if (!v) return;
-    const update = () => setVv({ height: v.height, top: v.offsetTop });
+    // The layout viewport keeps its height when the keyboard opens, so a big
+    // shortfall means the keyboard is covering the home-indicator area.
+    const update = () =>
+      setVv({
+        height: v.height,
+        top: v.offsetTop,
+        keyboardOpen: document.documentElement.clientHeight - v.height > KEYBOARD_MIN_PX,
+      });
     update();
     v.addEventListener("resize", update);
     v.addEventListener("scroll", update);
@@ -480,7 +489,7 @@ export function ChatThreadView({
             onSend={sendText}
             onPickPhoto={pickPhoto}
             preparingPhoto={preparingPhoto}
-            safeBottom={full}
+            safeBottom={full && !vv?.keyboardOpen}
             allowPhotos={meta.canSendPhotos}
           />
         ) : (
