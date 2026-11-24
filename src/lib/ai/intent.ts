@@ -75,11 +75,29 @@ export function isHoldingReply(text: string | null | undefined): boolean {
 export function classifyIntents(texts: string[], opts: { hasOrder?: boolean } = {}): AiTopic[] {
   const out: AiTopic[] = [];
   for (const t of texts) {
-    const topic = classifyIntent(t, opts);
-    if (!out.includes(topic)) out.push(topic);
+    // A complaint split across a comma ("mali po, yung size") is still a complaint.
+    if (classifyIntent(t, opts) === "returns" && !out.includes("returns")) out.push("returns");
+    // "COD po ba and ilang araw shipping?" asks two things.
+    for (const part of splitQuestions(t)) {
+      const topic = classifyIntent(part, opts);
+      if (!out.includes(topic)) out.push(topic);
+    }
   }
   // "other" alongside a real topic is usually filler ("nag order ako sa live").
   return out.length > 1 ? out.filter((t) => t !== "other") : out;
+}
+
+/**
+ * One message can hold several questions: split on question marks, sentence
+ * ends, commas and joining words ("and", "tapos", "at saka", "also", "+").
+ * Short leftovers ("po") are dropped; a message with no split stays whole.
+ */
+export function splitQuestions(text: string): string[] {
+  const parts = normalizeText(text)
+    .split(/[?!.;,\n]+|\s(?:and|tapos|at\s+saka|atsaka|saka|also|plus|\+|&)\s/i)
+    .map((p) => p.trim())
+    .filter((p) => p.replace(/\b(po|ba|pa|na)\b/gi, "").trim().length >= 3);
+  return parts.length ? parts : [normalizeText(text)];
 }
 
 /**

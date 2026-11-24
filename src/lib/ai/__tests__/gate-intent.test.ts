@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { needsAnswer, type GateMessage } from "@/lib/ai/gate";
-import { classifyIntent, classifyIntents, isAckOrGreeting, isHandoffNotice, isHoldingReply } from "@/lib/ai/intent";
+import { classifyIntent, classifyIntents, isAckOrGreeting, isHandoffNotice, isHoldingReply, splitQuestions } from "@/lib/ai/intent";
 import { orderTemplate, shopAnswerTemplate, templateDraft, templateDraftFor } from "@/lib/ai/templates";
 import { basisLabel, draftId } from "@/lib/ai/drafts";
 import type { OrderPanel } from "@/lib/chats/types";
@@ -155,6 +155,24 @@ describe("templates", () => {
     expect(classifyIntents(["Pwede po COD?", "Pa-check naman po ng order ko please"], { hasOrder: true })).toEqual(["cod", "order"]);
     expect(classifyIntents(["kelan po darating?", "nag order po ako nung live kahapon"], { hasOrder: true })).toEqual(["order"]);
     expect(classifyIntents(["Hello testing"], {})).toEqual(["other"]);
+  });
+
+  it("finds two questions in one message", () => {
+    expect(classifyIntents(["Cod po ba and ilang araw shipping?"])).toEqual(["cod", "shipping"]);
+    expect(classifyIntents(["may M pa po? tapos COD po ba"])).toEqual(["stock", "cod"]);
+    expect(classifyIntents(["Hi po, pwede COD?"])).toEqual(["cod"]);
+    // Tracking with J&T isn't split on the "&".
+    expect(classifyIntents(["asan na po order ko sa J&T"], { hasOrder: true })).toEqual(["order"]);
+  });
+
+  it("still sees a complaint split by a comma", () => {
+    expect(classifyIntents(["mali po, yung size na dumating"], { hasOrder: true })).toContain("returns");
+    expect(classifyIntents(["ok na po, salamat"])).toEqual(["other"]);
+  });
+
+  it("splits questions on joining words", () => {
+    expect(splitQuestions("Cod po ba and ilang araw shipping?")).toEqual(["Cod po ba", "ilang araw shipping"]);
+    expect(splitQuestions("po?")).toEqual(["po?"]);
   });
 
   it("gives the same draft id for the same buyer message", () => {
