@@ -20,6 +20,20 @@ const SIZE =
 const PRODUCT =
   /\b(tela|fabric|material|makapal|manipis|see[\s-]?through|stretch(y|able)?|garter|lining|tahi|quality|original|actual\s+(pic|photo)|real\s+(pic|photo)|wash|labhan|plantsa|kulay\s+ba|color\s+ba|kumukupas|fade)\b/i;
 
+// Asking for a lower price or something free. No shop answer covers it, so
+// a person or the AI answers ("the price is as listed"), never a template.
+const PRICE_ASK =
+  /\b(discount(s|ed)?|diskwento|less|tawad|bawas|libre(ng)?|free\s*(shipping|sf|gift|item)|freebies?|vouchers?|promo(\s*code)?|coupons?|cash\s?back)\b|\d+\s*%|%\s*off\b/i;
+// Trying to get the assistant to drop its rules.
+const TRICK =
+  /\b(ignore|disregard|forget)\b[^.!?]{0,30}\b(rules?|instructions?|prompt|previous|above)\b|\bsystem\s+prompt\b|\byou\s+are\s+now\b|\bpretend\s+(to\s+be|you)\b|\bact\s+as\b/i;
+
+/** A discount or freebie request, or an attempt to trick the assistant. */
+export function isPriceAskOrTrick(text: string | null | undefined): boolean {
+  const s = normalizeText(text);
+  return PRICE_ASK.test(s) || TRICK.test(s);
+}
+
 const GREETING = /^(hi+|hello+|helo|hey|good\s+(morning|afternoon|evening|day)|magandang\s+(umaga|hapon|gabi)|hu?mm*)[\s!.,?po]*$/i;
 const ACK =
   /^(ok(ay|i)?|k+|sige|noted|salamat|thank(s| you)?|ty|thx|tnx|ty po|po|yes|yup|yep|opo|oo|done|received|nareceive|natanggap|got it|wow|nice|ganda|ayos|sige po|okay po|ok po|salamat po|thank you po|thanks po)[\s!.,?😊🙏❤️👍🥰😍]*$/i;
@@ -83,7 +97,9 @@ export function classifyIntents(texts: string[], opts: { hasOrder?: boolean } = 
       if (!out.includes(topic)) out.push(topic);
     }
   }
-  // "other" alongside a real topic is usually filler ("nag order ako sa live").
+  // "other" alongside a real topic is usually filler ("nag order ako sa live"),
+  // but a discount ask or a trick is a real question no template answers.
+  if (texts.some(isPriceAskOrTrick)) return out;
   return out.length > 1 ? out.filter((t) => t !== "other") : out;
 }
 
@@ -107,6 +123,7 @@ export function splitQuestions(text: string): string[] {
 export function classifyIntent(text: string, opts: { hasOrder?: boolean } = {}): AiTopic {
   const s = normalizeText(text);
   if (RETURNS.test(s)) return "returns";
+  if (isPriceAskOrTrick(s)) return "other";
   if (COD.test(s)) return "cod";
   const asksArrival = /\b(kelan|kailan|when|arrive|darating|dadating|dumating|ilang\s+araw|how\s+many\s+days)\b/i.test(s);
   if (ORDER.test(s) && !(asksArrival && !opts.hasOrder && !/order|parcel|package|tracking|track/i.test(s))) {
