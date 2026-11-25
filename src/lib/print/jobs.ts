@@ -29,13 +29,56 @@ export function applyReport(
     : { ok: true, data: { status: PrintJobStatus.FAILED, error: report.error.slice(0, 500) } };
 }
 
-/** Requeues jobs a PC claimed but never reported (crash, power cut). Run from worker tick, not idle polls. */
+/** A job handed to the PC this many times without a report stops retrying and shows as failed. */
+export const MAX_PRINT_ATTEMPTS = 5;
+export const GAVE_UP_ERROR = `Printer didn't confirm after ${MAX_PRINT_ATTEMPTS} tries.`;
+
+/** Splits stale claimed jobs into ones to try again and ones to give up on. */
+export function planStaleJobs<T extends { attempts: number }>(
+  jobs: T[],
+  maxAttempts = MAX_PRINT_ATTEMPTS
+): { requeue: T[]; giveUp: T[] } {
+  const requeue: T[] = [];
+  const giveUp: T[] = [];
+  for (const job of jobs) (job.attempts >= maxAttempts ? giveUp : requeue).push(job);
+  return { requeue, giveUp };
+}
+
+/**
+ * Requeues jobs a PC claimed but never reported (crash, power cut). A job that
+ * was already handed out MAX_PRINT_ATTEMPTS times is marked failed instead, so
+ * one bad label can't loop forever. Run from worker tick, not idle polls.
+ */
 export async function requeueStalePrintJobs(now: Date = new Date()): Promise<number> {
-  const res = await prisma.printJob.updateMany({
+  const stale = await prisma.printJob.findMany({
     where: { status: PrintJobStatus.PRINTING, claimedAt: { lt: new Date(now.getTime() - STALE_CLAIM_MS) } },
-    data: { status: PrintJobStatus.QUEUED, deviceId: null, claimedAt: null },
+    select: { id: true, attempts: true, kind: true, waveId: true, packageId: true, batchPackageIds: true },
   });
-  return res.count;
+  if (!stale.length) return 0;
+  const { requeue, giveUp } = planStaleJobs(stale);
+
+  if (requeue.length) {
+    await prisma.printJob.updateMany({
+      where: { id: { in: requeue.map((j) => j.id) }, status: PrintJobStatus.PRINTING },
+      data: { status: PrintJobStatus.QUEUED, deviceId: null, claimedAt: null },
+    });
+  }
+  if (giveUp.length) {
+    await prisma.printJob.updateMany({
+      where: { id: { in: giveUp.map((j) => j.id) }, status: PrintJobStatus.PRINTING },
+      data: { status: PrintJobStatus.FAILED, deviceId: null, claimedAt: null, error: GAVE_UP_ERROR },
+    });
+    let waveTouched = false;
+    for (const job of giveUp) {
+      if (job.kind !== PrintJobKind.LABEL || !job.waveId) continue;
+      const pkgIds = job.batchPackageIds.length > 0 ? job.batchPackageIds : job.packageId ? [job.packageId] : [];
+      if (!pkgIds.length) continue;
+      await markLabelFailed(job.waveId, pkgIds, GAVE_UP_ERROR);
+      waveTouched = true;
+    }
+    if (waveTouched) await finishDoneWaves(now);
+  }
+  return stale.length;
 }
 
 export function computeNextPollMs(jobCount: number, runningWaveCount: number): number {

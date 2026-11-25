@@ -28,7 +28,10 @@ import { runLocked } from "./lock";
  * next tick continues where this one stopped.
  */
 export const TICK_BUDGET_MS = 90_000;
-const LEASE_MS = 115_000;
+/** Longer than the route's 120 s maxDuration, so a slow tick is killed before its lease can expire under it. */
+export const LEASE_MS = 135_000;
+/** A rerun pass only starts with at least this long left. */
+const MIN_PASS_MS = 20_000;
 const STOCK_PUSH_FALLBACK_MS = 5 * 60_000;
 const STOCK_PUSH_LOCK_ID = "stock-push-last";
 
@@ -62,6 +65,11 @@ export interface TickResult {
  * return requests) get a slice instead of the whole budget, so a shop that's
  * days behind still gets its failed deliveries and courier checks every tick.
  */
+/** True while at least `minMs` is left before `deadline`. Tail steps skip themselves otherwise; the next tick runs them. */
+export function hasTime(deadline: number, minMs: number, now = Date.now()): boolean {
+  return deadline - now >= minMs;
+}
+
 export function sliceDeadline(deadline: number, fraction: number, now = Date.now()): number {
   return Math.min(deadline, now + Math.max(0, deadline - now) * fraction);
 }
@@ -213,21 +221,8 @@ async function tickOnce(
     console.error("[tick] waves", err);
   }
 
-  // Keep the ledger's to-ship list matching Seller Center (at most every 5 min).
-  try {
-    if (await claimReadyReconcile()) {
-      await withSpan("worker.tick.readyReconcile", () => reconcileReadyOrders(sliceDeadline(deadline, 0.6)));
-    }
-  } catch (err) {
-    console.error("[tick] ready reconcile", err);
-  }
-
-  try {
-    await maybeAutoBumpShopee();
-  } catch (err) {
-    console.error("[tick] shopee bump", err);
-  }
-
+  // Owner-facing messages come before the optional steps, so a long tick
+  // never makes the 8 PM brief or an urgent alert wait for the next one.
   try {
     await sendDailyBriefIfDue();
   } catch (err) {
@@ -240,22 +235,41 @@ async function tickOnce(
     console.error("[tick] proactive alerts", err);
   }
 
+  // Keep the ledger's to-ship list matching Seller Center (at most every 5 min).
+  try {
+    if (hasTime(deadline, 15_000) && (await claimReadyReconcile())) {
+      await withSpan("worker.tick.readyReconcile", () => reconcileReadyOrders(sliceDeadline(deadline, 0.6)));
+    }
+  } catch (err) {
+    console.error("[tick] ready reconcile", err);
+  }
+
+  try {
+    if (hasTime(deadline, 10_000)) await maybeAutoBumpShopee();
+  } catch (err) {
+    console.error("[tick] shopee bump", err);
+  }
+
   try {
     // TikTok buyer chats: changed chats only, at most once a minute per shop.
-    await withSpan("worker.tick.chats", () => syncAllTikTokChats(sliceDeadline(deadline, 0.3)));
+    if (hasTime(deadline, 10_000)) {
+      await withSpan("worker.tick.chats", () => syncAllTikTokChats(sliceDeadline(deadline, 0.3)));
+    }
   } catch (err) {
     console.error("[tick] chats", err);
   }
 
   try {
     // Sends any grouped "new buyer messages" alert held back by the 2-minute limit.
-    await notifyNewBuyerMessage({ count: 0 });
+    if (hasTime(deadline, 5_000)) await notifyNewBuyerMessage({ count: 0 });
   } catch (err) {
     console.error("[tick] chat alerts", err);
   }
 
+  // The daily prune marks itself done only after it runs, so skipping it here
+  // just moves it to the next tick with time to spare.
   const [pruneRes, runningWaves] = await Promise.all([
-    pruneDailyData(),
+    hasTime(deadline, 20_000) ? pruneDailyData() : Promise.resolve({ orders: 0 }),
     prisma.wave.count({ where: { status: WaveStatus.RUNNING } }),
   ]);
 
@@ -279,6 +293,7 @@ export async function runTick(
     id: "tick",
     leaseMs: LEASE_MS,
     deadline,
+    minPassMs: MIN_PASS_MS,
     fn: () => tickOnce(deadline, pass++ === 0 ? opts : undefined),
   });
   const last = run.passes[run.passes.length - 1];

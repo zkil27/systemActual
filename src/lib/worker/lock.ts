@@ -64,6 +64,8 @@ export async function runLocked<T>(opts: {
   fn: () => Promise<T>;
   store?: LockStore;
   now?: () => Date;
+  /** A rerun pass only starts with at least this much time left before the deadline. */
+  minPassMs?: number;
 }): Promise<LockedRunResult<T>> {
   const store = opts.store ?? prismaLockStore;
   const now = opts.now ?? (() => new Date());
@@ -80,7 +82,10 @@ export async function runLocked<T>(opts: {
     do {
       passes.push(await opts.fn());
       await store.extend(opts.id, holder, new Date(now().getTime() + opts.leaseMs));
-    } while (now().getTime() < opts.deadline && (await store.takeRerun(opts.id, holder)));
+    } while (
+      now().getTime() < opts.deadline - (opts.minPassMs ?? 0) &&
+      (await store.takeRerun(opts.id, holder))
+    );
   } finally {
     await store.release(opts.id, holder, now());
   }

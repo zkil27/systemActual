@@ -29,7 +29,11 @@ vi.mock("@/lib/waves/run", () => ({
 import {
   claimJobs,
   clearPrintQueue,
+  GAVE_UP_ERROR,
+  MAX_PRINT_ATTEMPTS,
+  planStaleJobs,
   reportJob,
+  requeueStalePrintJobs,
   sumPrintedJobParcels,
 } from "@/lib/print/jobs";
 
@@ -150,5 +154,50 @@ describe("claimJobs", () => {
 
     // Ensure unused WaveItemStatus import isn't flagged
     expect(WaveItemStatus.FAILED).toBe("FAILED");
+  });
+});
+
+describe("planStaleJobs", () => {
+  it("retries jobs below the cap and gives up at the cap", () => {
+    const plan = planStaleJobs([
+      { id: "a", attempts: 1 },
+      { id: "b", attempts: MAX_PRINT_ATTEMPTS - 1 },
+      { id: "c", attempts: MAX_PRINT_ATTEMPTS },
+      { id: "d", attempts: MAX_PRINT_ATTEMPTS + 3 },
+    ]);
+    expect(plan.requeue.map((j) => j.id)).toEqual(["a", "b"]);
+    expect(plan.giveUp.map((j) => j.id)).toEqual(["c", "d"]);
+  });
+});
+
+describe("requeueStalePrintJobs", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("does nothing when no job is stuck", async () => {
+    mockPrisma.printJob.findMany.mockResolvedValue([]);
+    expect(await requeueStalePrintJobs(new Date())).toBe(0);
+    expect(mockPrisma.printJob.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("requeues fresh jobs and fails capped wave labels so the wave can finish", async () => {
+    mockPrisma.printJob.findMany.mockResolvedValue([
+      { id: "j1", attempts: 1, kind: PrintJobKind.LABEL, waveId: "w1", packageId: "p1", batchPackageIds: [] },
+      { id: "j2", attempts: MAX_PRINT_ATTEMPTS, kind: PrintJobKind.LABEL, waveId: "w1", packageId: null, batchPackageIds: ["p2", "p3"] },
+      { id: "j3", attempts: MAX_PRINT_ATTEMPTS, kind: PrintJobKind.TEST, waveId: null, packageId: null, batchPackageIds: [] },
+    ]);
+    mockPrisma.printJob.updateMany.mockResolvedValue({ count: 1 });
+
+    expect(await requeueStalePrintJobs(new Date())).toBe(3);
+
+    const calls = mockPrisma.printJob.updateMany.mock.calls.map((c) => c[0]);
+    expect(calls[0].where.id.in).toEqual(["j1"]);
+    expect(calls[0].data.status).toBe(PrintJobStatus.QUEUED);
+    expect(calls[1].where.id.in).toEqual(["j2", "j3"]);
+    expect(calls[1].data).toMatchObject({ status: PrintJobStatus.FAILED, error: GAVE_UP_ERROR });
+    expect(mockMarkLabelFailed).toHaveBeenCalledTimes(1);
+    expect(mockMarkLabelFailed).toHaveBeenCalledWith("w1", ["p2", "p3"], GAVE_UP_ERROR);
+    expect(mockFinishDoneWaves).toHaveBeenCalledTimes(1);
   });
 });

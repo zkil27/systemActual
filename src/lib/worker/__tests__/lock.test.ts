@@ -99,6 +99,42 @@ describe("runLocked", () => {
   });
 });
 
+describe("runLocked minPassMs", () => {
+  it("skips a rerun when too little time is left for a useful pass", async () => {
+    const { store, rows } = memoryStore();
+    const res = await runLocked({
+      id: "tick",
+      leaseMs: 70_000,
+      deadline: Date.now() + 5_000,
+      minPassMs: 20_000,
+      store,
+      fn: async () => {
+        rows.get("tick")!.rerun = true;
+        return "once";
+      },
+    });
+    expect(res.passes).toEqual(["once"]);
+  });
+
+  it("still reruns with enough time left", async () => {
+    const { store, rows } = memoryStore();
+    let n = 0;
+    const res = await runLocked({
+      id: "tick",
+      leaseMs: 70_000,
+      deadline: Date.now() + 60_000,
+      minPassMs: 20_000,
+      store,
+      fn: async () => {
+        n++;
+        if (n === 1) rows.get("tick")!.rerun = true;
+        return n;
+      },
+    });
+    expect(res.passes).toEqual([1, 2]);
+  });
+});
+
 describe("isWorkerAuthorized", () => {
   const secret = "s".repeat(40);
   it("accepts only the exact bearer secret", () => {
