@@ -46,7 +46,7 @@ export function ReturnItemCheck({
   const [openKey, setOpenKey] = useState<string | null>(null);
 
   function pick(line: StaffSafeParcelLine, problem: ItemProblem | null) {
-    haptic(10);
+    haptic("select");
     if (!problem) {
       onMarksChange(clearMark(marks, line.lineKey));
       setOpenKey(null);
@@ -132,7 +132,7 @@ export function ReturnItemCheck({
                               key={c.label}
                               type="button"
                               onClick={() => {
-                                haptic(10);
+                                haptic("select");
                                 onMarksChange(setMarkCount(marks, line, c.count));
                                 setOpenKey(null);
                               }}

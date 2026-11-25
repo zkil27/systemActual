@@ -317,7 +317,7 @@ function OrdersInner() {
                         <button
                           type="button"
                           onClick={() => setOpenReturn(r.id)}
-                          className={`pressable-row flex min-h-14 w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-surface-subtle ${
+                          className={`pressable-row flex min-h-14 w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-surface-subtle active:bg-surface-muted ${
                             i === 0 ? "" : "border-t border-hairline"
                           }`}
                         >

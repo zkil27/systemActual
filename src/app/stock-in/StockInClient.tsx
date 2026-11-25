@@ -7,6 +7,7 @@ import { Button, Group } from "@/components/ui/Button";
 import { ItemThumb } from "@/components/ui/ItemThumb";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { Toaster, toast } from "@/components/ui/Toast";
+import { pulseAmbient } from "@/lib/ui/ambient";
 import { haptic } from "@/lib/ui/motion";
 
 type StockMode = "SUPPLIER_IN" | "EMPTY_SHELF" | "DEFECTIVE";
@@ -167,7 +168,8 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
         toast(data.error || "Couldn't save", "error");
         return;
       }
-      haptic(12);
+      haptic("success");
+      pulseAmbient("success");
       if (mode === "SUPPLIER_IN") {
         toast(`Added ${qty} × ${picked.name} (${picked.label})`);
       } else if (mode === "EMPTY_SHELF") {
@@ -189,7 +191,7 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
   }
 
   return (
-    <main className="safe-top mx-auto min-h-dvh max-w-lg space-y-5 bg-ground px-4 pb-10 pt-4">
+    <main className="safe-top mx-auto min-h-dvh max-w-lg space-y-5 px-4 pb-10 pt-4">
       <header className="flex items-center gap-2">
         <Link
           href={backHref}
@@ -216,7 +218,7 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
       {unlocked === false && (
         <Group className="space-y-3 p-5">
           <p className="text-[16px] text-ink-2">Unlock with your PIN on the Scan page first.</p>
-          <Link href="/scan" className="block text-[16px] font-bold text-brand">
+          <Link href="/scan" className="pressable-text inline-flex min-h-11 items-center text-[16px] font-bold text-brand">
             Go to Scan
           </Link>
         </Group>

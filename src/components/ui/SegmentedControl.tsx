@@ -1,6 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
+import { haptic } from "@/lib/ui/motion";
 
 interface Option<T extends string> {
   id: T;
@@ -91,9 +92,12 @@ export function SegmentedControl<T extends string>({
             type="button"
             role="tab"
             aria-selected={active}
-            onClick={() => onChange(o.id)}
-            className={`relative z-10 grid place-items-center whitespace-nowrap ${innerRadius} ${padX} ${textSize} transition-colors duration-150 ${
-              active ? "font-bold text-ink" : "font-semibold text-ink-2 hover:text-ink active:text-ink"
+            onClick={() => {
+              if (o.id !== value) haptic("select");
+              onChange(o.id);
+            }}
+            className={`relative z-10 grid place-items-center whitespace-nowrap ${innerRadius} ${padX} ${textSize} transition-[color,opacity] duration-150 ${
+              active ? "font-bold text-ink" : "font-semibold text-ink-2 hover:text-ink active:text-ink active:opacity-60"
             }`}
           >
             {/* Invisible bold copy reserves the bold width, so selecting doesn't shift the layout. */}

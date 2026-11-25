@@ -190,7 +190,7 @@ export default function ProfitPage() {
                   className={`pressable h-10 shrink-0 rounded-full px-4 text-[15px] font-semibold ${
                     active
                       ? "bg-ink text-ink-inverse"
-                      : "text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] active:bg-ink/[0.05]"
+                      : "text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] active:bg-ink/[0.06]"
                   }`}
                 >
                   {monthLabel(m)}

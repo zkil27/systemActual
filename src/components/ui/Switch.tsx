@@ -1,5 +1,7 @@
 "use client";
 
+import { haptic } from "@/lib/ui/motion";
+
 /** iOS-style switch with tactile thumb elongation while pressed. */
 export function Switch({
   checked,
@@ -19,7 +21,10 @@ export function Switch({
       aria-checked={checked}
       aria-label={label}
       disabled={disabled}
-      onClick={() => onChange(!checked)}
+      onClick={() => {
+        haptic("select");
+        onChange(!checked);
+      }}
       className={`group relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50 ${
         checked ? "bg-brand-solid" : "bg-surface-track"
       }`}

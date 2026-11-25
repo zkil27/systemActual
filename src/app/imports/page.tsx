@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FileUp, RefreshCw } from "lucide-react";
+import { FileUp } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Button, Group, SectionHeader } from "@/components/ui/Button";
+import { ComingSoonPill } from "@/components/ui/ComingSoon";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { toast } from "@/components/ui/Toast";
 import { manilaDateTime } from "@/lib/ui/format";
@@ -19,15 +20,14 @@ interface ImportJobItem {
 }
 
 const STORES = [
-  { id: "SHOPEE", label: "Shopee" },
   { id: "TIKTOK", label: "TikTok Shop" },
+  { id: "SHOPEE", label: "Shopee" },
 ] as const;
 
 export default function ImportsPage() {
-  const [platform, setPlatform] = useState<"SHOPEE" | "TIKTOK">("SHOPEE");
+  const [platform, setPlatform] = useState<"SHOPEE" | "TIKTOK">("TIKTOK");
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [simulating, setSimulating] = useState(false);
   const [error, setError] = useState("");
   const [jobs, setJobs] = useState<ImportJobItem[]>([]);
 
@@ -68,26 +68,31 @@ export default function ImportsPage() {
     }
   }
 
-  async function handleSimulate() {
-    setSimulating(true);
-    try {
-      const res = await fetch("/api/demo/simulate", { method: "POST" });
-      const data = await res.json();
-      if (res.ok) toast("Sample data refreshed");
-      else toast(data.error || "Couldn't load sample data", "error");
-    } finally {
-      setSimulating(false);
-    }
-  }
+  const shopeeSoon = platform === "SHOPEE";
 
   return (
     <AppShell title="Upload">
       <div className="space-y-8">
         <form onSubmit={handleUpload} className="space-y-4">
-          <SegmentedControl label="Store" options={STORES} value={platform} onChange={setPlatform} />
+          <SegmentedControl
+            label="Store"
+            options={STORES}
+            value={platform}
+            onChange={(next) => {
+              setError("");
+              setPlatform(next);
+            }}
+          />
 
+          {shopeeSoon ? (
+            <Group className="anim-fade-in flex min-h-40 flex-col items-center justify-center gap-3 px-6 py-8 text-center">
+              <ComingSoonPill />
+              <span className="text-[17px] font-semibold text-ink">Shopee uploads are coming soon</span>
+              <span className="max-w-xs text-[15px] text-ink-3">Shopee is still reviewing Kyna Ops.</span>
+            </Group>
+          ) : (
           <label
-            className={`pressable flex min-h-40 cursor-pointer flex-col items-center justify-center gap-3 rounded-[var(--radius-card)] px-6 py-8 text-center transition-colors ${
+            className={`pressable flex min-h-40 cursor-pointer flex-col items-center justify-center gap-3 rounded-[var(--radius-card)] px-6 py-8 text-center ${
               file
                 ? "bg-brand-soft shadow-[inset_0_0_0_1.5px_var(--color-brand)]"
                 : "bg-surface shadow-[var(--shadow-card)] hover:bg-surface-subtle"
@@ -112,6 +117,7 @@ export default function ImportsPage() {
               }}
             />
           </label>
+          )}
 
           {error && (
             <p role="alert" className="anim-fade-in px-1 text-[15px] font-semibold text-missing-ink">
@@ -119,7 +125,7 @@ export default function ImportsPage() {
             </p>
           )}
 
-          <Button type="submit" size="lg" full disabled={!file || uploading}>
+          <Button type="submit" size="lg" full disabled={!file || uploading || shopeeSoon}>
             {uploading ? "Importing…" : "Import file"}
           </Button>
         </form>
@@ -146,18 +152,6 @@ export default function ImportsPage() {
             </Group>
           </section>
         )}
-
-        <Group>
-          <button
-            type="button"
-            onClick={handleSimulate}
-            disabled={simulating}
-            className="pressable-row flex min-h-[52px] w-full items-center justify-between gap-4 px-4 text-left hover:bg-surface-subtle active:bg-surface-muted"
-          >
-            <span className="text-[17px] text-ink">Refresh sample data</span>
-            <RefreshCw className={`h-5 w-5 text-brand ${simulating ? "anim-spin" : ""}`} />
-          </button>
-        </Group>
       </div>
     </AppShell>
   );

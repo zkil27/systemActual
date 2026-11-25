@@ -3,12 +3,17 @@ import { Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { detectAndParseSpreadsheet } from "@/lib/connectors/csv-importer";
 import { upsertNormalizedReturn } from "@/lib/connectors/normalizer";
-import { ensureDemoConnections } from "@/lib/demo-simulator";
 import { autoLinkAndInitCatalog, ensureGarmentFor } from "@/lib/catalog/garments";
 import { saveOrder } from "@/lib/ledger/store";
 
 export const maxDuration = 60;
 const MAX_IMPORT_BYTES = 10 * 1024 * 1024; // 10 MB
+
+function noShopMessage(platform: Platform): string {
+  return platform === Platform.SHOPEE
+    ? "Shopee uploads are coming soon. Shopee is still reviewing Kyna Ops."
+    : "Connect TikTok Shop in Settings first.";
+}
 
 export async function GET() {
   const jobs = await prisma.importJob.findMany({
@@ -39,20 +44,31 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Rows go onto the real shop for their platform. A platform without one is skipped.
+    const realShops = await prisma.shopConnection.findMany({
+      where: { isDemo: false },
+      select: { id: true, platform: true },
+    });
+    const shopIdFor = (p: Platform) => realShops.find((s) => s.platform === p)?.id ?? null;
+    if (!shopIdFor(defaultPlatform)) {
+      return NextResponse.json({ error: noShopMessage(defaultPlatform) }, { status: 400 });
+    }
+
     const buffer = Buffer.from(await file.arrayBuffer());
     const parsed = detectAndParseSpreadsheet(buffer, defaultPlatform);
 
-    const connections = await ensureDemoConnections();
-    const existingShops = await prisma.shopConnection.findMany();
-    const shopeeConn =
-      existingShops.find((s) => s.platform === Platform.SHOPEE && !s.isDemo) ??
-      connections.shopee;
-    const tiktokConn =
-      existingShops.find((s) => s.platform === Platform.TIKTOK && !s.isDemo) ??
-      connections.tiktok;
-
     let imported = 0;
     let totalRows = 0;
+    let noShop = 0;
+    const missingShops = new Set<Platform>();
+    const shopFor = (p: Platform): string | null => {
+      const id = shopIdFor(p);
+      if (!id) {
+        noShop++;
+        missingShops.add(p);
+      }
+      return id;
+    };
 
     if (parsed.kind === "returns") {
       if (parsed.rows.length === 0) {
@@ -68,7 +84,8 @@ export async function POST(req: NextRequest) {
       });
       const defaultUnitCostPhp = Number(settings?.defaultUnitCostPhp ?? 82);
       for (const row of parsed.rows) {
-        const shopConnectionId = row.platform === Platform.TIKTOK ? tiktokConn.id : shopeeConn.id;
+        const shopConnectionId = shopFor(row.platform);
+        if (!shopConnectionId) continue;
         await upsertNormalizedReturn(
           {
             shopConnectionId,
@@ -100,7 +117,8 @@ export async function POST(req: NextRequest) {
       totalRows = parsed.orders.length + parsed.skipped;
       const seenListings = new Set<string>();
       for (const { platform, order } of parsed.orders) {
-        const shopConnectionId = platform === Platform.TIKTOK ? tiktokConn.id : shopeeConn.id;
+        const shopConnectionId = shopFor(platform);
+        if (!shopConnectionId) continue;
         await saveOrder(shopConnectionId, platform, order, new Date(), { seenListings });
         imported++;
       }
@@ -108,7 +126,8 @@ export async function POST(req: NextRequest) {
       totalRows = parsed.items.length + parsed.skipped;
       const now = new Date();
       for (const item of parsed.items) {
-        const shopConnectionId = item.platform === Platform.TIKTOK ? tiktokConn.id : shopeeConn.id;
+        const shopConnectionId = shopFor(item.platform);
+        if (!shopConnectionId) continue;
         const lv = await prisma.listingVariant.upsert({
           where: {
             shopConnectionId_listingId_variationId: {
@@ -143,19 +162,21 @@ export async function POST(req: NextRequest) {
     }
 
     if (imported === 0) {
+      const [missing] = [...missingShops];
       return NextResponse.json(
-        { error: "No valid rows found in that file." },
+        { error: missing ? noShopMessage(missing) : "No valid rows found in that file." },
         { status: 400 }
       );
     }
 
+    const skipped = parsed.skipped + noShop;
     const job = await prisma.importJob.create({
       data: {
         fileName: file.name,
         sourceHint: `${defaultPlatform}:${parsed.kind.toUpperCase()}`,
         totalRows,
         importedRows: imported,
-        skippedRows: parsed.skipped,
+        skippedRows: skipped,
       },
     });
 
@@ -164,7 +185,7 @@ export async function POST(req: NextRequest) {
       kind: parsed.kind,
       job,
       imported,
-      skipped: parsed.skipped,
+      skipped,
     });
   } catch (err) {
     console.error("[CSV/XLSX import error]", err);

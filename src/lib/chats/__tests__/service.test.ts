@@ -1,37 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
-import { chatVisibility, markChatRead, sumUnread } from "@/lib/chats/service";
+import { listChats, markChatRead, sumUnread } from "@/lib/chats/service";
 
-describe("chatVisibility", () => {
-  const demoShops = [
-    { platform: "SHOPEE", isDemo: true, accessToken: null },
-    { platform: "TIKTOK", isDemo: true, accessToken: null },
-  ];
-
-  it("shows sample chats while no real shop has live chats", () => {
-    const vis = chatVisibility([...demoShops, { platform: "TIKTOK", isDemo: false, accessToken: "t" }]);
-    expect(vis).toEqual({ SHOPEE: { sample: true }, TIKTOK: { sample: true } });
-  });
-
-  it("hides sample chats only for the platform whose real shop is live", () => {
-    const live = (s: { isDemo: boolean; platform: string }) => !s.isDemo && s.platform === "TIKTOK";
-    const vis = chatVisibility([...demoShops, { platform: "TIKTOK", isDemo: false, accessToken: "t" }], live);
-    expect(vis).toEqual({ SHOPEE: { sample: true }, TIKTOK: { sample: false } });
+describe("listChats", () => {
+  it("lists no Shopee chats while Shopee is coming soon", async () => {
+    expect(await listChats("SHOPEE")).toEqual({ items: [], nextCursor: null, comingSoon: true });
   });
 });
 
 describe("sumUnread", () => {
-  it("counts only the chats shown for each platform", () => {
-    const vis = { SHOPEE: { sample: true }, TIKTOK: { sample: false } };
-    const totals = sumUnread(
-      [
-        { platform: "SHOPEE", isDemo: true, unread: 2 },
-        { platform: "SHOPEE", isDemo: true, unread: 1 },
-        { platform: "TIKTOK", isDemo: true, unread: 5 }, // hidden: TikTok is live
-        { platform: "TIKTOK", isDemo: false, unread: 4 },
-      ],
-      vis
-    );
-    expect(totals).toEqual({ SHOPEE: 3, TIKTOK: 4, total: 7 });
+  it("counts real TikTok chats only", () => {
+    const totals = sumUnread([
+      { platform: "SHOPEE", isDemo: false, unread: 2 }, // coming soon
+      { platform: "SHOPEE", isDemo: true, unread: 1 },
+      { platform: "TIKTOK", isDemo: true, unread: 5 }, // sample shop
+      { platform: "TIKTOK", isDemo: false, unread: 4 },
+    ]);
+    expect(totals).toEqual({ SHOPEE: 0, TIKTOK: 4, total: 4 });
   });
 });
 

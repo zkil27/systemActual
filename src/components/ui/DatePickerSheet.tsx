@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Sheet } from "@/components/ui/Sheet";
 import { getManilaTodayStr } from "@/lib/time";
 import { manilaDayLabel } from "@/lib/ui/format";
+import { haptic } from "@/lib/ui/motion";
 
 /*
  * In-app calendar that replaces the browser / iOS / Android date pickers.
@@ -152,12 +153,14 @@ function Picker(props: DatePickerSheetProps) {
   }
 
   function pickMonth(m: number) {
+    haptic("select");
     setDirection(null);
     setMonth(browseYear * 12 + m);
     setView("days");
   }
 
   function pickYear(y: number) {
+    haptic("select");
     setBrowseYear(y);
     setView("months");
   }
@@ -210,6 +213,7 @@ function Picker(props: DatePickerSheetProps) {
   }
 
   function pick(day: string) {
+    haptic("select");
     setFocusDay(day);
     if (!isRange) {
       (props as SingleProps).onChange(day);

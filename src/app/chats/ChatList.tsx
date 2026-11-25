@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { MessageCircle, MessageSquarePlus } from "lucide-react";
+import { MessageCircle } from "lucide-react";
 import { Button, Group } from "@/components/ui/Button";
+import { ComingSoonPill } from "@/components/ui/ComingSoon";
 import { chatListTime, platformName, shopParam } from "@/lib/chats/format";
 import type { ChatListItem, ChatPlatform } from "@/lib/chats/types";
 import { BuyerAvatar } from "./BuyerAvatar";
@@ -12,24 +13,35 @@ export function ChatList({
   items,
   error,
   selectedId,
-  sample,
+  comingSoon,
   hasMore,
   loadingMore,
   onLoadMore,
-  testing,
-  onTestMessage,
 }: {
   platform: ChatPlatform;
   items: ChatListItem[] | null;
   error: string | null;
   selectedId: string | null;
-  sample: boolean;
+  comingSoon: boolean;
   hasMore: boolean;
   loadingMore: boolean;
   onLoadMore: () => void;
-  testing: boolean;
-  onTestMessage: () => void;
 }) {
+  const shop = platformName(platform);
+
+  if (comingSoon) {
+    return (
+      <Group className="anim-fade-in flex flex-col items-center gap-3 px-6 py-10 text-center">
+        <MessageCircle className="h-9 w-9 text-ink-3/70" strokeWidth={1.6} />
+        <ComingSoonPill />
+        <p className="text-[17px] font-semibold text-ink">{shop} chats are coming soon</p>
+        <p className="max-w-xs text-[15px] text-ink-3">
+          {shop} is still reviewing Kyna Ops. Until then, answer {shop} buyers in {shop} Seller Centre.
+        </p>
+      </Group>
+    );
+  }
+
   if (items === null) {
     if (error) {
       return (
@@ -40,8 +52,6 @@ export function ChatList({
     }
     return <ListSkeleton />;
   }
-
-  const shop = platformName(platform);
 
   return (
     <div className="space-y-4">
@@ -56,17 +66,7 @@ export function ChatList({
           <MessageCircle className="h-9 w-9 text-ink-3/70" strokeWidth={1.6} />
           <p className="text-[17px] font-semibold text-ink">No chats yet</p>
           <p className="max-w-xs text-[15px] text-ink-3">
-            {sample ? (
-              <>
-                Load the sample chats with{" "}
-                <Link href="/imports" className="font-semibold text-brand">
-                  Refresh sample data
-                </Link>
-                .
-              </>
-            ) : (
-              `When buyers message your ${shop} shop, their chats show up here.`
-            )}
+            When buyers message your {shop} shop, their chats show up here.
           </p>
         </Group>
       ) : (
@@ -119,23 +119,6 @@ export function ChatList({
         <Button variant="secondary" full onClick={onLoadMore} disabled={loadingMore}>
           {loadingMore ? "Loading…" : "Show older chats"}
         </Button>
-      )}
-
-      {sample && items.length > 0 && (
-        <Group>
-          <button
-            type="button"
-            onClick={onTestMessage}
-            disabled={testing}
-            className="pressable-row flex min-h-[52px] w-full items-center justify-between gap-4 px-4 text-left hover:bg-surface-subtle active:bg-surface-muted disabled:opacity-60"
-          >
-            <span className="min-w-0">
-              <span className="block text-[17px] text-ink">{testing ? "Sending…" : "Send a test buyer message"}</span>
-              <span className="block text-[13px] text-ink-3">Sample chats only. Nothing goes to {shop}.</span>
-            </span>
-            <MessageSquarePlus className="h-5 w-5 shrink-0 text-brand" />
-          </button>
-        </Group>
       )}
     </div>
   );

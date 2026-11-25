@@ -139,7 +139,7 @@ The product rules stay fixed:
 
 ## Colors
 
-The palette follows the Clean Merchant Standard in both light mode and an optional dark mode (`Light` / `Dark` / `Auto` under **Settings → Appearance**). Color carries meaning only. It is never decoration.
+The palette follows the Clean Merchant Standard in both light mode and an optional dark mode (`Light` / `Dark` / `Auto` under **Settings → Appearance**). Color carries meaning: a status, which shop you're looking at, or how an action went. It is never decoration for its own sake.
 
 | Token | Light | Dark | Role |
 | :--- | :--- | :--- | :--- |
@@ -156,6 +156,22 @@ The palette follows the Clean Merchant Standard in both light mode and an option
 - Status always pairs color with a dot and a word (`StatusText`, `StatusPill`).
 - Secondary text on a colored fill uses white or a tint of that hue, never grey.
 - Theme selection is stored in `kyna:theme` (`localStorage`), initialized synchronously in `<head>` before first paint to prevent light/dark flash, and transitions surfaces gently over 200ms when switched in Settings.
+
+## Ambient field
+
+A soft, Weather-style color wash behind the cards (`AmbientField`, mounted once in the root layout; moods in `src/lib/ui/ambient.ts`). Cards stay white and text contrast is unchanged.
+
+- **Shape:** two large blobs in the top corners, behind the large title, and one faint blob low on the screen. Light mode peaks at about 20% strength in the top corners and about 8% low down; dark mode is a deeper, low-light glow, never neon. It's painted with `radial-gradient(closest-side, …)` on a fixed layer at `z-index: -1`, with no blur filter and no idle motion. `html` paints the ground and `body` stays clear.
+- **Moods (where you are):**
+  - Kyna pink with a cool mist: every owner screen by default, including Home, Returns, Waves and the desktop parcel panel.
+  - TikTok cyan `#25F4EE` up-left and red `#FE2C55` down-right, offset like the logo.
+  - Shopee orange `#EE4D2D` with a warm peach.
+  - A shop's mood shows on the Chats tab for that shop, in an open chat, and while a parcel sheet or wave parcel sheet for one order is open (`useAmbientShop`). The last one opened wins; closing it brings back the one under it. Adding a shop means one entry in `AMBIENT_MOODS`.
+- **Moments (how it went):** `pulseAmbient(tone)` blooms from the bottom edge for about 1.2s, then the mood returns. Green for success (scan saved, stock saved, reply sent, sync with updates), amber for warn (saved offline, already scanned, pick one of several), warm coral for error (code not found, wrong PIN, couldn't save). Crimson stays reserved for Missing and never appears in the field.
+- **Where:** owner screens get the full field. `/scan` and `/stock-in` stay plain grey at rest and show blooms only. `/login` has none.
+- **Switch:** Settings → Appearance → Background color, on by default. Stored in `kyna:ambient` and applied before first paint (`data-ambient` on `<html>`). Off fades the field and the blooms out.
+- **Contrast:** `src/lib/ui/__tests__/ambient.test.ts` checks that `ink` and `ink-3` stay at 4.5:1 or better where both top blobs peak, and over every bloom, in both themes.
+- Bars over the field use the bar material: the top bar is clear at rest and frosted once collapsed, the desktop sidebar is `ground` at 60%, and the Returns filter bar is frosted `ground` at 75%.
 
 ## Typography
 
@@ -209,7 +225,7 @@ Shadows always have an offset and a soft blur. There are three levels:
 - `--shadow-float`: hover lift and the toast.
 - `--shadow-sheet`: bottom sheets.
 
-The Missing card and the scanner's main button use a tinted shadow in their own hue. Blur is used for bar material only: the top bar once collapsed, and the tab bar.
+The Missing card and the scanner's main button use a tinted shadow in their own hue. Blur is used for bar material only: the top bar once collapsed, the tab bar, and the Returns filter bar.
 
 ## Shapes
 
@@ -233,6 +249,13 @@ Shared building blocks live in `src/components/ui/`:
 - **ItemThumb:** the garment photo in sm, md, lg and xl sizes, with a shirt icon as fallback.
 - **StatusPill / StatusText:** one status per parcel from `getParcelStatus`. Priority is Missing, then Issue, Arrived, Overdue and On the way.
 - **Toast:** a single dark capsule under the top bar that rises in, pops its icon, and eases out after 2.6s (`.anim-toast-out`). It replaces the old inline notice banners.
+  - Errors use `role="alert"`, stay 3.6s, and their icon gives a small shake. `toast(msg, tone, { haptic: true })` also plays the matching haptic.
+- **Haptics (`haptic(kind)` in `src/lib/ui/haptics.ts`):** `tap`, `select`, `success`, `warn`, `error` and `pin-wrong`.
+  - Android (staff) vibrates with short patterns: select 6ms, tap 10ms, success 18ms, error 30-40-30.
+  - iPhone (owner) has no web vibration. Inside a tap, the helper clicks the label of a hidden `<input type="checkbox" switch>` so iOS plays its switch tick. It can't tick after a network reply, so the bloom confirms those.
+  - Two haptics within 40ms play as one. Call `haptic()` straight from the tap handler, before any `await`.
+  - Selection controls (Switch, SegmentedControl, filter chips, date picker cells, pin star, staff and condition pickers) play `select`.
+- **Pressed tints:** rows and white tiles use `active:bg-surface-muted`; transparent icon and text buttons use `active:bg-ink/[0.06]`; brand-tinted buttons use `active:bg-brand/15`.
 - **Pull to sync (`PullIndicator` + `usePullToRefresh`):** pull down from the top of any page to sync, the way a phone browser refreshes. Pages opt in with `AppShell onRefresh`.
   - Touch only. It starts only at scroll top, never inside a sheet or a field, and lets sideways drags through to chip rows.
   - It fires past 72px of finger travel with one vibration tick. A white capsule drops from under the top bar: "Pull to sync" → "Release to sync" → "Syncing…" → check.
@@ -256,17 +279,19 @@ Motion follows Apple's HIG: it has a purpose, it's short, it never blocks input,
 
 | Moment | Motion | Time |
 | :--- | :--- | :--- |
-| Press any button / card | scale 0.97 (`.pressable`) | 120ms |
-| Press a list row | subtle scale 0.99 (`.pressable-row`) | 120ms |
+| Press any button / card | scale 0.97 (`.pressable`): sinks fast, settles slower | 90ms in / 220ms out |
+| Press a list row | subtle scale 0.99 (`.pressable-row`) + `surface-muted` tint | 90ms in / 220ms out |
+| Press a text link | dims to 60% (`.pressable-text`) | 120ms |
 | Hover interactive card (pointer) | 1px lift + float shadow (`.hover-lift`), trailing chevron nudges 2px (`.chevron-nudge`) | 250ms / 120ms |
 | Page opens or tab switches | fade + 8px rise on `<main>`, crossfade between `/scan` modes | 250ms |
 | Counts load or change | count up (`AnimatedNumber` on Home, Money credited, Waves) | 400ms |
 | Missing ↔ All clear | crossfade | 250ms |
-| Segmented / tab / filter selection | highlight slides (Home, Returns, Items, Pick list, Waves, Settings theme) | 200ms |
-| Switch press & toggle | thumb elongates while pressed, slides across track | 200ms |
+| Segmented / filter selection | highlight slides (Home, Returns, Items, Pick list, Waves, Settings theme) + select haptic | 200ms |
+| Tab bar selection | pink indicator slides to the new tab | 300ms |
+| Switch press & toggle | thumb elongates while pressed, slides across track + select haptic | 200ms |
 | Disclosure / pick group expand | chevron rotates, body fades & slides down (`anim-disclosure-in`) | 200ms |
 | Pick list progress bar | GPU-composited `scaleX` transition | 300ms |
-| Sheet open / close | slide on `cubic-bezier(0.32,0.72,0,1)` + backdrop fade | 350ms / 280ms |
+| Sheet open / close | slide on `cubic-bezier(0.32,0.72,0,1)` + backdrop fade | 350ms / 260ms |
 | Toast arrive / leave | rise in + icon pop, then fade/lift out | 320ms / 180ms |
 | Wrong PIN or wrong password | shake + Android vibration | 300ms |
 | PIN dot, badge, star pin, theme icon | pop (`anim-pop`) | 260ms |
@@ -276,6 +301,9 @@ Motion follows Apple's HIG: it has a purpose, it's short, it never blocks input,
 | Pull to sync | capsule follows the finger, icon turns with travel; settles back | 300ms |
 | First chip row ever | scrolls 56px and back, once per device | ~650ms |
 | Theme toggle in Settings | surface/ink colors crossfade | 200ms |
+| Shop mood change (ambient field) | mood layers crossfade on `--ease-ios` | 900ms |
+| Moment (ambient bloom) | green, amber or coral glow rises from the bottom edge and fades | 1.2s |
+| Error toast | icon pops then shakes 3px; stays 3.6s | 320ms |
 
 - Home attention/top lists, Imports history, Items (first load), and Returns rows (first load) stagger in softly. Filter changes swap in place.
 - With `prefers-reduced-motion: reduce`:
@@ -283,6 +311,8 @@ Motion follows Apple's HIG: it has a purpose, it's short, it never blocks input,
   - The page rise, disclosure drop, list rise, toast exit, and pop become plain fades.
   - Press feedback becomes an opacity dip.
   - Theme transitions snap cleanly; pulse dot stops.
+  - The scan-saved check shows fully drawn, loading skeletons stop pulsing, and scripted scrolls jump instead of gliding.
+  - Ambient moods still crossfade; blooms fade in place without rising or scaling.
   - Counts show the final value straight away.
 
 ## Do's and Don'ts

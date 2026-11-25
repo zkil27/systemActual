@@ -34,6 +34,7 @@ import { CONDITIONS, DEFAULT_CONDITION, findCondition, type ConditionTone } from
 import { compressImageFile } from "@/lib/ui/compress-image";
 import { decodeBarcodeFromFile } from "@/lib/ui/decode-barcode";
 import { shortCourier } from "@/lib/ui/format";
+import { pulseAmbient } from "@/lib/ui/ambient";
 import { haptic } from "@/lib/ui/motion";
 import { categoryLabel } from "@/lib/ui/parcel-status";
 import { PIN_LENGTH, applyPinKey, keyFromKeyboard } from "@/lib/ui/pin";
@@ -491,7 +492,8 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
     setPhotos([]);
     setSaved(null);
     playBeep(parcel.alreadyScanned ? "warn" : "ok");
-    haptic(12);
+    haptic(parcel.alreadyScanned ? "warn" : "tap");
+    if (parcel.alreadyScanned) pulseAmbient("warn");
   }, []);
 
   const lookupReturnBarcode = useCallback(
@@ -510,7 +512,8 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
         setChoices([]);
         if (!res.ok || !data.found) {
           playBeep("error");
-          haptic([30, 40, 30]);
+          haptic("error");
+          pulseAmbient("error");
           setMatchedParcel(null);
           setLookupError(data.error || `No return found for ${code}. Try the last 6 digits.`);
           return;
@@ -520,7 +523,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
           setMatchedParcel(null);
           setChoices(data.matches);
           playBeep("warn");
-          haptic(12);
+          haptic("warn");
           return;
         }
         openParcel(data.parcel);
@@ -637,11 +640,12 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
           setPin("");
           setUnlockError(data.error || "Wrong PIN");
           setWrongCount((n) => n + 1);
-          haptic([40, 50, 40]);
+          haptic("pin-wrong");
+          pulseAmbient("error");
           return;
         }
         setPin("");
-        haptic(12);
+        haptic("success");
         await loadSession();
       } catch {
         setPin("");
@@ -688,7 +692,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
         return;
       }
       playBeep("ok");
-      haptic(14);
+      haptic("success");
       setCancelledToPull((prev) => prev.filter((p) => p.packageId !== pkg.packageId));
       if (typeof data.cancelledToPullCount === "number") {
         setCancelledToPullCount(data.cancelledToPullCount);
@@ -716,7 +720,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
         toast(data.error || "Couldn't queue reprint.", "error");
         return;
       }
-      haptic(12);
+      haptic("success");
       toast(`Sent ${data.orderSn} to printer`);
     } catch {
       toast("No connection. Try again.", "error");
@@ -792,7 +796,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
         return;
       }
       playBeep("ok");
-      haptic(12);
+      haptic("success");
       if (data.outbound) {
         setCheckResults((prev) =>
           prev.map((item) => (item.packageId === pkg.packageId ? (data.outbound as StaffSafeOutboundPackage) : item))
@@ -808,7 +812,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
 
   function togglePickChecked(key: string) {
     if (!waveData) return;
-    haptic(8);
+    haptic("select");
     const nextVal = !checkedPickKeys[key];
     setCheckedPickKeys((prev) => {
       const next = { ...prev, [key]: nextVal };
@@ -906,11 +910,15 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
       const res = await fetch("/api/scan/confirm", { method: "POST", body: buildScanForm(entry) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        playBeep("error");
+        haptic("error");
+        pulseAmbient("error");
         setLookupError(data.error || "Couldn't save. Try again.");
         return;
       }
       playBeep("ok");
-      haptic(18);
+      haptic("success");
+      pulseAmbient("success");
       setSaved({ id: Date.now(), text, restocked: Boolean(data.restocked) });
       applySaved(data, text);
       finishScanForm();
@@ -921,7 +929,8 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
         prev.some((p) => p.clientKey === entry.clientKey) ? prev : [...prev, { ...entry, text, tries: 0 }]
       );
       playBeep("warn");
-      haptic(18);
+      haptic("warn");
+      pulseAmbient("warn");
       toast("No Wi-Fi. Saved on this phone, will send by itself.", "error");
       finishScanForm();
     } finally {
@@ -994,7 +1003,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
         if (res.status === 404 || res.status === 409) setLastUndo(null);
         return;
       }
-      haptic(12);
+      haptic("tap");
       setTodayCount((n) => Math.max(0, n - 1));
       setRecentScans((prev) => prev.filter((r) => r.id !== lastUndo.scanId));
       if (typeof data.pendingMissingCount === "number") setPendingMissing(data.pendingMissingCount);
@@ -1057,11 +1066,11 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
   // ── Locked: name, then PIN ────────────────────────────────────────
   if (!unlocked) {
     return (
-      <div className="safe-top flex min-h-dvh flex-col bg-ground px-6">
+      <div className="safe-top flex min-h-dvh flex-col px-6">
         <div className="anim-page-in mx-auto flex w-full max-w-sm flex-1 flex-col py-6">
           <div className="flex h-12 items-center justify-between">
             <span />
-            <Link href="/login" className="text-[16px] font-semibold text-brand">
+            <Link href="/login" className="pressable-text -mr-1 flex h-11 items-center px-1 text-[16px] font-semibold text-brand">
               Owner
             </Link>
           </div>
@@ -1079,6 +1088,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                   role="radio"
                   aria-checked={active}
                   onClick={() => {
+                    if (!active) haptic("select");
                     setSelectedStaffId(s.id);
                     setPin("");
                     setUnlockError("");
@@ -1176,7 +1186,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
   }
 
   return (
-    <div className="min-h-dvh bg-ground pb-14">
+    <div className="min-h-dvh pb-14">
       <header
         className={`safe-top sticky top-0 z-30 transition-[background-color,border-color,backdrop-filter] duration-200 ${
           scrolled
@@ -1589,9 +1599,12 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                         type="button"
                         role="radio"
                         aria-checked={active}
-                        onClick={() => setSelectedCondition(c.id)}
-                        className={`pressable flex min-h-14 w-full items-center gap-3.5 px-4 text-left transition-colors ${
-                          active ? TONE_SELECTED_ROW[c.tone] : "bg-surface hover:bg-surface-subtle"
+                        onClick={() => {
+                          if (!active) haptic("select");
+                          setSelectedCondition(c.id);
+                        }}
+                        className={`pressable-row flex min-h-14 w-full items-center gap-3.5 px-4 text-left ${
+                          active ? TONE_SELECTED_ROW[c.tone] : "bg-surface hover:bg-surface-subtle active:bg-surface-muted"
                         }`}
                       >
                         <span
@@ -1650,14 +1663,14 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                 {photoPreviews.length > 0 && (
                   <div className="flex flex-wrap gap-2 pt-1">
                     {photoPreviews.map((url, idx) => (
-                      <div key={url} className="relative h-16 w-16 overflow-hidden rounded-lg bg-surface-muted ring-1 ring-hairline">
+                      <div key={url} className="relative h-16 w-16">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={url} alt={`Proof ${idx + 1}`} className="h-full w-full object-cover" />
+                        <img src={url} alt={`Proof ${idx + 1}`} className="h-full w-full rounded-lg bg-surface-muted object-cover ring-1 ring-hairline" />
                         <button
                           type="button"
                           aria-label={`Remove photo ${idx + 1}`}
                           onClick={() => setPhotos((prev) => prev.filter((_, i) => i !== idx))}
-                          className="absolute right-0.5 top-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white"
+                          className="pressable absolute right-0.5 top-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white after:absolute after:-inset-2.5 after:content-['']"
                         >
                           <X className="h-3.5 w-3.5" />
                         </button>

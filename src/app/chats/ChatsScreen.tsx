@@ -1,14 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { MessageCircle } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { toast } from "@/components/ui/Toast";
 import { timeoutSignal } from "@/lib/chats/client";
-import { defaultShop, parseShopParam, platformName, shopParam } from "@/lib/chats/format";
+import { useAmbientShop } from "@/lib/ui/use-ambient";
+import { chatsComingSoon, defaultShop, parseShopParam, platformName, shopParam } from "@/lib/chats/format";
 import type { ChatListItem, ChatPlatform, ChatUnread } from "@/lib/chats/types";
 import { ChatList } from "./ChatList";
 import { ChatThreadView } from "./ChatThreadView";
@@ -38,7 +38,6 @@ interface ListState {
   platform: ChatPlatform;
   items: ChatListItem[];
   nextCursor: string | null;
-  sample: boolean;
 }
 
 export function ChatsScreen() {
@@ -50,13 +49,14 @@ export function ChatsScreen() {
   const selectedId = pathname.startsWith("/chats/") ? decodeURIComponent(pathname.slice("/chats/".length)) : null;
   const shopFromUrl = parseShopParam(searchParams.get("shop"));
   const [shop, setShop] = useState<ChatPlatform>(shopFromUrl ?? "TIKTOK");
+  // The background takes this shop's colors while Chats is open.
+  useAmbientShop(shop);
   const pickedDefault = useRef(shopFromUrl !== null);
 
   const [list, setList] = useState<ListState | null>(null);
   const [unread, setUnread] = useState<ChatUnread | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [testing, setTesting] = useState(false);
 
   // Follow the URL when it changes (back button, links from a chat).
   const lastUrlShop = useRef(shopFromUrl);
@@ -99,7 +99,6 @@ export function ChatsScreen() {
             ? mergeFirstPage(prev.items, data.items)
             : data.items,
         nextCursor: prev && prev.platform === platform && prev.items.length > data.items.length ? prev.nextCursor : data.nextCursor,
-        sample: data.sample,
       }));
     } catch {
       setError("No connection. Pull down to try again.");
@@ -154,29 +153,9 @@ export function ChatsScreen() {
     }
   }
 
-  async function sendTestMessage() {
-    setTesting(true);
-    try {
-      const res = await fetch("/api/demo/chats/incoming", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform: shop, ...(selectedId && wide ? { conversationId: selectedId } : {}) }),
-      });
-      const data = await res.json().catch(() => null);
-      if (res.ok) {
-        toast("Test message added");
-        await load(shop);
-      } else {
-        toast(data?.error ?? "Couldn't add a test message", "error");
-      }
-    } finally {
-      setTesting(false);
-    }
-  }
-
   const refresh = useCallback(() => load(shop), [load, shop]);
   const visible = list && list.platform === shop ? list : null;
-  const sample = visible?.sample ?? false;
+  const comingSoon = chatsComingSoon(shop);
 
   const options = (["SHOPEE", "TIKTOK"] as const).map((p) => {
     const n = unread?.[p] ?? 0;
@@ -189,23 +168,12 @@ export function ChatsScreen() {
       items={visible?.items ?? null}
       error={error}
       selectedId={wide ? selectedId : null}
-      sample={sample}
+      comingSoon={comingSoon}
       hasMore={Boolean(visible?.nextCursor)}
       loadingMore={loadingMore}
       onLoadMore={loadMore}
-      testing={testing}
-      onTestMessage={sendTestMessage}
     />
   );
-
-  const samplePill = sample ? (
-    <Link
-      href="/imports"
-      className="pressable rounded-full bg-surface-muted px-2.5 py-1 text-[13px] font-bold text-ink-2 hover:bg-surface-track"
-    >
-      Sample
-    </Link>
-  ) : undefined;
 
   // Screen size not known yet (first paint of a chat link): wait one frame.
   if (wide === null && selectedId) return null;
@@ -219,7 +187,6 @@ export function ChatsScreen() {
     <AppShell
       title="Chats"
       width={wide ? "wide" : "default"}
-      titleAccessory={samplePill}
       chatUnread={unread?.total}
       onRefresh={wide ? undefined : refresh}
     >
@@ -240,9 +207,13 @@ export function ChatsScreen() {
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
                   <MessageCircle className="h-9 w-9 text-ink-3/70" strokeWidth={1.6} />
-                  <p className="text-[17px] font-semibold text-ink">Pick a chat to read it here</p>
+                  <p className="text-[17px] font-semibold text-ink">
+                    {comingSoon ? `${platformName(shop)} chats will show here` : "Pick a chat to read it here"}
+                  </p>
                   <p className="max-w-xs text-[15px] text-ink-3">
-                    Replies go to the buyer in the {platformName(shop)} app.
+                    {comingSoon
+                      ? `Once ${platformName(shop)} approves Kyna Ops.`
+                      : `Replies go to the buyer in the ${platformName(shop)} app.`}
                   </p>
                 </div>
               )}

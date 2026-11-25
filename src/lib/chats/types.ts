@@ -73,10 +73,9 @@ export interface ChatThread {
   platform: ChatPlatform;
   buyerName: string;
   buyerAvatarUrl: string | null;
-  sample: boolean;
   /** Replies can be sent from Kyna Ops in this chat. */
   canReply: boolean;
-  /** The photo button shows (sample chats now; TikTok later). */
+  /** The photo button shows (TikTok now; Shopee later). */
   canSendPhotos: boolean;
   /** Why not, in plain words, when canReply is false. */
   replyNote: string | null;

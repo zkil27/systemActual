@@ -1,6 +1,5 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
-import { generateDemoDayData } from "../src/lib/demo-simulator";
 
 const prisma = new PrismaClient();
 
@@ -43,14 +42,6 @@ async function main() {
       create: { name: s.name, pinHash, active: true },
       update: {},
     });
-  }
-
-  const existingParcels = await prisma.returnParcel.count();
-  if (existingParcels === 0) {
-    const { createdCount } = await generateDemoDayData();
-    console.log(`Seeded ${createdCount} realistic kynaph return parcels.`);
-  } else {
-    console.log(`Skipped demo parcels (${existingParcels} already present).`);
   }
 
   console.log("Seed complete. Owner login: owner@kynaph.com / kyna1234");

@@ -16,6 +16,7 @@ import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { toast } from "@/components/ui/Toast";
 import { useConfirm } from "@/components/ui/ConfirmSheet";
 import { formatPeso, manilaDateTime, manilaTime } from "@/lib/ui/format";
+import { prefersReducedMotion } from "@/lib/ui/motion";
 import { useLiveRefresh } from "@/lib/ui/use-live-refresh";
 import type { CourierHandoverSummary } from "@/lib/print/handover";
 import type { ReadyBreakdown } from "@/lib/waves/build";
@@ -354,7 +355,7 @@ export default function WavesPage() {
       await load(data.waveId ?? null);
       // Phones stack the result under the controls; bring it into view.
       if (!window.matchMedia("(min-width: 1024px)").matches) {
-        requestAnimationFrame(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+        requestAnimationFrame(() => resultRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" }));
       }
     } catch (e) {
       toast((e as Error).message, "error");
@@ -577,7 +578,7 @@ export default function WavesPage() {
                       setSelectedWaveId(w.id);
                       void load(w.id);
                     }}
-                    className={`pressable h-11 shrink-0 rounded-full px-3.5 text-[13px] font-semibold tabular-nums transition-colors ${
+                    className={`pressable h-11 shrink-0 rounded-full px-3.5 text-[13px] font-semibold tabular-nums ${
                       active
                         ? "bg-ink text-ink-inverse"
                         : w.status === "RUNNING"
@@ -861,7 +862,7 @@ export default function WavesPage() {
                                           parcels: matchingParcels,
                                         })
                                       }
-                                      className="group pressable flex w-full items-center gap-2 rounded-[var(--radius-control)] bg-surface-subtle px-2.5 py-1.5 text-left ring-1 ring-hairline/80 transition-colors hover:bg-surface-muted hover:ring-ink/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                                      className="group pressable flex w-full items-center gap-2 rounded-[var(--radius-control)] bg-surface-subtle px-2.5 py-1.5 text-left ring-1 ring-hairline/80 hover:bg-surface-muted hover:ring-ink/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                                     >
                                       <span
                                         className={`inline-flex min-w-8 shrink-0 items-center justify-center rounded-md px-1.5 py-0.5 text-[14px] font-extrabold tabular-nums ${
@@ -923,7 +924,7 @@ export default function WavesPage() {
                                       initialParcelId: parcel.id,
                                     })
                                   }
-                                  className="group pressable flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-subtle active:bg-surface-muted"
+                                  className="group pressable-row flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-subtle active:bg-surface-muted"
                                 >
                                   <ItemThumb
                                     src={leadLine?.imageUrl ?? null}

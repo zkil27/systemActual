@@ -11,6 +11,7 @@ import { DatePickerSheet } from "@/components/ui/DatePickerSheet";
 import { ScrollChips } from "@/components/ui/ScrollChips";
 import { toast } from "@/components/ui/Toast";
 import { manilaDayLabel } from "@/lib/ui/format";
+import { haptic, prefersReducedMotion } from "@/lib/ui/motion";
 import { stepSelection } from "@/lib/ui/returns-nav";
 import { DESKTOP_QUERY, useMediaQuery } from "@/lib/ui/use-media-query";
 import { useLiveRefresh } from "@/lib/ui/use-live-refresh";
@@ -66,7 +67,7 @@ function FilterChips({
     const el = refs.current[value];
     if (!el) return;
     setBox({ x: el.offsetLeft, w: el.offsetWidth });
-    el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+    el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: prefersReducedMotion() ? "auto" : "smooth" });
   }, [value, count]);
 
   return (
@@ -104,11 +105,14 @@ function FilterChips({
             type="button"
             role="tab"
             aria-selected={active}
-            onClick={() => onChange(f.id)}
+            onClick={() => {
+              if (!active) haptic("select");
+              onChange(f.id);
+            }}
             className={`pressable relative z-10 h-10 shrink-0 rounded-full px-4 text-[15px] font-semibold ${
               active
                 ? activeText
-                : "text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] active:bg-ink/[0.05]"
+                : "text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] active:bg-ink/[0.06]"
             }`}
           >
             {f.label}
@@ -352,7 +356,7 @@ function ReturnsExplorerInner() {
     >
       <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_420px] lg:items-start lg:gap-6 xl:grid-cols-[minmax(0,1fr)_460px]">
         <div className="min-w-0">
-          <div className="sticky top-[calc(env(safe-area-inset-top)+48px)] z-20 -mx-5 space-y-2.5 bg-ground px-5 pb-3.5 lg:top-16 lg:mr-0 lg:pr-0">
+          <div className="sticky top-[calc(env(safe-area-inset-top)+48px)] z-20 -mx-5 space-y-2.5 bg-ground/75 px-5 pb-3.5 backdrop-blur-xl backdrop-saturate-150 lg:top-16 lg:mr-0 lg:pr-0">
             <label className="relative block">
               <span className="sr-only">Search returns</span>
               <Search className="pointer-events-none absolute left-3 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-ink-3" />
@@ -377,7 +381,10 @@ function ReturnsExplorerInner() {
                     key={preset.id}
                     type="button"
                     aria-pressed={active}
-                    onClick={() => selectDatePreset(preset.id)}
+                    onClick={() => {
+                      if (!active) haptic("select");
+                      selectDatePreset(preset.id);
+                    }}
                     className={`pressable h-9 shrink-0 rounded-full px-3.5 text-[14px] font-semibold ${
                       active
                         ? "bg-brand/12 text-brand ring-1 ring-inset ring-brand/35"

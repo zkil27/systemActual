@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { CalendarDays, ChevronRight, Lock, Monitor, Moon, Sun } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Button, Group } from "@/components/ui/Button";
+import { ComingSoonPill } from "@/components/ui/ComingSoon";
 import { useConfirm } from "@/components/ui/ConfirmSheet";
 import { DatePickerSheet } from "@/components/ui/DatePickerSheet";
 import { Disclosure } from "@/components/ui/Disclosure";
@@ -16,7 +17,7 @@ import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { Switch } from "@/components/ui/Switch";
 import { toast } from "@/components/ui/Toast";
 import { formatManilaDateTime, getManilaTodayStr } from "@/lib/time";
-import { useTheme, type ThemePreference } from "@/lib/ui/theme";
+import { useAmbientPreference, useTheme, type ThemePreference } from "@/lib/ui/theme";
 import { PrinterSettings } from "@/components/PrinterSettings";
 
 const THEME_OPTIONS: readonly { id: ThemePreference; label: string }[] = [
@@ -390,10 +391,10 @@ function NumberRow({
 
 type ShopRow = SettingsPayload["shops"][number];
 
-function storeStatus(shop: ShopRow | undefined, keysReady: boolean): string {
+function storeStatus(shop: ShopRow | undefined, keysReady: boolean, noKeysLabel: string): string {
   if (shop?.needsReconnect) return "Reconnect";
   if (shop?.connected) return "Connected";
-  return keysReady ? "Connect" : "Waiting for keys";
+  return keysReady ? "Connect" : noKeysLabel;
 }
 
 function storeDetail(shop: ShopRow | undefined): string | null {
@@ -404,6 +405,7 @@ function storeDetail(shop: ShopRow | undefined): string | null {
 export default function SettingsPage() {
   const router = useRouter();
   const { preference, setPreference } = useTheme();
+  const { ambient, setAmbient } = useAmbientPreference();
   const ThemeIcon = preference === "dark" ? Moon : preference === "system" ? Monitor : Sun;
   const [data, setData] = useState<SettingsPayload | null>(null);
   const [unitCost, setUnitCost] = useState("82");
@@ -707,13 +709,15 @@ export default function SettingsPage() {
             <Group className="divide-y divide-hairline">
               {(
                 [
-                  { label: "Shopee PH", href: "/api/oauth/shopee/start", shop: shopee, keys: data?.integrations.shopeeEnvReady },
-                  { label: "TikTok Shop PH", href: "/api/oauth/tiktok/start", shop: tiktok, keys: data?.integrations.tiktokEnvReady },
+                  // Shopee has no app keys until Shopee approves Kyna Ops.
+                  { label: "Shopee PH", href: "/api/oauth/shopee/start", shop: shopee, keys: data?.integrations.shopeeEnvReady, noKeys: "Coming soon" },
+                  { label: "TikTok Shop PH", href: "/api/oauth/tiktok/start", shop: tiktok, keys: data?.integrations.tiktokEnvReady, noKeys: "Waiting for keys" },
                 ] as const
               ).map((row) => {
                 const detail = storeDetail(row.shop);
                 const synced = row.shop?.connected && row.shop.lastSyncedAt ? `Synced ${updatedAgo(row.shop.lastSyncedAt)}` : null;
-                const status = storeStatus(row.shop, Boolean(row.keys));
+                const status = storeStatus(row.shop, Boolean(row.keys), row.noKeys);
+                const soon = status === "Coming soon";
                 const body = (
                   <>
                     <span className="flex min-w-0 flex-col py-2">
@@ -731,7 +735,7 @@ export default function SettingsPage() {
                         row.shop?.needsReconnect ? "font-semibold text-missing-ink" : "text-ink-3"
                       }`}
                     >
-                      {status}
+                      {soon ? <ComingSoonPill /> : status}
                       {row.keys && <ChevronRight className="chevron-nudge h-5 w-5" />}
                     </span>
                   </>
@@ -998,6 +1002,17 @@ export default function SettingsPage() {
                   value={preference}
                   onChange={setPreference}
                 />
+                <div className="flex items-center justify-between gap-3 border-t border-hairline pt-3.5">
+                  <span className="flex flex-col">
+                    <span className="text-[17px] text-ink">Background color</span>
+                    <span className="text-[13px] text-ink-3">Soft shop colors behind the cards</span>
+                  </span>
+                  <Switch
+                    label="Background color"
+                    checked={ambient === "on"}
+                    onChange={(next) => setAmbient(next ? "on" : "off")}
+                  />
+                </div>
               </Group>
             </section>
 

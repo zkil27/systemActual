@@ -20,6 +20,17 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    id: 8,
+    date: "2026-11-26",
+    title: "Shopee coming soon, softer colors",
+    changes: [
+      "The Shopee tab in Chats now says Coming soon while Shopee reviews Kyna Ops. Your TikTok chats work as before.",
+      "Shopee in Settings, Upload, Items and Today also shows Coming soon.",
+      "The sample chats and sample returns are gone, so everything you see is from your real shop.",
+      "Chats and orders show soft TikTok or Shopee colors behind the cards, and a soft glow and a light tap confirm what you do. Turn the colors off in Settings → Appearance.",
+    ],
+  },
+  {
     id: 7,
     date: "2026-11-26",
     title: "Profit after fees",

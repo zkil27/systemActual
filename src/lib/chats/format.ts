@@ -95,6 +95,11 @@ export function defaultShop(unread: Pick<ChatUnread, "SHOPEE" | "TIKTOK"> | null
   return "TIKTOK";
 }
 
+/** Shopee chats need the Shopee Open Platform, which hasn't approved the app yet. */
+export function chatsComingSoon(platform: ChatPlatform): boolean {
+  return platform === "SHOPEE";
+}
+
 export function platformName(platform: ChatPlatform): string {
   return platform === "SHOPEE" ? "Shopee" : "TikTok";
 }

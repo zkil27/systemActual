@@ -9,6 +9,7 @@ import { StatusText } from "@/components/ui/StatusPill";
 import type { StaffSafeOutboundPackage } from "@/lib/auth";
 import type { StaffPickGroup } from "@/app/api/scan/wave/route";
 import { manilaDateTime, manilaTime, shortCourier } from "@/lib/ui/format";
+import { prefersReducedMotion } from "@/lib/ui/motion";
 import type { StatusTone } from "@/lib/ui/parcel-status";
 import {
   MultiParcelActionSheet,
@@ -111,7 +112,7 @@ function PickFilterStrip({
     const el = refs.current[value];
     if (!el) return;
     setBox({ x: el.offsetLeft, w: el.offsetWidth });
-    el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+    el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: prefersReducedMotion() ? "auto" : "smooth" });
   }, [value, optionsKey]);
 
   return (
@@ -136,7 +137,7 @@ function PickFilterStrip({
             role="tab"
             aria-selected={active}
             onClick={() => onChange(opt.id)}
-            className={`pressable relative z-10 h-10 shrink-0 rounded-full px-4 text-[15px] font-semibold tabular-nums transition-colors ${
+            className={`pressable relative z-10 h-10 shrink-0 rounded-full px-4 text-[15px] font-semibold tabular-nums ${
               active
                 ? "text-ink-inverse"
                 : "bg-surface text-ink-2 shadow-[var(--shadow-card)] hover:text-ink"
@@ -308,7 +309,7 @@ export function PickListSection({
                   role="tab"
                   aria-selected={active}
                   onClick={() => onSelectWave(w.id)}
-                  className={`pressable h-9 shrink-0 rounded-full px-3 text-[13px] font-semibold tabular-nums transition-colors ${
+                  className={`pressable h-9 shrink-0 rounded-full px-3 text-[13px] font-semibold tabular-nums ${
                     active
                       ? "bg-ink text-ink-inverse"
                       : "bg-surface text-ink-2 shadow-[var(--shadow-card)] hover:text-ink"
@@ -496,7 +497,7 @@ export function PickListSection({
                                   role="checkbox"
                                   aria-checked={checked}
                                   onClick={() => onToggleChecked(checkKey)}
-                                  className="pressable flex min-h-[60px] min-w-0 flex-1 items-center gap-3 py-3 pl-4 pr-2 text-left hover:bg-surface-subtle active:bg-surface-muted"
+                                  className="pressable-row flex min-h-[60px] min-w-0 flex-1 items-center gap-3 py-3 pl-4 pr-2 text-left hover:bg-surface-subtle active:bg-surface-muted"
                                 >
                                   <span
                                     aria-hidden="true"
@@ -612,7 +613,7 @@ export function PickListSection({
                     role="checkbox"
                     aria-checked={checked}
                     onClick={() => onToggleChecked(checkKey)}
-                    className="pressable flex min-w-0 flex-1 items-center gap-3 py-3 pl-4 pr-2 text-left"
+                    className="pressable-row flex min-w-0 flex-1 items-center gap-3 py-3 pl-4 pr-2 text-left hover:bg-surface-subtle active:bg-surface-muted"
                   >
                     <span
                       aria-hidden="true"

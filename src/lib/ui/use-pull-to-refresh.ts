@@ -83,7 +83,7 @@ export function usePullToRefresh(
       if (e.cancelable) e.preventDefault();
       dy = Math.max(0, rawDy);
       const nowArmed = dy >= PULL_TRIGGER;
-      if (nowArmed && !armed) haptic(8);
+      if (nowArmed && !armed) haptic("select");
       armed = nowArmed;
       push({ phase: pullPhase(dy), dy });
     };

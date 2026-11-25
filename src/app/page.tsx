@@ -18,6 +18,7 @@ import { toast } from "@/components/ui/Toast";
 import type { CategoryDailyTruth, DailyTruthReport } from "@/lib/analytics/daily-returns";
 import { formatPeso, formatSignedPeso, manilaDayLabel, manilaTime, updatedAgo } from "@/lib/ui/format";
 import type { MoneySummary } from "@/lib/money/summary";
+import { pulseAmbient } from "@/lib/ui/ambient";
 import { haptic } from "@/lib/ui/motion";
 import { returnsUrl } from "@/lib/ui/returns-filter";
 import { useLiveRefresh } from "@/lib/ui/use-live-refresh";
@@ -85,7 +86,7 @@ function CategoryCard({
  * The owner's main number: money actually credited (Shopee wallet / TikTok
  * statement paid). Orders placed sit underneath, muted, because they aren't money yet.
  */
-function MoneyCard({ money, onOpen }: { money: MoneySummary; onOpen: () => void }) {
+function MoneyCard({ money, onOpen, shopeeSoon }: { money: MoneySummary; onOpen: () => void; shopeeSoon: boolean }) {
   const extras = [
     money.adsPhp ? `Ads ${formatSignedPeso(money.adsPhp)}` : null,
     money.adjustmentsPhp ? `Adjustments ${formatSignedPeso(money.adjustmentsPhp)}` : null,
@@ -112,7 +113,9 @@ function MoneyCard({ money, onOpen }: { money: MoneySummary; onOpen: () => void 
         className="mt-3 block text-[40px] font-extrabold leading-none tracking-[-0.03em] text-ink"
       />
       <span className="mt-2 block text-[15px] text-ink-2 tabular-nums">
-        Shopee {formatPeso(money.creditedShopeePhp)} · TikTok {formatPeso(money.creditedTikTokPhp)}
+        {shopeeSoon
+          ? `TikTok ${formatPeso(money.creditedTikTokPhp)} · Shopee coming soon`
+          : `Shopee ${formatPeso(money.creditedShopeePhp)} · TikTok ${formatPeso(money.creditedTikTokPhp)}`}
       </span>
       {extras.length > 0 && (
         <span className="mt-1 block text-[15px] text-ink-3 tabular-nums">{extras.join(" · ")}</span>
@@ -286,6 +289,7 @@ function MissingStatus({
 }
 
 function OperationsStrip({ ops }: { ops: DailyTruthReport["operations"] }) {
+  const shopeeSoon = ops.shopeeConnected === false;
   const stockHeadline =
     ops.outOfStockCount > 0
       ? `${ops.outOfStockCount} out`
@@ -297,7 +301,7 @@ function OperationsStrip({ ops }: { ops: DailyTruthReport["operations"] }) {
     ops.outOfStockCount > 0 && ops.lowStockCount > 0 ? `${ops.lowStockCount} low` : null,
     ops.unlinkedCount > 0 ? `${ops.unlinkedCount} unlinked` : null,
     ops.stockPushFailedCount > 0 ? `${ops.stockPushFailedCount} not updated` : null,
-    ops.shopeeBumpEnabled ? `Auto-bump ${ops.shopeeBoostedCount}/5` : "Auto-bump off",
+    shopeeSoon ? null : ops.shopeeBumpEnabled ? `Auto-bump ${ops.shopeeBoostedCount}/5` : "Auto-bump off",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -332,7 +336,9 @@ function OperationsStrip({ ops }: { ops: DailyTruthReport["operations"] }) {
           </span>
 
           <span className="mt-2 block text-[15px] text-ink-3 tabular-nums">
-            Shopee {ops.readyShopeeCount} · TikTok {ops.readyTikTokCount}
+            {shopeeSoon
+              ? `TikTok ${ops.readyTikTokCount} · Shopee coming soon`
+              : `Shopee ${ops.readyShopeeCount} · TikTok ${ops.readyTikTokCount}`}
           </span>
         </div>
 
@@ -367,13 +373,19 @@ function OperationsStrip({ ops }: { ops: DailyTruthReport["operations"] }) {
           >
             {stockHeadline}
           </span>
-          <span
-            className={`rounded-full px-2.5 py-1 text-[13px] font-bold tabular-nums ${
-              ops.shopeeBumpEnabled ? "bg-brand-soft text-brand" : "bg-surface-muted text-ink-3"
-            }`}
-          >
-            Bump {ops.shopeeBoostedCount}/5
-          </span>
+          {shopeeSoon ? (
+            <span className="rounded-full bg-surface-muted px-2.5 py-1 text-[13px] font-bold text-ink-3">
+              Bump coming soon
+            </span>
+          ) : (
+            <span
+              className={`rounded-full px-2.5 py-1 text-[13px] font-bold tabular-nums ${
+                ops.shopeeBumpEnabled ? "bg-brand-soft text-brand" : "bg-surface-muted text-ink-3"
+              }`}
+            >
+              Bump {ops.shopeeBoostedCount}/5
+            </span>
+          )}
         </span>
         <span className="mt-2.5 block text-[14px] text-ink-3 tabular-nums">{stockSub}</span>
       </Link>
@@ -472,7 +484,7 @@ function SyncLine({
       onClick={onSync}
       disabled={syncing}
       aria-label={dateLabel ? `Sync ${dateLabel}` : "Sync stores"}
-      className="pressable -mx-1.5 -my-2 inline-flex min-h-11 items-center gap-1.5 rounded-full px-1.5 text-[14px] font-medium text-ink-3 active:bg-ink/[0.05] lg:hidden"
+      className="pressable -mx-1.5 -my-2 inline-flex min-h-11 items-center gap-1.5 rounded-full px-1.5 text-[14px] font-medium text-ink-3 active:bg-ink/[0.06] lg:hidden"
     >
       {done ? (
         <Check className="anim-pop h-4 w-4 text-arrived" strokeWidth={2.8} />
@@ -569,9 +581,12 @@ export default function DashboardPage() {
       }
       cacheRef.current.clear();
       await loadReport({ force: true });
-      haptic(8);
+      haptic("success");
       setSyncState("done");
-      if (data.totalSynced > 0) toast(`${data.totalSynced} updates`);
+      if (data.totalSynced > 0) {
+        pulseAmbient("success");
+        toast(`${data.totalSynced} updates`);
+      }
       setTimeout(() => setSyncState("idle"), 1400);
     } catch {
       setSyncState("idle");
@@ -580,7 +595,6 @@ export default function DashboardPage() {
   }
 
   const title = customDate ? manilaDayLabel(customDate) : RANGE_TITLES[range];
-  const isDemoOnly = Boolean(report && report.shops.length > 0 && report.shops.every((s) => s.isDemo));
   const toCheck = report?.attentionParcels.slice(0, 8) ?? [];
 
   return (
@@ -598,16 +612,6 @@ export default function DashboardPage() {
             dateLabel={customDate ? manilaDayLabel(customDate) : null}
             onSync={handleSync}
           />
-        ) : undefined
-      }
-      titleAccessory={
-        isDemoOnly ? (
-          <Link
-            href="/imports"
-            className="pressable rounded-full bg-surface-muted px-2.5 py-1 text-[13px] font-bold text-ink-2 hover:bg-surface-track"
-          >
-            Sample data
-          </Link>
         ) : undefined
       }
       headerRight={
@@ -703,7 +707,11 @@ export default function DashboardPage() {
         ) : (
           <div className="anim-fade-in grid grid-cols-1 gap-8 lg:grid-cols-12 lg:gap-6">
             <div className="lg:col-span-5">
-              <MoneyCard money={report.money} onOpen={() => setMoneyOpen(true)} />
+              <MoneyCard
+                money={report.money}
+                onOpen={() => setMoneyOpen(true)}
+                shopeeSoon={report.operations?.shopeeConnected === false}
+              />
               <Link
                 href="/profit"
                 className="group pressable mt-2 flex min-h-11 items-center justify-between rounded-[var(--radius-control)] px-4 text-[15px] font-semibold text-brand hover:bg-brand/10 lg:hidden"

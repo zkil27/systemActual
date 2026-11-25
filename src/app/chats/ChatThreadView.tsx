@@ -2,13 +2,16 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ChevronLeft, ExternalLink, MessageSquarePlus } from "lucide-react";
+import { ArrowDown, ChevronLeft, ExternalLink } from "lucide-react";
 import { useConfirm } from "@/components/ui/ConfirmSheet";
 import { PhotoLightbox } from "@/components/ui/PhotoLightbox";
 import { toast, Toaster } from "@/components/ui/Toast";
 import { describeFound, findOffPlatformDetails } from "@/lib/chats/contact-check";
 import { newClientKey, shrinkPhoto, timeoutSignal } from "@/lib/chats/client";
 import { platformName, shopParam, withDaySeparators } from "@/lib/chats/format";
+import { useAmbientShop } from "@/lib/ui/use-ambient";
+import { pulseAmbient } from "@/lib/ui/ambient";
+import { haptic, prefersReducedMotion } from "@/lib/ui/motion";
 import type { ChatDraftView, ChatMessageView, ChatThread } from "@/lib/chats/types";
 import { DraftCard, SuggestBar } from "./DraftCard";
 import { BuyerAvatar } from "./BuyerAvatar";
@@ -71,6 +74,7 @@ export function ChatThreadView({
   onChanged: () => void;
 }) {
   const [meta, setMeta] = useState<Meta | null>(null);
+  useAmbientShop(meta?.platform ?? null);
   const [draft, setDraft] = useState<ChatDraftView | null>(null);
   const [canSuggest, setCanSuggest] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
@@ -92,7 +96,6 @@ export function ChatThreadView({
   const [preparingPhoto, setPreparingPhoto] = useState(false);
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [newPill, setNewPill] = useState(false);
-  const [testing, setTesting] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
@@ -214,7 +217,7 @@ export function ChatThreadView({
     const mode = scrollMode.current;
     if (!el || !mode) return;
     scrollMode.current = null;
-    el.scrollTo({ top: el.scrollHeight, behavior: mode === "smooth" ? "smooth" : "auto" });
+    el.scrollTo({ top: el.scrollHeight, behavior: mode === "smooth" && !prefersReducedMotion() ? "smooth" : "auto" });
   }, [rows]);
 
   function onScroll() {
@@ -232,7 +235,7 @@ export function ChatThreadView({
 
   function jumpToNewest() {
     setNewPill(false);
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: prefersReducedMotion() ? "auto" : "smooth" });
   }
 
   function deliver(clientKey: string, content: Outgoing): Promise<void> {
@@ -263,17 +266,20 @@ export function ChatThreadView({
         mergeServer([msg]);
         if (msg.status === "SENT") {
           outgoing.current.delete(clientKey);
+          // Arrives after the tap, so only Android buzzes; the glow confirms on iPhone.
+          haptic("success");
+          pulseAmbient("success");
           onChanged();
         } else {
-          toast("Not sent. Tap the message to retry.", "error");
+          toast("Not sent. Tap the message to retry.", "error", { haptic: true });
         }
       } else {
         markFailed(clientKey);
-        toast(data?.error ?? "Not sent. Tap the message to retry.", "error");
+        toast(data?.error ?? "Not sent. Tap the message to retry.", "error", { haptic: true });
       }
     } catch {
       markFailed(clientKey);
-      toast("No connection. Tap the message to retry.", "error");
+      toast("No connection. Tap the message to retry.", "error", { haptic: true });
     }
   }
 
@@ -321,6 +327,7 @@ export function ChatThreadView({
         return;
       }
     }
+    haptic("tap");
     const clientKey = newClientKey();
     outgoing.current.set(clientKey, { text: body });
     addPending(clientKey, { kind: "TEXT", text: body, imageUrl: null });
@@ -342,6 +349,7 @@ export function ChatThreadView({
     const draft = photoDraft;
     if (!draft) return;
     setPhotoDraft(null);
+    haptic("tap");
     const clientKey = newClientKey();
     outgoing.current.set(clientKey, { file: draft.file });
     addPending(clientKey, { kind: "IMAGE", text: null, imageUrl: draft.url });
@@ -355,6 +363,7 @@ export function ChatThreadView({
 
   function retry(m: DisplayMessage) {
     if (!m.clientKey || m.status !== "FAILED") return;
+    haptic("tap");
     const saved = outgoing.current.get(m.clientKey);
     setPending((prev) => prev.map((p) => (p.clientKey === m.clientKey ? { ...p, status: "SENDING" } : p)));
     setMessages((prev) => prev.map((x) => (x.clientKey === m.clientKey ? { ...x, status: "SENDING" } : x)));
@@ -415,21 +424,6 @@ export function ChatThreadView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, autoSuggest, draft, lastBuyerId, meta?.canReply]);
 
-  async function sendTestMessage() {
-    if (!meta) return;
-    setTesting(true);
-    try {
-      const res = await fetch("/api/demo/chats/incoming", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform: meta.platform, conversationId: meta.id }),
-      });
-      if (!res.ok) toast("Couldn't add a test message", "error");
-    } finally {
-      setTesting(false);
-    }
-  }
-
   const backHref = `/chats?shop=${shopParam(meta?.platform ?? "TIKTOK")}`;
   const full = layout === "full";
 
@@ -456,7 +450,6 @@ export function ChatThreadView({
               <h1 className="truncate text-[17px] font-bold leading-tight text-ink">{meta.buyerName}</h1>
               <p className="truncate text-[13px] text-ink-3">
                 {platformName(meta.platform)}
-                {meta.sample ? " · Sample chat" : ""}
               </p>
             </div>
           </div>
@@ -478,7 +471,7 @@ export function ChatThreadView({
           {state === "missing" ? "Chats are kept for 90 days." : "Check your connection and try again."}
         </p>
         {full && (
-          <Link href={backHref} className="text-[16px] font-bold text-brand">
+          <Link href={backHref} className="pressable-text inline-flex min-h-11 items-center text-[16px] font-bold text-brand">
             Back to chats
           </Link>
         )}
@@ -531,19 +524,6 @@ export function ChatThreadView({
                 )
               )}
             </ol>
-            {meta.sample && (
-              <div className="flex justify-center pt-5">
-                <button
-                  type="button"
-                  onClick={sendTestMessage}
-                  disabled={testing}
-                  className="pressable inline-flex min-h-11 items-center gap-2 rounded-full px-3 text-[14px] font-semibold text-brand hover:bg-brand-soft disabled:opacity-60"
-                >
-                  <MessageSquarePlus className="h-4 w-4" />
-                  {testing ? "Sending…" : "Send a test buyer message"}
-                </button>
-              </div>
-            )}
           </div>
           {newPill && (
             <button
@@ -614,7 +594,7 @@ export function ChatThreadView({
   }
 
   const shell = (
-    <div className={`flex h-full min-h-0 flex-col ${full ? "bg-ground" : "bg-ground/60"}`}>
+    <div className={`flex h-full min-h-0 flex-col ${full ? "" : "bg-ground/60"}`}>
       {header}
       {content}
     </div>

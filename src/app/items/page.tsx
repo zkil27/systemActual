@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ChevronRight, Link2, PackagePlus, RotateCw, Search, Sparkles, Star } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Button, Group } from "@/components/ui/Button";
+import { ComingSoonPill } from "@/components/ui/ComingSoon";
 import { useConfirm } from "@/components/ui/ConfirmSheet";
 import { Disclosure } from "@/components/ui/Disclosure";
 import { ItemThumb } from "@/components/ui/ItemThumb";
@@ -16,6 +17,7 @@ import { useLiveRefresh } from "@/lib/ui/use-live-refresh";
 import type { CatalogGarment, CatalogVariant } from "@/lib/catalog/garments";
 import type { StockHistoryRow } from "@/lib/stock/history";
 import { manilaDateTime } from "@/lib/ui/format";
+import { haptic, prefersReducedMotion } from "@/lib/ui/motion";
 
 type Platform = "SHOPEE" | "TIKTOK";
 type ItemFilter = "all" | "low" | "out" | "errors" | "unlinked" | "check" | "archived";
@@ -104,7 +106,7 @@ function ItemFilterChips({
     const el = refs.current[value];
     if (!el) return;
     setBox({ x: el.offsetLeft, w: el.offsetWidth });
-    el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+    el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: prefersReducedMotion() ? "auto" : "smooth" });
   }, [value, needsCheck, errors, archived]);
 
   const options = [
@@ -138,8 +140,11 @@ function ItemFilterChips({
             type="button"
             role="tab"
             aria-selected={active}
-            onClick={() => onChange(f.id)}
-            className={`pressable relative z-10 h-9 shrink-0 rounded-full px-3.5 text-[13px] font-semibold transition-colors ${
+            onClick={() => {
+              if (!active) haptic("select");
+              onChange(f.id);
+            }}
+            className={`pressable relative z-10 h-9 shrink-0 rounded-full px-3.5 text-[13px] font-semibold ${
               active
                 ? "text-ink-inverse"
                 : "bg-surface text-ink-2 shadow-[var(--shadow-card)] hover:text-ink"
@@ -670,6 +675,16 @@ export default function ItemsPage() {
           )}
         </Group>
 
+        {bump && !bump.connected && (
+          <Group className="flex items-center justify-between gap-3 p-4">
+            <div>
+              <h2 className="text-[17px] font-bold text-ink">Shopee Auto-Bump</h2>
+              <p className="text-[13px] text-ink-3">Shopee is still reviewing Kyna Ops.</p>
+            </div>
+            <ComingSoonPill />
+          </Group>
+        )}
+
         {bump?.connected && (
           <Group className="space-y-3 p-4">
             <div className="flex items-center justify-between gap-3">
@@ -803,6 +818,7 @@ export default function ItemsPage() {
                         type="button"
                         disabled={busy}
                         onClick={() => {
+                          haptic("select");
                           setLastToggledPinId(shopeeItemId);
                           void run(
                             { action: "pin_bump", itemId: shopeeItemId },

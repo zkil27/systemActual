@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Eye, EyeOff, ScanBarcode } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { safeNextPath } from "@/lib/ui/safe-next";
+import { haptic } from "@/lib/ui/motion";
 
 const fieldClass =
   "h-[52px] w-full bg-transparent px-4 text-[17px] text-ink placeholder:text-ink-3 focus:outline-none";
@@ -39,6 +40,7 @@ function LoginForm() {
       if (!res.ok) {
         setError(data.error || "Wrong email or password.");
         setShakeKey((k) => k + 1);
+        haptic("error");
         return;
       }
       router.replace(nextPath);

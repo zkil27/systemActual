@@ -260,10 +260,10 @@ export function AppShell({
 
   return (
     <div className="min-h-dvh pb-[calc(max(12px,env(safe-area-inset-bottom))+100px)] lg:pb-16 lg:pl-60">
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-hairline bg-ground px-3 pb-4 lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-hairline bg-ground/60 px-3 pb-4 lg:flex">
         <Link
           href="/"
-          className="flex h-16 shrink-0 items-center px-3 text-[17px] font-extrabold tracking-tight text-ink"
+          className="pressable-text flex h-16 shrink-0 items-center px-3 text-[17px] font-extrabold tracking-tight text-ink"
         >
           Kyna Ops
         </Link>
@@ -279,7 +279,7 @@ export function AppShell({
         className={`safe-top sticky top-0 z-30 transition-[background-color,border-color,backdrop-filter] duration-200 ${
           collapsed
             ? "border-b border-hairline bg-surface/80 backdrop-blur-xl backdrop-saturate-150"
-            : "border-b border-transparent bg-ground"
+            : "border-b border-transparent bg-transparent"
         }`}
       >
         <div className={`relative mx-auto flex h-12 items-center justify-between px-5 lg:h-16 lg:px-8 ${maxW}`}>
@@ -358,7 +358,7 @@ export function AppShell({
                 key={tab.href}
                 href={tab.href}
                 aria-current={active ? "page" : undefined}
-                className={`pressable relative flex flex-col items-center justify-center gap-0.5 rounded-full text-[11px] font-semibold transition-colors duration-150 ${
+                className={`pressable relative flex flex-col items-center justify-center gap-0.5 rounded-full text-[11px] font-semibold ${
                   active ? "text-brand" : "text-ink-3 active:text-ink"
                 }`}
               >

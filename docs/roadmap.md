@@ -139,7 +139,8 @@ Risks:
 ## Phase 4: chats on both shops, safe auto-replies (planned)
 
 Problem:
-- Only TikTok chats are connected (`src/lib/chats/*`). Shopee chats show sample data.
+- Only TikTok chats are connected (`src/lib/chats/*`). The Shopee tab shows "Coming soon" (`chatsComingSoon` in `src/lib/chats/format.ts`) while the Shopee Open Platform profile is under review. The sample data (demo shops, sample chats and returns) was removed on 2026-11-26.
+- When Shopee approves: set the Shopee keys, make `chatsComingSoon` return false for connected Shopee shops, and drop the "Coming soon" on Upload (`src/app/imports/page.tsx`). Settings, Items and Today switch back by themselves once a real Shopee shop is connected.
 - The assistant's "Auto" mode does nothing: `canAutoSend` and `withAutoLabel` in `src/lib/ai/settings.ts` are never called.
 - Sending replies to real buyers depends on the `CHAT_SEND_TIKTOK` environment variable, which has no switch in the app.
 

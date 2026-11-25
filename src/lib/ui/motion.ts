@@ -39,13 +39,5 @@ export function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-/** Short vibration on Android. iOS Safari ignores it, which is fine. */
-export function haptic(pattern: number | number[] = 10): void {
-  if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
-    try {
-      navigator.vibrate(pattern);
-    } catch {
-      // Some browsers throw when called without a user gesture.
-    }
-  }
-}
+/** Named haptics (Android vibrate, iPhone switch tick). See `haptics.ts`. */
+export { haptic, type HapticKind } from "@/lib/ui/haptics";

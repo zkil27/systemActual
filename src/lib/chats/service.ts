@@ -7,7 +7,6 @@ import {
   canSendPhotosFrom,
   ChatSendDisabledError,
   chatSourceFor,
-  isChatLive,
   PHOTO_OFF_NOTE,
   REPLY_OFF_NOTE,
   tiktokSendSetting,
@@ -16,53 +15,21 @@ import {
 export { ChatSendDisabledError };
 import { refreshDraft } from "@/lib/ai/drafts";
 import { isHoldingReply } from "@/lib/ai/intent";
+import { chatsComingSoon } from "./format";
 import type { ChatCard, ChatListItem, ChatMessageView, ChatPlatform, ChatThread, ChatUnread } from "./types";
 
 export const CHAT_PAGE_SIZE = 30;
 /** First load of a thread. Older messages stay in the shop app. */
 export const THREAD_MESSAGE_LIMIT = 200;
 
-export interface ChatShopSnapshot {
-  platform: string;
-  isDemo: boolean;
-  accessToken: string | null;
-  chatAccessAt?: Date | null;
-}
-
-/**
- * Sample chats show for a platform until a real shop on it has live chats.
- * Returns which kind of shop each platform's chats come from.
- */
-export function chatVisibility(
-  shops: ChatShopSnapshot[],
-  live: (shop: ChatShopSnapshot) => boolean = isChatLive
-): Record<ChatPlatform, { sample: boolean }> {
-  const liveOn = (p: ChatPlatform) => shops.some((s) => s.platform === p && !s.isDemo && live(s));
-  return {
-    SHOPEE: { sample: !liveOn("SHOPEE") },
-    TIKTOK: { sample: !liveOn("TIKTOK") },
-  };
-}
-
-async function loadVisibility() {
-  const shops = await prisma.shopConnection.findMany({
-    select: { platform: true, isDemo: true, accessToken: true, chatAccessAt: true },
-  });
-  return chatVisibility(shops);
-}
-
-function conversationWhere(platform: ChatPlatform, sample: boolean): Prisma.ChatConversationWhereInput {
-  return { platform: platform as Platform, shopConnection: { isDemo: sample } };
-}
-
+/** Real shops only. Shopee chats are coming soon, so none are listed or counted. */
 export async function listChats(
   platform: ChatPlatform,
   cursor?: string | null
-): Promise<{ items: ChatListItem[]; nextCursor: string | null; sample: boolean }> {
-  const vis = await loadVisibility();
-  const sample = vis[platform].sample;
+): Promise<{ items: ChatListItem[]; nextCursor: string | null; comingSoon: boolean }> {
+  if (chatsComingSoon(platform)) return { items: [], nextCursor: null, comingSoon: true };
   const rows = await prisma.chatConversation.findMany({
-    where: conversationWhere(platform, sample),
+    where: { platform: platform as Platform, shopConnection: { isDemo: false } },
     orderBy: [{ lastMessageAt: "desc" }, { id: "desc" }],
     take: CHAT_PAGE_SIZE + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -88,19 +55,16 @@ export async function listChats(
       unreadCount: r.unreadCount,
     })),
     nextCursor: rows.length > CHAT_PAGE_SIZE ? page[page.length - 1].id : null,
-    sample,
+    comingSoon: false,
   };
 }
 
-/** Sums unread per platform from rows grouped by platform and shop kind. */
-export function sumUnread(
-  groups: Array<{ platform: string; isDemo: boolean; unread: number }>,
-  vis: Record<ChatPlatform, { sample: boolean }>
-): ChatUnread {
+/** Sums unread per platform. Skips sample shops and platforms whose chats are coming soon. */
+export function sumUnread(groups: Array<{ platform: string; isDemo: boolean; unread: number }>): ChatUnread {
   const out: ChatUnread = { SHOPEE: 0, TIKTOK: 0, total: 0 };
   for (const g of groups) {
     if (g.platform !== "SHOPEE" && g.platform !== "TIKTOK") continue;
-    if (vis[g.platform].sample !== g.isDemo) continue;
+    if (g.isDemo || chatsComingSoon(g.platform)) continue;
     out[g.platform] += g.unread;
   }
   out.total = out.SHOPEE + out.TIKTOK;
@@ -108,18 +72,12 @@ export function sumUnread(
 }
 
 export async function unreadTotals(): Promise<ChatUnread> {
-  const [vis, rows] = await Promise.all([
-    loadVisibility(),
-    // Only unread chats, so this stays small however many chats there are.
-    prisma.chatConversation.findMany({
-      where: { unreadCount: { gt: 0 } },
-      select: { platform: true, unreadCount: true, shopConnection: { select: { isDemo: true } } },
-    }),
-  ]);
-  return sumUnread(
-    rows.map((r) => ({ platform: r.platform, isDemo: r.shopConnection.isDemo, unread: r.unreadCount })),
-    vis
-  );
+  // Only unread chats, so this stays small however many chats there are.
+  const rows = await prisma.chatConversation.findMany({
+    where: { unreadCount: { gt: 0 }, shopConnection: { isDemo: false } },
+    select: { platform: true, unreadCount: true },
+  });
+  return sumUnread(rows.map((r) => ({ platform: r.platform, isDemo: false, unread: r.unreadCount })));
 }
 
 export function toCard(raw: Prisma.JsonValue | null): ChatCard | null {
@@ -251,7 +209,6 @@ export async function getThread(id: string, afterId?: string | null): Promise<Ch
     platform: conv.platform as ChatPlatform,
     buyerName: conv.buyerName,
     buyerAvatarUrl: conv.buyerAvatarUrl,
-    sample: conv.shopConnection.isDemo,
     ...replyState(conv.canReply, conv.shopConnection, conv.externalId),
     order: buildOrderPanel({ order, sampleOrder: conv.shopConnection.isDemo ? conv.sampleOrder : null }),
     messages: messages.map(toMessageView),

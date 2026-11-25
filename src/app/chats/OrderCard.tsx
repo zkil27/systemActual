@@ -63,7 +63,7 @@ export function OrderCard({ order, defaultOpen = false }: { order: OrderPanel; d
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((v) => !v)}
-        className="pressable-row flex min-h-[60px] w-full items-center gap-3 rounded-[var(--radius-card)] px-3 py-2 text-left hover:bg-surface-subtle"
+        className="pressable-row flex min-h-[60px] w-full items-center gap-3 rounded-[var(--radius-card)] px-3 py-2 text-left hover:bg-surface-subtle active:bg-surface-muted"
       >
         <ItemThumb src={order.photoUrl} alt={order.itemName} size="sm" />
         <span className="min-w-0 flex-1">

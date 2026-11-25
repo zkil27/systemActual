@@ -128,6 +128,8 @@ export interface DailyTruthReport {
     stockPushFailedCount: number;
     shopeeBumpEnabled: boolean;
     shopeeBoostedCount: number;
+    /** A real Shopee shop is connected. False while Shopee is coming soon. */
+    shopeeConnected: boolean;
   };
 }
 
@@ -502,6 +504,7 @@ export async function getDailyTruthReport(options?: {
       stockPushFailedCount,
       shopeeBumpEnabled: bumpStatus.enabled,
       shopeeBoostedCount: bumpStatus.boosted.length,
+      shopeeConnected: Boolean(liveShopee),
     },
   };
 }

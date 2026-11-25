@@ -17,7 +17,7 @@ The existing Supabase database was created with `db push`, so it already matches
 
 `npm run db:deploy`, then optionally `npm run db:seed`.
 
-The seed creates a demo owner (`owner@kynaph.com` / `kyna1234`) and demo staff PINs.
+The seed creates a demo owner (`owner@kynaph.com` / `kyna1234`) and demo staff PINs. It adds no sample shops, chats or returns.
 Do not run it against the real database, or change those credentials immediately if you do.
 
 ## Day to day

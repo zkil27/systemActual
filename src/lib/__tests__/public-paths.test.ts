@@ -45,7 +45,6 @@ describe("isPublicPath", () => {
       "/api/chats/unread",
       "/api/chats/abc/messages",
       "/api/chats/photos/chat-photo-1-ab.jpg",
-      "/api/demo/chats/incoming",
     ]) {
       expect(isPublicPath(path), path).toBe(false);
     }

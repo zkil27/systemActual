@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Public_Sans } from "next/font/google";
+import { AmbientField } from "@/components/AmbientField";
 import { ThemeSync } from "@/components/ThemeSync";
 import { UpdatePrompt } from "@/components/UpdatePrompt";
 import { THEME_INIT_SCRIPT } from "@/lib/ui/theme";
@@ -50,6 +51,7 @@ export default function RootLayout({
       </head>
       <body className="antialiased">
         <ThemeSync />
+        <AmbientField />
         {children}
         <UpdatePrompt />
       </body>

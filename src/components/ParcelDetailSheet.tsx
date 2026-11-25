@@ -10,6 +10,8 @@ import { Sheet } from "@/components/ui/Sheet";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { toast } from "@/components/ui/Toast";
 import { formatPeso, manilaDateTime } from "@/lib/ui/format";
+import { haptic } from "@/lib/ui/motion";
+import { useAmbientShop } from "@/lib/ui/use-ambient";
 import { categoryLabel, getParcelStatus } from "@/lib/ui/parcel-status";
 import { CONDITIONS, conditionLabel } from "@/lib/ui/conditions";
 import { deadlineCountdown, DISPUTE_STATUSES, eventSourceLabel, humanizeStatus, type DisputeStatusId } from "@/lib/ui/dispute";
@@ -171,9 +173,12 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
 function ParcelDetailBody({
   parcelId,
   onChanged,
+  ambient = false,
 }: {
   parcelId: string | null;
   onChanged?: () => void;
+  /** Tint the background with the parcel's shop while open (bottom sheet only). */
+  ambient?: boolean;
 }) {
   // Kept after close so the sheet still has content while it slides away.
   const [parcel, setParcel] = useState<ParcelDetailData | null>(null);
@@ -188,6 +193,7 @@ function ParcelDetailBody({
   const [disputeRef, setDisputeRef] = useState("");
   const [reimbursed, setReimbursed] = useState("");
   const [audit, setAudit] = useState<AuditEntry[]>([]);
+  useAmbientShop(ambient && parcelId && parcel ? parcel.platform : null);
 
   // A different parcel starts clean; a reload after an action keeps the content on screen.
   useEffect(() => {
@@ -277,8 +283,16 @@ function ParcelDetailBody({
 
   async function handleCopy() {
     if (!draft) return;
-    await navigator.clipboard.writeText(draft);
+    // Before the await, so the iPhone tick still counts as part of the tap.
+    haptic("success");
+    try {
+      await navigator.clipboard.writeText(draft);
+    } catch {
+      toast("Couldn't copy. Try again.", "error");
+      return;
+    }
     setCopied(true);
+    toast("Message copied");
     setTimeout(() => setCopied(false), 1800);
   }
 
@@ -702,7 +716,7 @@ export function ParcelDetailSheet({
 }) {
   return (
     <Sheet open={parcelId !== null} onClose={onClose} title="Parcel">
-      <ParcelDetailBody parcelId={parcelId} onChanged={onChanged} />
+      <ParcelDetailBody parcelId={parcelId} onChanged={onChanged} ambient />
     </Sheet>
   );
 }

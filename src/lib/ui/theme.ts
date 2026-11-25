@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { AMBIENT_STORAGE_KEY, parseAmbientPreference } from "@/lib/ui/ambient";
 import { prefersReducedMotion } from "@/lib/ui/motion";
 
 export const THEME_STORAGE_KEY = "kyna:theme";
@@ -27,7 +28,7 @@ export function resolveTheme(pref: ThemePreference, systemDark: boolean): Resolv
 /** Runs synchronously in <head> before first paint to prevent a light/dark flash. */
 export const THEME_INIT_SCRIPT = `(function(){try{var k=${JSON.stringify(
   THEME_STORAGE_KEY
-)};var p=localStorage.getItem(k);if(p!=="light"&&p!=="dark"&&p!=="system")p="light";var sys=typeof window.matchMedia==="function"&&window.matchMedia("(prefers-color-scheme: dark)").matches;var d=p==="dark"||(p==="system"&&sys);var r=document.documentElement;r.classList.toggle("dark",d);r.dataset.theme=p;r.style.colorScheme=d?"dark":"light";var c=d?${JSON.stringify(
+)};var p=localStorage.getItem(k);if(p!=="light"&&p!=="dark"&&p!=="system")p="light";var sys=typeof window.matchMedia==="function"&&window.matchMedia("(prefers-color-scheme: dark)").matches;var d=p==="dark"||(p==="system"&&sys);var r=document.documentElement;r.classList.toggle("dark",d);r.dataset.theme=p;r.style.colorScheme=d?"dark":"light";r.dataset.ambient=localStorage.getItem(${JSON.stringify(AMBIENT_STORAGE_KEY)})==="off"?"off":"on";var c=d?${JSON.stringify(
   THEME_COLORS.dark
 )}:${JSON.stringify(
   THEME_COLORS.light
@@ -120,4 +121,46 @@ export function useTheme(): {
   const preference = useSyncExternalStore(subscribeTheme, getThemePreference, serverTheme);
   const resolved = useSyncExternalStore(subscribeTheme, getResolvedTheme, serverResolved);
   return { preference, resolved, setPreference: setThemePreference };
+}
+
+// ── Background color (ambient field) ───────────────────────────────────────
+// Stored on this phone like the theme, and applied by THEME_INIT_SCRIPT
+// before first paint as <html data-ambient="on|off">.
+
+export type AmbientPreference = "on" | "off";
+
+export function getAmbientPreference(): AmbientPreference {
+  if (typeof window === "undefined") return "on";
+  try {
+    return parseAmbientPreference(window.localStorage.getItem(AMBIENT_STORAGE_KEY));
+  } catch {
+    return "on";
+  }
+}
+
+export function applyAmbientToDocument(pref: AmbientPreference): void {
+  if (typeof document === "undefined") return;
+  document.documentElement.dataset.ambient = pref;
+}
+
+export function setAmbientPreference(pref: AmbientPreference): void {
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(AMBIENT_STORAGE_KEY, pref);
+    } catch {
+      // Private browsing / restricted storage
+    }
+  }
+  applyAmbientToDocument(pref);
+  emitThemeChange();
+}
+
+const serverAmbient = (): AmbientPreference => "on";
+
+export function useAmbientPreference(): {
+  ambient: AmbientPreference;
+  setAmbient: (pref: AmbientPreference) => void;
+} {
+  const ambient = useSyncExternalStore(subscribeTheme, getAmbientPreference, serverAmbient);
+  return { ambient, setAmbient: setAmbientPreference };
 }

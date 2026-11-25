@@ -7,6 +7,7 @@ import { ItemThumb } from "@/components/ui/ItemThumb";
 import { Sheet } from "@/components/ui/Sheet";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { formatPeso, manilaDateTime } from "@/lib/ui/format";
+import { useAmbientShop } from "@/lib/ui/use-ambient";
 import type { StatusTone } from "@/lib/ui/parcel-status";
 import { parsePickItemLabel, type WaveParcel, type WaveParcelLine } from "@/lib/waves/plan";
 
@@ -283,7 +284,7 @@ function MultiParcelListView({
               <button
                 type="button"
                 onClick={() => onSelectParcel(parcel.id)}
-                className="group pressable flex w-full items-center gap-3 py-3 text-left transition-colors hover:bg-surface-subtle active:bg-surface-muted"
+                className="group pressable-row flex w-full items-center gap-3 py-3 text-left hover:bg-surface-subtle active:bg-surface-muted"
               >
                 <ItemThumb
                   src={matchingLine?.imageUrl ?? null}
@@ -381,6 +382,9 @@ export function WaveParcelSheet({
   const current = selection ?? cached;
   const activeParcel =
     current && activeParcelId ? current.parcels.find((p) => p.id === activeParcelId) ?? null : null;
+
+  // One open order tints the background with its shop until the sheet closes.
+  useAmbientShop(selection !== null && activeParcel ? activeParcel.platform : null);
 
   const sheetTitle = activeParcel
     ? `Parcel #${activeParcel.position}`

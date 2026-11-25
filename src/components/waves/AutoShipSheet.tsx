@@ -112,7 +112,7 @@ export function AutoShipSheet({
                     type="button"
                     aria-pressed={active}
                     onClick={() => toggleTime(t)}
-                    className={`pressable relative flex h-14 items-center justify-center rounded-[var(--radius-control)] text-[16px] font-semibold tabular-nums transition-colors ${
+                    className={`pressable relative flex h-14 items-center justify-center rounded-[var(--radius-control)] text-[16px] font-semibold tabular-nums ${
                       active
                         ? "bg-brand-soft text-brand shadow-[inset_0_0_0_2px_var(--color-brand)]"
                         : "bg-surface-muted text-ink-2 hover:bg-surface-track"
