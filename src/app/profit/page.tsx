@@ -201,7 +201,20 @@ export default function ProfitPage() {
         )}
 
         {error && !report ? (
-          <p className="py-10 text-center text-[17px] font-semibold text-ink">Couldn&apos;t load profit. Pull to try again.</p>
+          <div className="space-y-3 py-10 text-center">
+            <p className="text-[17px] font-semibold text-ink">Couldn&apos;t load profit.</p>
+            <p className="text-[15px] text-ink-3">Check the connection, then try again.</p>
+            <button
+              type="button"
+              onClick={() => {
+                setLoading(true);
+                void load(month);
+              }}
+              className="pressable inline-flex h-12 items-center rounded-[var(--radius-control)] bg-surface-muted px-5 text-[16px] font-bold text-ink hover:bg-surface-track"
+            >
+              Try again
+            </button>
+          </div>
         ) : loading || !report || !t ? (
           <div className="h-64 animate-pulse rounded-[var(--radius-card)] bg-surface-muted" />
         ) : (
