@@ -2,11 +2,9 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { verifyTikTokWebhookSignature } from "@/lib/connectors/tiktok";
-import { syncSingleOrder } from "@/lib/ledger/sync";
-import { notifyCancelledPrintedOrder } from "@/lib/shipping/outbound";
+import { eventFields, processEvent, storeEvent } from "@/lib/integrations/inbox";
+import { handleMarketplaceEvent } from "@/lib/integrations/handle-event";
 import { runTick } from "@/lib/worker/tick";
-import { isChatWebhook } from "@/lib/chats/webhook";
-import { syncAllTikTokChats } from "@/lib/chats/tiktok-sync";
 
 export const maxDuration = 120;
 
@@ -30,51 +28,37 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const data = (payload?.data ?? {}) as Record<string, unknown>;
+  // Store first: a resend is answered without doing the work twice, and a
+  // crash below leaves the event for the worker tick to retry.
+  const eventId = await storeEvent(Platform.TIKTOK, payload, rawBody);
+  if (!eventId) return NextResponse.json({ ok: true, duplicate: true });
+
+  const fields = eventFields(Platform.TIKTOK, payload);
 
   // Buyer chat events (New conversation / New message) only touch Chats, never the order sync.
-  if (isChatWebhook(data)) {
-    after(() =>
-      syncAllTikTokChats(Date.now() + 50_000, 5_000).catch((err) =>
-        console.error("[TikTok chat webhook]", err instanceof Error ? err.message : err)
-      )
-    );
+  if (fields.isChat) {
+    after(() => processEvent(eventId, handleMarketplaceEvent).catch((err) => console.error("[TikTok chat webhook]", err)));
     return NextResponse.json({ ok: true });
   }
 
   // Fast-track urgent cancellations before any in-flight wave ships the order.
-  const orderSn = typeof data.order_id === "string" ? data.order_id : "";
-  const status = String(data.order_status ?? "").toUpperCase();
-  const cancelStatus = String(data.cancel_status ?? "").toUpperCase();
-  const isCancelEvent = Boolean(orderSn && (status === "CANCELLED" || cancelStatus.includes("CANCEL")));
-  if (isCancelEvent) {
+  if (fields.isCancel && fields.orderSn) {
     await prisma.order
       .updateMany({
-        where: { platform: Platform.TIKTOK, orderSn },
+        where: { platform: Platform.TIKTOK, orderSn: fields.orderSn },
         data: {
           cancelRequested: true,
-          ...(status === "CANCELLED" ? { status: "CANCELLED" } : {}),
+          ...(fields.cancelStatus === "CANCELLED" ? { status: "CANCELLED" } : {}),
         },
       })
       .catch((err) => console.error("[TikTok fast-cancel]", err));
   }
 
-  const shopExternalId = typeof payload?.shop_id === "string" ? payload.shop_id : undefined;
-
-  // TikTok needs a 200 within 3 seconds. Fast-sync the specific changed order
-  // first (<1s) so dashboards reflect it immediately, then run the full tick.
+  // TikTok needs a 200 within 3 seconds. Handle the event (fast single-order
+  // sync) after replying, then run the full tick.
   after(async () => {
     try {
-      if (isCancelEvent) {
-        await notifyCancelledPrintedOrder(Platform.TIKTOK, orderSn).catch((err) =>
-          console.error("[TikTok cancel-pull alert]", orderSn, err)
-        );
-      }
-      if (orderSn) {
-        await syncSingleOrder(Platform.TIKTOK, orderSn, shopExternalId).catch((err) =>
-          console.error("[TikTok single-order sync error]", orderSn, err)
-        );
-      }
+      await processEvent(eventId, handleMarketplaceEvent);
       await runTick("webhook", { platform: Platform.TIKTOK });
     } catch (err) {
       console.error("[TikTok webhook tick error]", err);

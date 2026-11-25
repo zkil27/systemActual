@@ -31,6 +31,42 @@ Do these steps in order. Each one can be stopped or undone until **step 7**. Fro
 3. `npm run db:deploy` applies the new migrations.
 4. `npm run db:clear-returns -- --yes` removes demo, imported and old-sync return rows. The old sync filed every buyer return a second time as a failed delivery.
 
+## 1b. Free heartbeat: keep syncing when the warehouse PC is off
+
+The app syncs when the PC agent calls it (every minute while the PC is on) and
+when Shopee/TikTok send a webhook. Vercel's free plan runs scheduled jobs at
+most once a day, so at night or with the PC off nothing else wakes it. That
+delays the 8 PM brief, alerts and scheduled waves. Supabase can call the app
+for free:
+
+1. Supabase dashboard > Database > Extensions: turn on `pg_cron` and `pg_net`.
+2. SQL editor, once (put in the real `CRON_SECRET` and app address):
+
+   ```sql
+   select vault.create_secret('<CRON_SECRET from Vercel env>', 'kyna_cron_secret');
+
+   select cron.schedule(
+     'kyna-worker-tick',
+     '*/5 * * * *',
+     $$
+     select net.http_get(
+       url := 'https://<your-app-domain>/api/worker/tick',
+       headers := jsonb_build_object(
+         'Authorization',
+         'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'kyna_cron_secret')
+       ),
+       timeout_milliseconds := 125000
+     );
+     $$
+   );
+   ```
+
+3. Check it: `select * from cron.job_run_details order by start_time desc limit 5;`
+   and Settings > Health shows a recent sync with the PC off.
+
+The tick has a lock, so this never runs on top of the PC's own tick. To stop
+it: `select cron.unschedule('kyna-worker-tick');`
+
 ## 2. Rehearse on test shops (Writes, test shops only)
 
 Use Shopee's sandbox (`SHOPEE_BASE_URL=https://partner.test-stable.shopeemobile.com`) and a TikTok test shop. These parts haven't run end to end anywhere yet, so this step matters:
@@ -122,7 +158,7 @@ The returns, money and Telegram features keep working read-only, so you can roll
 - [ ] Waves: the "need attention" list is empty or explained.
 - [ ] Items & stock: no "not updated" warnings.
 - [ ] Printer: online during work hours, with no failed prints.
-- [ ] The 8 PM Telegram brief arrives. It needs a sync after 8 PM, so on a night with no orders it comes with the first sync the next morning.
+- [ ] The 8 PM Telegram brief arrives. It needs a sync after 8 PM: with the heartbeat (step 1b) it comes within 5 minutes; without it, on a night with no orders it comes with the first sync the next morning.
 - [ ] A few orders compared end to end with Seller Center: status, tracking number, money credited.
 
 ## Known limits

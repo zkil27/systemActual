@@ -19,6 +19,8 @@ import { advanceTikTokWaves } from "@/lib/shipping/tiktok-engine";
 import { finishDoneWaves, maybeStartScheduledWave } from "@/lib/waves/run";
 import { claimReadyReconcile, reconcileReadyOrders } from "@/lib/waves/reconcile";
 import { withSpan } from "@/lib/otel";
+import { drainIntegrationEvents } from "@/lib/integrations/inbox";
+import { handleMarketplaceEvent } from "@/lib/integrations/handle-event";
 import { runLocked } from "./lock";
 
 /**
@@ -162,6 +164,17 @@ async function tickOnce(
     orderBy: { platform: "asc" },
     select: { id: true, platform: true },
   });
+
+  // Webhook events whose handling crashed or timed out get another try.
+  try {
+    if (hasTime(deadline, 30_000)) {
+      await withSpan("worker.tick.inbox", () =>
+        drainIntegrationEvents(sliceDeadline(deadline, 0.15), handleMarketplaceEvent)
+      );
+    }
+  } catch (err) {
+    console.error("[tick] webhook inbox", err);
+  }
 
   // Run shops in parallel so Shopee and TikTok never block each other.
   const shopBudgetDeadline = sliceDeadline(deadline, 0.7);

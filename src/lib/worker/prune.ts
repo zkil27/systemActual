@@ -5,6 +5,7 @@ import { pruneOldOrders } from "@/lib/ledger/store";
 import { pruneOldChats } from "@/lib/chats/prune";
 import { getManilaDateString } from "@/lib/time";
 import { AUDIT_RETENTION_DAYS } from "@/lib/audit";
+import { pruneIntegrationEvents } from "@/lib/integrations/inbox";
 
 const DAILY_PRUNE_LOCK_ID = "daily-prune";
 const PRINT_JOB_RETENTION_DAYS = 30;
@@ -159,6 +160,12 @@ export async function pruneDailyData(now: Date = new Date()): Promise<DailyPrune
     });
   } catch (err) {
     console.error("[prune] audit log", err);
+  }
+
+  try {
+    await pruneIntegrationEvents(now);
+  } catch (err) {
+    console.error("[prune] webhook inbox", err);
   }
 
   let movementsRolledUp = 0;
