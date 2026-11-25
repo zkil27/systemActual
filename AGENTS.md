@@ -10,6 +10,13 @@ Edit this file, not those.
 - `main` is production: every push to it deploys to the live app.
 - Don't commit to, push to, or merge into `main` unless the user asks.
 
+## Roadmap
+
+`docs/roadmap.md` is the shared plan: what's done, what's next, and the rules
+for new features (owner stays in control, $0 budget, free-database limits,
+light staff screens). Read it before planning or building a feature. When you
+finish part of a phase, update its status and "Open" list in the same change.
+
 ## Release notes
 
 The app shows a "New update available" sheet when a deploy adds a new entry to

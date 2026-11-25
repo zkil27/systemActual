@@ -1,0 +1,222 @@
+# Kyna Ops roadmap
+
+Shared plan for every agent and developer working in this repo. Read it before
+planning or building a feature. When you finish part of a phase, update the
+status table and that phase's "Open" list in the same change.
+
+Last updated: 2026-11-26.
+
+## Status
+
+| Phase | Theme | Status |
+|---|---|---|
+| 1 | Return truth, item by item, plus foundations | Done on `dev` (not on `main` yet) |
+| 2 | Profit per order | Done on `dev` (not on `main` yet) |
+| 3 | Restock and suppliers | Planned |
+| 4 | Chats on both shops, safe auto-replies | Planned |
+| 5 | Listings and prices in one place | Planned |
+| Ongoing | Maintainability | Backlog below |
+
+Suggested order: 3, 4, 5. Phase 5 is last because it writes to the live listings.
+
+## Constraints
+
+- **One seller** (Kyna: 1 Shopee PH + 1 TikTok Shop PH, 400 to 2,000 parcels a day, 6 staff). It must be able to take more shops per platform, and maybe Lazada or Shopify, later. It is not a multi-seller SaaS.
+- **$0 budget.** Free tiers only. The paid upgrades listed at the end are for the developer to propose to the client later; don't build anything that needs them.
+- **Free Postgres is 500 MB.** Every new table needs a retention rule. Keep per-order detail for a limited time and roll it up into small tables kept permanently (see `OrderFinance` → `FinanceMonth`).
+- **Vercel Hobby** runs scheduled jobs at most once a day. Background work runs in the worker tick (`src/lib/worker/tick.ts`), triggered by the warehouse PC agent, webhooks, and the optional Supabase `pg_cron` heartbeat (`docs/cutover.md`, step 1b).
+- **The tick has a 90 s budget**, and every step must respect its deadline (`hasTime`, `sliceDeadline`).
+- **Phone-first**, plain everyday English, owner on a phone, staff on phones at the scan table. Staff never see pesos (`redactParcelForStaff` in `src/lib/auth.ts`, test `src/lib/__tests__/staff-redaction.test.ts`).
+- **Release notes** follow `AGENTS.md`.
+
+## How automation stays under the owner's control
+
+Apply this to every phase.
+
+- **Gate by risk.** Run automatically only what's cheap to reverse: syncing, alerts, drafts, stock pushes inside a buffer. Anything that moves money, talks to buyers, or can't be undone goes through preview, then approve. Waves already work this way.
+- **Log every change** in `AuditLog` via `recordAudit` (`src/lib/audit.ts`). The actor is the owner, the staff member, or `systemActor("<job>")`. Give actions an undo where you can (scans have a 5-minute undo).
+- **Give every automation a visible switch** in Settings. Don't add switches that live only in environment variables.
+- **Keep the staff screens light.** Default to the common case, ask only about exceptions, no typing, no item barcodes. The owner fixes mistakes later, not staff.
+
+## Data model rules
+
+For every new table:
+- Add `createdAt` and `updatedAt`.
+- Use a real foreign key where today the code keeps a bare string id.
+- Store money as `Decimal`.
+- Add a retention rule.
+- Test any derived logic with a pure function.
+
+Migrations must be additive, so the code live on `main` keeps working before it's redeployed. Generate the SQL offline:
+
+```
+npx prisma migrate diff --from-schema-datamodel <old schema> --to-schema-datamodel prisma/schema.prisma --script
+```
+
+Never run `prisma migrate dev` against the database in `.env`; it's shared with production. To check things against a real database, use a throwaway local one (`npx prisma dev --name <x>`, with `pgbouncer=true` in the URL).
+
+## Phase 1: return truth, item by item (done)
+
+The client's original pain: she couldn't tell whether a return was all there or only marked as returned.
+
+What exists:
+- **Data:** `ReturnItemCheck`, one row per expected line per scan. It holds good, damaged, wrong and missing counts, plus a price snapshot. `ReturnParcel` has pieces summary fields (`piecesGood`, `piecesMissing` and so on); `null` means an old, parcel-level-only scan. `PhysicalScan` gained `packagingTorn` and `checkMs`.
+- **Rules:** `src/lib/returns/item-check.ts`, used by the server, restock, reports and dispute messages. The phone-side copy is `src/lib/ui/item-check-ui.ts`. A one-piece parcel takes its check from the condition staff tap. Parcels with more pieces default every item to Received.
+- **Staff screen:** `src/components/scan/ReturnItemCheck.tsx`, used by `src/app/scan/ScanClient.tsx`. It is also reused for the owner's "Fix items".
+- **Restock:** `syncReturnRestock` (`src/lib/stock/ledger.ts`) puts back only good pieces.
+- **Owner side:**
+  - Filters Partial return, Wrong item, and Refunded, not back (`src/lib/returns/rules.ts`).
+  - The Return check card (`src/components/returns/ReturnCheckCard.tsx`).
+  - "Who did what" in the parcel sheet, item lines in the dispute message, and chips on Today, in the 8 PM brief and in `/returns`.
+- **Foundations:**
+  - `AuditLog`.
+  - The `IntegrationEvent` webhook inbox (`src/lib/integrations/inbox.ts`): stored before handling, duplicates dropped, retried by the tick.
+  - The tick lease is now longer than `maxDuration`; tail steps respect the deadline.
+  - Print jobs stop after 5 tries.
+  - CI in `.github/workflows/ci.yml`.
+
+Open:
+- [ ] Apply the migrations to Supabase: `npm run db:deploy`.
+- [ ] Set up the free heartbeat (`docs/cutover.md`, step 1b) and confirm it runs.
+- [ ] Confirm the return item price fields (Shopee `item_price`, TikTok per-line `refund_amount.refund_total`) with `npm run capture:live`. Until then the value is a pro-rata split, labelled "estimate".
+- [ ] Look at the new screens on a phone: `/scan` with a 3-piece return, and the parcel sheet.
+- [ ] Wrong extra items (something not expected at all) are only captured in the note and photo.
+
+## Phase 2: profit per order (done)
+
+What exists:
+- **Data:**
+  - `OrderFinance` and `OrderFinanceLine`: one per completed order, kept 120 days, not tied to `Order` (orders are deleted after 90 days).
+  - `FinanceMonth` and `ItemProfitMonth`: rolled up every 30 minutes and kept permanently.
+  - `Order.financeCheckedAt` and `financeSavedAt`.
+- **Mapping:** `src/lib/finance/map.ts`.
+  - The net payout is the trusted headline (Shopee `escrow_amount`, TikTok `settlement_amount`).
+  - Named fees are matched by field name. Whatever else the shop kept goes in `otherPhp`, so the totals always add up.
+  - Profit = payout − cost of the pieces the buyer kept. Pieces that came back good, found through the Phase 1 item check, aren't a cost.
+- **Sync:** `src/lib/finance/sync.ts`, read-only. It asks for 40 orders per shop per tick, 3 at a time, and stops when the shop says it's throttling. Unsettled orders are asked again after 6 hours; it gives up after 45 days.
+- **Report:** `src/lib/finance/report.ts`. The last 3 months are summed live; older months come from the rollups.
+- **Screens:**
+  - `src/app/profit/page.tsx`, linked under Money on Today and in the sidebar.
+  - `GET /api/profit`, and `?format=csv` for the bookkeeper.
+  - Telegram `/profit` (`src/lib/finance/telegram.ts`).
+
+Open:
+- [ ] Run `npm run capture:live` and check `shopee-escrow.json` and `tiktok-order-statement.json`. If a fee lands in "other", add its field name to the regexes in `map.ts`.
+- [ ] Compare 3 payouts per shop with Seller Center (`docs/cutover.md`, first-week checklist).
+- [ ] Not in per-order profit yet: refunds taken back after a payout, and the courier fee on failed deliveries. Both are in Money adjustments. A later step could link them to the order.
+- [ ] Confirm whether the shops' data carries the 1% withholding tax (`withholding_tax*` fields). If not, the screen shows an estimate labelled as such.
+
+## Phase 3: restock and suppliers (planned)
+
+Problem: "Add a delivery" at Stock-in is a free-text note (`StockReason.SUPPLIER_IN`). Nothing records what was ordered, from whom, what's still due, or when to reorder.
+
+Scope:
+- **Supplier list:** name, contact, usual lead time, notes.
+- **Purchase orders:** a supplier, lines of `GarmentVariant` with quantity and cost per piece, an expected date, and a status (Draft, Ordered, Partly received, Received, Cancelled).
+- **Receiving at Stock-in:** staff pick the open order and tap what arrived. Use the Phase 1 pattern: every line starts as "all arrived", and staff mark only what's short or damaged. This creates `StockMovement` rows (reason `SUPPLIER_IN`) linked to the order line.
+- **"Reorder soon":** sales speed per variant over 14 and 30 days, from shipped stock movements. It shows days of stock left (on shelf ÷ daily sales) against the supplier's lead time. It's a suggestion list only; the owner creates the order.
+- **Cost updates:** receiving at a new cost per piece updates `Garment.unitCostPhp` only with the owner's OK, because Phase 2 profit uses it.
+- **Telegram:** a short "reorder soon" line in the 8 PM brief, plus an alert when an order is overdue.
+
+Data:
+- `Supplier`.
+- `PurchaseOrder` (FK to `Supplier`).
+- `PurchaseOrderLine` (FK to `PurchaseOrder` and `GarmentVariant`; ordered, received and damaged quantities; cost per piece).
+- `StockMovement.purchaseOrderLineId` (nullable FK).
+
+Retention: orders are small, so keep them permanently or for 2 years.
+
+Files to start from:
+- `src/app/stock-in/StockInClient.tsx` and `src/app/api/stock-in/*`.
+- `src/lib/stock/ledger.ts` (`recordSupplierDelivery`).
+- `src/app/items/page.tsx` (963 lines: add new UI as components, don't grow the page).
+- `src/lib/catalog/*`.
+
+Risks:
+- Variants still need linking across shops (`ListingVariant` → `GarmentVariant`). Unlinked listings can't be reordered by item.
+- The staff Stock-in screen must stay as light as the scan screen.
+
+## Phase 4: chats on both shops, safe auto-replies (planned)
+
+Problem:
+- Only TikTok chats are connected (`src/lib/chats/*`). Shopee chats show sample data.
+- The assistant's "Auto" mode does nothing: `canAutoSend` and `withAutoLabel` in `src/lib/ai/settings.ts` are never called.
+- Sending replies to real buyers depends on the `CHAT_SEND_TIKTOK` environment variable, which has no switch in the app.
+
+Scope:
+- **Shopee chats** through the Open Platform seller chat API, in the same Chats tab. Check the endpoints against open.shopee.com before building.
+- **A Settings switch** to replace `CHAT_SEND_TIKTOK` and `AI_AUTOSEND_TIKTOK`.
+- **Auto-send only for topics the owner turns on** (`AiSettings.topicModes`). Returns, refunds and complaints stay person-only, as they are now. Every auto reply carries `autoLabel` and is logged (`AiEvent`, plus `AuditLog` with a system actor).
+- **An approval queue** for anything in between: approve, edit or reject in the app, or on Telegram with one tap. Phase 5 reuses it.
+
+Data:
+- `ActionRequest`: kind, payload, proposed by (system job or person), status (Pending, Approved, Rejected, Expired, Done), decided by and when, and the result.
+- Keep it general; price changes and listings use it in Phase 5.
+
+Files to start from:
+- `src/lib/ai/*`: the providers, the reply checks (`output-check.ts`, `fact-check.ts`) and the eval set (`npm run ai:eval`). Run the evals before and after.
+- `src/lib/chats/*` and `src/app/chats/*`.
+
+Risks:
+- Buyers can see auto replies, so a bad reply costs the shop.
+- The free AI tiers have daily limits (`AiUsage`, `eveningReservePct`).
+- Never auto-send a promise about money, stock or delivery dates; the existing checks block these.
+
+## Phase 5: listings and prices in one place (planned)
+
+Problem: prices and listings are still edited in each Seller Center separately. Product data is read-only in the app, apart from stock and Shopee Auto-Bump.
+
+Scope:
+- **One item, both shops:** change the price (and stock) of a `Garment` once, and the app proposes the update to each linked listing. Each change goes through the `ActionRequest` approval queue, then is pushed with per-shop results and a retry.
+- **Copy a listing:** copy a Shopee listing to TikTok, or the other way, as a draft. The owner reviews the title, photos, category and variants before it's created. Category and attribute mapping is the hard part.
+- **Price history:** who changed what, when, and what each shop accepted.
+
+Data:
+- `ChannelProduct`: the parent listing per shop. `ListingVariant` gets a foreign key to it, so the listing name is no longer repeated per variant.
+- `PriceChange`: the variant or product, old and new price, the request, and the push result per shop.
+
+Files to start from:
+- `src/lib/connectors/shopee.ts` and `tiktok.ts`.
+- `src/lib/catalog/import.ts` (it already reads listings).
+- `src/lib/stock/push.ts` (the pattern for pushing to both shops with per-listing status).
+
+Risks:
+- This writes to the live shops: respect `ShopConnection.writesEnabled`, and preview before anything is sent.
+- TikTok product edits can trigger a new review.
+- Promotions and vouchers are out of scope.
+
+## Ongoing: maintainability backlog
+
+Ranked by how much each one helps future phases.
+
+1. **A connector interface.** There are about 128 `Platform.SHOPEE` / `Platform.TIKTOK` branches across about 42 files. The paired files `shopee.ts` / `tiktok.ts`, `shopee-engine` / `tiktok-engine` and `shopee-rules` / `tiktok-rules` have no shared interface. Define a `ChannelConnector` (orders, returns, money, finance, stock push, labels, chats) so adding a channel touches one folder.
+2. **One set of order statuses.** `Order.status` is the raw platform string, and status lists are spread over `variants.ts`, `normalize.ts`, `orders/lookup.ts`, `stock/rules.ts` and `returns/classify.ts`. Add `Order.state` (an enum) and keep the raw status beside it.
+3. **More than one shop per platform.**
+   - `committedUnitsByListing` keys on `platform:listing:variation` without the shop (`src/lib/catalog/garments.ts`).
+   - `Order` is unique on `[platform, orderSn]`.
+   - `health.ts` assumes one shop per platform.
+4. **Backing off when a shop throttles.** The connectors have no 429 handling; only finance stops on throttling.
+5. **Splitting big screens.** These are the largest: `src/app/scan/ScanClient.tsx` (about 2,050 lines), `src/app/waves/page.tsx`, `src/app/settings/page.tsx` and `src/app/items/page.tsx` (about 1,000 each), `src/app/page.tsx`. Move new UI into components.
+6. **Foreign keys missing (bare string ids):**
+   - `OrderLine` → `ListingVariant`.
+   - `ReturnParcel.orderSn`.
+   - `WalletTransaction.orderSn`.
+   - `PrintJob.packageId` and `PrintJob.waveId`.
+   - `WaveItem.orderId`.
+   - `StockMovement.staffMemberId`.
+7. **Tests:** there are no route or integration tests. Database paths were checked by hand against a local Prisma Postgres.
+
+## Known gaps, not yet fixed
+
+- **Revoking owner sessions:** they last 30 days and can't be revoked (`src/middleware.ts`, `src/lib/session-edge.ts`). `session-edge.ts` also duplicates `auth.ts`.
+- **Telegram `/pause`, `/aioff` and `/sync`** act straight away, with no confirmation and no undo message.
+- **The dispute message template** (`src/lib/reports/dispute-template.ts`) removes its own blank lines: `.filter(Boolean)` also drops `""`.
+- **`WorkerLock` doubles as a key-value store** (sync window, stock push time, finance rollup time, Auto-Bump state). Fine for now; move the settings-like values into settings if more appear.
+- **Data that's never pruned:** `AiEvent` and `AiUsage` grow without limit.
+- **Hosting terms:** Vercel Hobby's terms are for non-commercial use (see below).
+
+## Paid upgrades to propose to the client later
+
+- **Vercel Pro** (about $20 a month): commercial use is allowed, functions can run longer, and scheduled jobs can run every minute.
+- **A paid Postgres plan** with point-in-time restore. Today the PC's nightly `pg_dump` is the only backup.
+- **An error tracker** (Sentry's free tier first). There's no error tracking now; logs are `console.*` only.
