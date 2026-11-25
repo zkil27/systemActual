@@ -243,8 +243,19 @@ model ReturnParcel {
   /// When courier tracking was last checked. Open parcels are refreshed however old.
   lastCheckedAt         DateTime?
 
-  events ReturnEvent[]
-  scans  PhysicalScan[]
+  events     ReturnEvent[]
+  scans      PhysicalScan[]
+  itemChecks ReturnItemCheck[]
+
+  /// Item-by-item check of the latest scan. All null when the parcel was only
+  /// checked as a whole (scans before the item check existed, or no item list).
+  piecesGood       Int?
+  piecesDamaged    Int?
+  piecesWrong      Int?
+  piecesMissing    Int?
+  /// Value of the pieces that physically came back (good + damaged). Owner only.
+  receivedValuePhp Decimal?  @db.Decimal(10, 2)
+  itemCheckedAt    DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -259,6 +270,8 @@ model ReturnParcel {
   @@index([physicallyReceivedAt])
   @@index([category, digitalStatus])
   @@index([disputeDeadlineAt])
+  @@index([piecesMissing])
+  @@index([piecesWrong])
 }
 
 model ReturnEvent {
@@ -289,9 +302,94 @@ model PhysicalScan {
   scannedAt      DateTime          @default(now())
   /// Made on the phone per save, so a retry on flaky Wi-Fi is recorded once.
   clientKey      String?           @unique
+  /// Staff ticked "Pouch torn": the bag is damaged but the items may be fine.
+  packagingTorn  Boolean           @default(false)
+  /// Milliseconds from "parcel found" to Save on the phone, to keep the check fast.
+  checkMs        Int?
+  itemChecks     ReturnItemCheck[]
 
   @@index([scannedAt])
   @@index([parcelId, scannedAt])
+}
+
+/// Worst outcome on one item line of a return check.
+enum ItemCheckResult {
+  ALL_GOOD
+  SOME_DAMAGED
+  SOME_MISSING
+  WRONG_ITEM
+}
+
+/// One expected item line of a return, checked at the scan table: how many
+/// pieces came back good, damaged, wrong, or not at all. Removed with its scan.
+model ReturnItemCheck {
+  id            String          @id @default(cuid())
+  scanId        String
+  scan          PhysicalScan    @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  parcelId      String
+  parcel        ReturnParcel    @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+  /// "listingId:variationId", or "name:variationName" when the shop gave no ids.
+  lineKey       String
+  listingId     String?
+  variationId   String?
+  name          String
+  variationName String?
+  imageUrl      String?
+  expectedQty   Int
+  goodQty       Int             @default(0)
+  damagedQty    Int             @default(0)
+  wrongQty      Int             @default(0)
+  missingQty    Int             @default(0)
+  result        ItemCheckResult
+  /// Price of one piece, copied at scan time (orders are deleted after 90 days). Owner only.
+  unitPricePhp  Decimal?        @db.Decimal(10, 2)
+  /// RETURN (from the return request), ORDER_LINE, or PRO_RATA (refund split evenly: an estimate).
+  priceSource   String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@unique([scanId, lineKey])
+  @@index([parcelId])
+}
+
+/// Who changed what. Owner and staff actions, and changes the app makes by itself.
+model AuditLog {
+  id        String   @id @default(cuid())
+  at        DateTime @default(now())
+  /// OWNER | STAFF | SYSTEM
+  actorType String
+  actorId   String?
+  actorName String
+  /// e.g. "return.scan", "return.scan_undone", "return.resolve", "shop.writes"
+  action    String
+  /// e.g. "ReturnParcel", "ShopConnection"
+  entity    String
+  entityId  String
+  before    Json?
+  after     Json?
+
+  @@index([entity, entityId, at])
+  @@index([at])
+}
+
+/// Every Shopee/TikTok webhook, stored before it's handled, so none is lost
+/// when a function crashes and a resend is handled once.
+model IntegrationEvent {
+  id             String    @id @default(cuid())
+  platform       Platform
+  eventType      String
+  /// Platform notification id, or a hash of the body. Duplicates are dropped.
+  externalKey    String    @unique
+  shopExternalId String?
+  orderSn        String?
+  payload        Json
+  receivedAt     DateTime  @default(now())
+  claimedAt      DateTime?
+  processedAt    DateTime?
+  attempts       Int       @default(0)
+  error          String?
+
+  @@index([processedAt, receivedAt])
 }
 
 model ImportJob {
@@ -305,29 +403,29 @@ model ImportJob {
 }
 
 model AppSettings {
-  id                        String   @id @default("default")
-  defaultUnitCostPhp        Decimal  @default(82.00) @db.Decimal(10, 2)
-  defaultSellingPrice       Decimal  @default(199.00) @db.Decimal(10, 2)
-  overdueRtsDays            Int      @default(10)
+  id                        String    @id @default("default")
+  defaultUnitCostPhp        Decimal   @default(82.00) @db.Decimal(10, 2)
+  defaultSellingPrice       Decimal   @default(199.00) @db.Decimal(10, 2)
+  overdueRtsDays            Int       @default(10)
   /// What one return/failed-delivery shipment costs the seller (Shopee PH charges it since June 2025).
-  returnShippingEstimatePhp Decimal  @default(40.00) @db.Decimal(10, 2)
+  returnShippingEstimatePhp Decimal   @default(40.00) @db.Decimal(10, 2)
   /// Pieces held back from what the shops show, so a late sync can't oversell.
-  stockSafetyBuffer         Int      @default(0)
+  stockSafetyBuffer         Int       @default(0)
   telegramChatId            String?
-  telegramDailyBriefUtc     String   @default("12:00")
+  telegramDailyBriefUtc     String    @default("12:00")
   /// Manila date ("2026-11-21") the 8 PM brief was last sent, so it goes out once a day.
   dailyBriefSentOn          String?
   /// Parcels returned to seller before this timestamp are pre-go-live history and excluded from "Missing" alerts.
   missingSinceAt            DateTime?
   /// Manila wave times, "HH:MM" comma-separated.
-  waveTimes                 String   @default("08:30,12:30,15:30")
+  waveTimes                 String    @default("08:30,12:30,15:30")
   /// Ship waves at those times without a tap. Off until the owner turns it on.
-  wavesAutoEnabled          Boolean  @default(false)
+  wavesAutoEnabled          Boolean   @default(false)
   /// Last wave slot that fired ("2026-11-21 08:30"), so each slot runs once.
   lastWaveSlot              String?
   /// Print our own one-sticker waybill (shop's courier section + our item list) instead of the shop's label as-is.
-  customWaybillEnabled      Boolean  @default(false)
-  updatedAt                 DateTime @updatedAt
+  customWaybillEnabled      Boolean   @default(false)
+  updatedAt                 DateTime  @updatedAt
 }
 
 /// One marketplace order. Kept current by incremental sync; completed and
@@ -555,21 +653,21 @@ enum PrintJobStatus {
 /// The warehouse PC running the print agent. Authenticates with a token whose
 /// SHA-256 is stored here; the token itself is shown to the owner once.
 model PrintDevice {
-  id           String     @id @default(cuid())
-  name         String
-  tokenHash    String     @unique
-  paused       Boolean    @default(false)
-  lastSeenAt   DateTime?
-  agentVersion String?
-  printerName  String?
+  id              String     @id @default(cuid())
+  name            String
+  tokenHash       String     @unique
+  paused          Boolean    @default(false)
+  lastSeenAt      DateTime?
+  agentVersion    String?
+  printerName     String?
   /// Windows printer state from the agent ("Normal", "Offline", "PaperOut", ...).
   printerStatus   String?
   /// Nightly pg_dump on the PC: last success, last error, size of the last file.
   lastBackupAt    DateTime?
   lastBackupError String?
   lastBackupBytes Int?
-  createdAt    DateTime   @default(now())
-  jobs         PrintJob[]
+  createdAt       DateTime   @default(now())
+  jobs            PrintJob[]
 }
 
 /// One row per alert key so a proactive Telegram alert is sent once per episode.

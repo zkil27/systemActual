@@ -14,6 +14,8 @@ export interface NormalizedReturnItem {
   imageUrl: string | null;
   listingId?: string | null;
   variationId?: string | null;
+  /** Price of one piece (return request or order line). Owner only; never sent to staff. */
+  unitPricePhp?: number | null;
 }
 
 export interface NormalizedReturnInput {

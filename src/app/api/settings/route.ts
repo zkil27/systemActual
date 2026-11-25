@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getOwnerSession, hashSecret, verifySecret } from "@/lib/auth";
+import { actorFromSession, changedFields, recordAudit, type AuditActor } from "@/lib/audit";
 import { manilaToUtcHm, utcToManilaHm } from "@/lib/reports/brief-time";
 import { isShopeeConfigured } from "@/lib/connectors/shopee";
 import { isTikTokConfigured } from "@/lib/connectors/tiktok";
@@ -78,6 +79,20 @@ export async function GET(req: NextRequest) {
   });
 }
 
+/** Settings whose changes are kept in the history (not the Telegram chat id or bookkeeping fields). */
+const AUDITED_SETTINGS = [
+  "defaultUnitCostPhp",
+  "defaultSellingPrice",
+  "overdueRtsDays",
+  "returnShippingEstimatePhp",
+  "stockSafetyBuffer",
+  "telegramDailyBriefUtc",
+  "missingSinceAt",
+  "waveTimes",
+  "wavesAutoEnabled",
+  "customWaybillEnabled",
+] as const;
+
 const updateSettingsSchema = z.object({
   action: z.enum([
     "update_settings",
@@ -124,8 +139,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid settings input." }, { status: 400 });
     }
     const data = parsed.data;
+    const ownerSession = await getOwnerSession();
+    const actor: AuditActor = ownerSession ? actorFromSession(ownerSession) : { type: "OWNER", id: null, name: "Owner" };
 
     if (data.action === "update_settings") {
+      const settingsBefore = await prisma.appSettings.findUnique({ where: { id: "default" } });
       const missingSinceAt =
         data.missingSinceDate !== undefined
           ? data.missingSinceDate
@@ -179,6 +197,11 @@ export async function POST(req: NextRequest) {
             : {}),
         },
       });
+      const settingsAfter = await prisma.appSettings.findUnique({ where: { id: "default" } });
+      const diff = settingsAfter ? changedFields(settingsBefore, settingsAfter, AUDITED_SETTINGS) : null;
+      if (diff) {
+        await recordAudit({ actor, action: "settings.update", entity: "AppSettings", entityId: "default", ...diff });
+      }
       return NextResponse.json({ ok: true });
     }
 
@@ -271,9 +294,21 @@ export async function POST(req: NextRequest) {
 
     if (data.action === "set_shop_writes" && data.shopConnectionId && data.active !== undefined) {
       // The one switch that lets the app change a shop (stock now, shipping later). Off by default.
+      const shopBefore = await prisma.shopConnection.findUnique({
+        where: { id: data.shopConnectionId },
+        select: { writesEnabled: true },
+      });
       await prisma.shopConnection.update({
         where: { id: data.shopConnectionId },
         data: { writesEnabled: data.active },
+      });
+      await recordAudit({
+        actor,
+        action: "shop.writes",
+        entity: "ShopConnection",
+        entityId: data.shopConnectionId,
+        before: { writesEnabled: shopBefore?.writesEnabled ?? null },
+        after: { writesEnabled: data.active },
       });
       return NextResponse.json({ ok: true });
     }

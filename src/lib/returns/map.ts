@@ -22,6 +22,12 @@ const unix = (v: unknown): Date | null => {
   return Number.isFinite(n) && n > 0 ? new Date(n * 1000) : null;
 };
 const arr = (v: unknown): Raw[] => (Array.isArray(v) ? (v as Raw[]) : []);
+/** A positive peso amount from a number, numeric string or Decimal; null otherwise. */
+const peso = (v: unknown): number | null => {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(typeof v === "object" ? String(v) : v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
 
 function summarize(items: NormalizedReturnItem[]) {
   const first = items[0];
@@ -39,8 +45,10 @@ function mergeItems(items: NormalizedReturnItem[]): NormalizedReturnItem[] {
   for (const it of items) {
     const key = `${it.listingId ?? it.name}:${it.variationId ?? it.variationName ?? ""}`;
     const prev = map.get(key);
-    if (prev) prev.quantity += it.quantity;
-    else map.set(key, { ...it });
+    if (prev) {
+      prev.quantity += it.quantity;
+      prev.unitPricePhp ??= it.unitPricePhp ?? null;
+    } else map.set(key, { ...it });
   }
   return [...map.values()];
 }
@@ -93,6 +101,7 @@ export function mapShopeeReturn(r: Raw, ctx: ShopeeReturnContext): NormalizedRet
         imageUrl: arr(it.images).length ? String((it.images as unknown[])[0]) : null,
         listingId: str(it.item_id),
         variationId: modelId,
+        unitPricePhp: peso(it.item_price),
       };
     })
   );
@@ -152,6 +161,8 @@ export function mapTikTokReturn(
       imageUrl: str((li.product_image as Raw | undefined)?.url),
       listingId: str(li.product_id),
       variationId: str(li.sku_id),
+      // TikTok sends one line per piece, so the line's refund is one piece's price.
+      unitPricePhp: peso((li.refund_amount as Raw | undefined)?.refund_total) ?? peso(li.sale_price),
     }))
   );
   const created = unix(r.create_time) ?? new Date();
@@ -187,6 +198,30 @@ export function mapTikTokReturn(
 
 // ---------------------------------------------------------------- Failed deliveries from the ledger
 
+export interface OrderLineForReturn {
+  name: string;
+  variationName: string | null;
+  imageUrl: string | null;
+  quantity: number;
+  listingId: string;
+  variationId: string;
+  /** Number or Prisma Decimal. */
+  unitPricePhp?: unknown;
+}
+
+/** Return items for a whole order (failed delivery, or a parcel scanned before the shop tagged it). */
+export function orderLineReturnItems(lines: OrderLineForReturn[]): NormalizedReturnItem[] {
+  return lines.map((l) => ({
+    name: l.name,
+    variationName: l.variationName,
+    quantity: l.quantity,
+    imageUrl: l.imageUrl,
+    listingId: l.listingId,
+    variationId: l.variationId,
+    unitPricePhp: peso(l.unitPricePhp),
+  }));
+}
+
 export interface LedgerOrderForReturn {
   orderSn: string;
   status: string;
@@ -194,7 +229,7 @@ export interface LedgerOrderForReturn {
   platformCreatedAt: Date;
   platformUpdatedAt: Date;
   cancelReason: string | null;
-  lines: Array<{ name: string; variationName: string | null; imageUrl: string | null; quantity: number; listingId: string; variationId: string }>;
+  lines: OrderLineForReturn[];
   packages: Array<{ trackingNumber: string | null; carrier: string | null }>;
 }
 
@@ -204,14 +239,7 @@ export function mapFailedDelivery(
   order: LedgerOrderForReturn,
   events: TrackingEvent[] = []
 ): NormalizedReturnInput {
-  const items = order.lines.map((l) => ({
-    name: l.name,
-    variationName: l.variationName,
-    quantity: l.quantity,
-    imageUrl: l.imageUrl,
-    listingId: l.listingId,
-    variationId: l.variationId,
-  }));
+  const items = orderLineReturnItems(order.lines);
   const pkg = order.packages.find((p) => p.trackingNumber) ?? order.packages[0];
   const returnedAt = findReturnedToSeller(events);
   const rawTaggedAt = findDeliveryFailed(events) ?? returnedAt ?? order.platformUpdatedAt;

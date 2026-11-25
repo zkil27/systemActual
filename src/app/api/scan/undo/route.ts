@@ -6,6 +6,7 @@ import { undoReturnScan } from "@/lib/returns/undo-scan";
 import { missingWhere } from "@/lib/returns/rules";
 import { resolveActorStaffMemberId } from "@/lib/shipping/outbound";
 import { pushStock } from "@/lib/stock/push";
+import { actorFromSession } from "@/lib/audit";
 
 const bodySchema = z.object({ scanId: z.string().min(1) });
 
@@ -20,6 +21,7 @@ export async function POST(req: NextRequest) {
     const res = await undoReturnScan(parsed.data.scanId, {
       staffMemberId: await resolveActorStaffMemberId(session),
       isOwner: session.actorType === "owner",
+      audit: actorFromSession(session),
     });
     if (!res.ok) return NextResponse.json({ error: res.error }, { status: res.status });
     if (res.restockDelta !== 0) {

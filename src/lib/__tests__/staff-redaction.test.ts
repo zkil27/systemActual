@@ -52,12 +52,45 @@ describe("Warehouse staff financial data redaction", () => {
     const lines = safe.lines as Array<Record<string, unknown>>;
     expect(lines).toHaveLength(2);
     expect(lines[1]).toEqual({
+      lineKey: "n:ribbed crop top:white, s",
       name: "Ribbed Crop Top",
       variationName: "White, S",
       quantity: 2,
       imageUrl: "https://example.com/top.png",
     });
     expect("unitPricePhp" in lines[0]).toBe(false);
+    // Nothing that looks like money or a price anywhere in what staff receive.
+    expect(JSON.stringify(safe)).not.toMatch(/Php|price|497|246|149/i);
+  });
+
+  it("gives item lines with shop ids a stable key, without the ids' prices", () => {
+    const safe = redactParcelForStaff({
+      id: "p2",
+      platform: "TIKTOK",
+      orderSn: "5770001",
+      returnSn: "R1",
+      forwardTrackingNumber: null,
+      rtsTrackingNumber: null,
+      courier: "J&T Express",
+      category: "RETURN_REFUND",
+      digitalStatus: "COURIER_RETURNED",
+      returnReason: null,
+      itemSummary: "Tee",
+      variationName: null,
+      quantity: 2,
+      itemImageUrl: null,
+      // TikTok: one line per piece, merged for staff.
+      itemsJson: [
+        { name: "Tee", variationName: "Pink", quantity: 1, imageUrl: null, listingId: "17", variationId: "42", unitPricePhp: 175 },
+        { name: "Tee", variationName: "Pink", quantity: 1, imageUrl: null, listingId: "17", variationId: "42", unitPricePhp: 175 },
+      ],
+      digitalReturnTaggedAt: null,
+      courierReturnedToSellerAt: null,
+      physicallyReceivedAt: null,
+      physicalCondition: null,
+    });
+    expect(safe.lines).toEqual([{ lineKey: "17:42", name: "Tee", variationName: "Pink", quantity: 2, imageUrl: null }]);
+    expect(JSON.stringify(safe)).not.toMatch(/Php|price|175/i);
   });
 
   it("never exposes totalPhp, unitPricePhp, or isCod on outbound packages", () => {

@@ -2,7 +2,7 @@ import { DigitalStatus, DisputeStatus, PhysicalCondition, ReturnCategory } from 
 import { describe, expect, it } from "vitest";
 import { planReturnAction, type ReturnActionState } from "@/lib/returns/owner-actions";
 import { isMissingDiscrepancy, isOverdueRts, isUrgentDeadline } from "@/lib/returns/rules";
-import { desiredReturnRestock } from "@/lib/stock/ledger";
+import { desiredRestockFromChecks, desiredReturnRestock } from "@/lib/stock/ledger";
 
 const NOW = new Date("2026-11-23T04:00:00Z");
 
@@ -143,5 +143,20 @@ describe("restock after a condition fix", () => {
   it("damaged or wrong items put nothing back", () => {
     expect(desiredReturnRestock("DAMAGED_ITEM", items).size).toBe(0);
     expect(desiredReturnRestock(null, items).size).toBe(0);
+  });
+});
+
+describe("desiredRestockFromChecks", () => {
+  it("puts back only the good pieces of each item, adding lines of the same variant", () => {
+    expect([
+      ...desiredRestockFromChecks([
+        { variantId: "v1", goodQty: 2 },
+        { variantId: "v2", goodQty: 0 },
+        { variantId: "v1", goodQty: 1 },
+      ]),
+    ]).toEqual([
+      ["v1", 3],
+      ["v2", 0],
+    ]);
   });
 });

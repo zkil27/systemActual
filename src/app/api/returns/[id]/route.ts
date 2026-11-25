@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { buildDisputeAppealDraft } from "@/lib/reports/dispute-template";
 import { isMissingDiscrepancy, isOverdueRts, isUrgentDeadline } from "@/lib/returns/rules";
 import { applyReturnAction, type ReturnAction } from "@/lib/returns/owner-actions";
+import { getOwnerSession } from "@/lib/auth";
+import { actorFromSession } from "@/lib/audit";
 
 export async function GET(
   _req: NextRequest,
@@ -157,6 +159,21 @@ const patchSchema = z.discriminatedUnion("action", [
     condition: z.nativeEnum(PhysicalCondition),
     note: z.string().trim().max(500).optional().nullable(),
   }),
+  z.object({
+    action: z.literal("correct_items"),
+    checks: z
+      .array(
+        z.object({
+          lineKey: z.string().min(1).max(300),
+          missing: z.number().int().min(0).max(999).optional(),
+          wrong: z.number().int().min(0).max(999).optional(),
+          damaged: z.number().int().min(0).max(999).optional(),
+        })
+      )
+      .max(100),
+    packagingTorn: z.boolean().optional(),
+    note: z.string().trim().max(500).optional().nullable(),
+  }),
 ]);
 
 /** Owner actions on one return: dispute status, settle / reopen, fix a wrong scan. */
@@ -167,7 +184,13 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     return NextResponse.json({ error: "Invalid action." }, { status: 400 });
   }
   try {
-    const result = await applyReturnAction(id, parsed.data as ReturnAction);
+    const owner = await getOwnerSession();
+    const result = await applyReturnAction(
+      id,
+      parsed.data as ReturnAction,
+      new Date(),
+      owner ? actorFromSession(owner) : undefined
+    );
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: result.status });
     }

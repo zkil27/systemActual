@@ -1,4 +1,4 @@
-import { DigitalStatus, Platform, ReturnCategory } from "@prisma/client";
+import { DigitalStatus, Platform, Prisma, ReturnCategory } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import { classifyReturnCategory, mergeDigitalStatus } from "@/lib/connectors/normalizer";
 import {
@@ -9,7 +9,7 @@ import {
   isFailedDeliveryCandidate,
 } from "@/lib/returns/classify";
 import { returnDedupeKey } from "@/lib/returns/keys";
-import { mapFailedDelivery, mapShopeeReturn, mapTikTokReturn, tiktokTrackingEvents } from "@/lib/returns/map";
+import { mapFailedDelivery, mapShopeeReturn, mapTikTokReturn, orderLineReturnItems, tiktokTrackingEvents } from "@/lib/returns/map";
 import { isActiveSince, isExpectedAtDoor, isMissingDiscrepancy, isOverdueRts } from "@/lib/returns/rules";
 import {
   shopeeInTransitReturn,
@@ -401,5 +401,33 @@ describe("open parcels are refreshed however old", () => {
     const now = Date.now();
     expect(openParcelsWhere("shop1", now, "TIKTOK").category).toBe("FAILED_DELIVERY");
     expect(openParcelsWhere("shop1", now, "SHOPEE").category).toBeUndefined();
+  });
+});
+
+describe("return item prices (owner-only, for refund vs came back)", () => {
+  it("reads Shopee's item_price per piece", () => {
+    const p = mapShopeeReturn(
+      { ...shopeeNormalReturn, item: [{ item_id: 1, model_id: 2, name: "Top", amount: 2, item_price: "149.00", images: [] }] },
+      ctx
+    );
+    expect(p.items?.[0]).toMatchObject({ quantity: 2, unitPricePhp: 149 });
+  });
+
+  it("leaves the price empty when Shopee doesn't send one", () => {
+    expect(mapShopeeReturn(shopeeNormalReturn, ctx).items?.[0].unitPricePhp).toBeNull();
+  });
+
+  it("uses each TikTok line's refund as one piece's price while merging pieces", () => {
+    const line = { product_name: "Tee", sku_name: "Pink", product_id: "17", sku_id: "42", refund_amount: { refund_total: "175.00" } };
+    const p = mapTikTokReturn({ ...tiktokReturnAndRefund, return_line_items: [line, line] }, ctx);
+    expect(p.items).toEqual([expect.objectContaining({ quantity: 2, unitPricePhp: 175 })]);
+  });
+
+  it("copies order line prices, including Decimals, for failed deliveries", () => {
+    const items = orderLineReturnItems([
+      { name: "Skirt", variationName: "M", imageUrl: null, quantity: 1, listingId: "9", variationId: "0", unitPricePhp: new Prisma.Decimal("199.00") },
+      { name: "Tee", variationName: null, imageUrl: null, quantity: 1, listingId: "8", variationId: "1", unitPricePhp: 0 },
+    ]);
+    expect(items.map((i) => i.unitPricePhp)).toEqual([199, null]);
   });
 });

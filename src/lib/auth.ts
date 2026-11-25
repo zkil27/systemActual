@@ -6,6 +6,7 @@ import { getAuthSecretKey as getSecretKey } from "./auth-secret";
 import { normalizeCourierName } from "@/lib/connectors/normalizer";
 import { isOrderCancelledForPacking } from "@/lib/shipping/outbound";
 import { shortenGarmentName } from "@/lib/waves/pick-list";
+import { expectedLinesFromItems } from "@/lib/returns/item-check";
 
 export const OWNER_COOKIE = "kyna_owner_session";
 export const STAFF_COOKIE = "kyna_staff_session";
@@ -120,6 +121,8 @@ export async function getScannerSession(): Promise<
 }
 
 export interface StaffSafeParcelLine {
+  /** Matches the line in an item check (see src/lib/returns/item-check.ts). */
+  lineKey: string;
   name: string;
   variationName: string | null;
   quantity: number;
@@ -150,22 +153,14 @@ export interface StaffSafeParcel {
 }
 
 function parseStaffSafeReturnLines(rawItems: unknown): StaffSafeParcelLine[] {
-  if (!Array.isArray(rawItems)) return [];
-  const lines: StaffSafeParcelLine[] = [];
-  for (const entry of rawItems) {
-    if (!entry || typeof entry !== "object") continue;
-    const rec = entry as Record<string, unknown>;
-    const name = typeof rec.name === "string" ? rec.name.trim() : "";
-    if (!name) continue;
-    const rawQty = typeof rec.quantity === "number" ? rec.quantity : Number(rec.quantity);
-    lines.push({
-      name,
-      variationName: typeof rec.variationName === "string" && rec.variationName.trim() ? rec.variationName.trim() : null,
-      quantity: Number.isFinite(rawQty) && rawQty > 0 ? Math.floor(rawQty) : 1,
-      imageUrl: typeof rec.imageUrl === "string" && rec.imageUrl.trim() ? rec.imageUrl.trim() : null,
-    });
-  }
-  return lines;
+  // Only name, colour/size, count and photo: never prices or shop ids.
+  return expectedLinesFromItems(rawItems).map((l) => ({
+    lineKey: l.lineKey,
+    name: l.name,
+    variationName: l.variationName,
+    quantity: l.quantity,
+    imageUrl: l.imageUrl,
+  }));
 }
 
 /**

@@ -308,17 +308,40 @@ export function desiredReturnRestock(
 }
 
 /**
+ * Pieces a return should have put back per variant when staff checked it item
+ * by item: only the pieces that came back good (a torn pouch alone still counts
+ * as good). Zero is kept, so a line that came back bad takes pieces off.
+ */
+export function desiredRestockFromChecks(lines: Array<{ variantId: string; goodQty: number }>): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const l of lines) out.set(l.variantId, (out.get(l.variantId) ?? 0) + Math.max(0, l.goodQty));
+  return out;
+}
+
+/**
  * After the owner corrects a scanned return's condition, make the shelf match:
  * good → damaged takes the pieces back off, damaged → good puts them on.
+ * When the latest scan was checked item by item, the good pieces per item
+ * decide instead of the parcel condition. Also used right after an item-by-item
+ * scan, undo, and the owner's item fix.
  * Earlier movements are kept; one balancing movement is added per variant.
  * Returns the net pieces changed.
  */
 export async function syncReturnRestock(parcelId: string, staffMemberId?: string | null): Promise<number> {
   const parcel = await prisma.returnParcel.findUnique({ where: { id: parcelId } });
   if (!parcel) return 0;
-  const rawItems = Array.isArray(parcel.itemsJson)
-    ? (parcel.itemsJson as Array<{ listingId?: string | null; variationId?: string | null; quantity?: number }>)
-    : [];
+  const latestScan = await prisma.physicalScan.findFirst({
+    where: { parcelId },
+    orderBy: { scannedAt: "desc" },
+    select: { itemChecks: { select: { listingId: true, variationId: true, goodQty: true, expectedQty: true } } },
+  });
+  const checks = latestScan?.itemChecks ?? [];
+  const byChecks = checks.length > 0;
+  const rawItems: Array<{ listingId?: string | null; variationId?: string | null; quantity?: number }> = byChecks
+    ? checks.map((c) => ({ listingId: c.listingId, variationId: c.variationId, quantity: c.goodQty }))
+    : Array.isArray(parcel.itemsJson)
+      ? (parcel.itemsJson as Array<{ listingId?: string | null; variationId?: string | null; quantity?: number }>)
+      : [];
   const items: Array<{ variantId: string; quantity: number }> = [];
   for (const item of rawItems) {
     if (!item.listingId || !item.variationId) continue;
@@ -336,7 +359,9 @@ export async function syncReturnRestock(parcelId: string, staffMemberId?: string
   }
   if (!items.length) return 0;
 
-  const desired = desiredReturnRestock(parcel.physicalCondition, items);
+  const desired = byChecks
+    ? desiredRestockFromChecks(items.map((i) => ({ variantId: i.variantId, goodQty: i.quantity })))
+    : desiredReturnRestock(parcel.physicalCondition, items);
   const existing = await prisma.stockMovement.findMany({
     where: {
       OR: [{ sourceKey: { startsWith: `return:${parcel.id}:` } }, { sourceKey: { startsWith: `returnfix:${parcel.id}:` } }],
@@ -347,6 +372,8 @@ export async function syncReturnRestock(parcelId: string, staffMemberId?: string
   for (const m of existing) current.set(m.garmentVariantId, (current.get(m.garmentVariantId) ?? 0) + m.delta);
 
   const variantIds = new Set([...items.map((i) => i.variantId), ...current.keys()]);
+  // Nothing recorded for this parcel yet: this is the first restock, not a fix.
+  const firstRestock = existing.length === 0;
   let net = 0;
   for (const variantId of variantIds) {
     const want = desired.get(variantId) ?? 0;
@@ -360,13 +387,32 @@ export async function syncReturnRestock(parcelId: string, staffMemberId?: string
       });
       if (v) await ensureVariantStartingStock(v);
     }
+    if (firstRestock && delta > 0) {
+      const res = await prisma.stockMovement.createMany({
+        data: [
+          {
+            garmentVariantId: variantId,
+            delta,
+            reason: StockReason.RETURN_GOOD,
+            // Fixed key, so a retried save can't put the pieces back twice.
+            sourceKey: `return:${parcel.id}:v:${variantId}`,
+            staffMemberId: staffMemberId ?? null,
+          },
+        ],
+        skipDuplicates: true,
+      });
+      if (res.count) net += delta;
+      continue;
+    }
     await prisma.stockMovement.create({
       data: {
         garmentVariantId: variantId,
         delta,
         reason: StockReason.ADJUSTMENT,
         sourceKey: `returnfix:${parcel.id}:${variantId}:${crypto.randomUUID()}`,
-        note: `Return ${parcel.orderSn} condition corrected to ${parcel.physicalCondition ?? "none"}`,
+        note: byChecks
+          ? `Return ${parcel.orderSn} item check corrected`
+          : `Return ${parcel.orderSn} condition corrected to ${parcel.physicalCondition ?? "none"}`,
         staffMemberId: staffMemberId ?? null,
       },
     });

@@ -12,6 +12,7 @@ import {
   findOutboundPackagesByCode,
 } from "@/lib/shipping/outbound";
 import { withSpan } from "@/lib/otel";
+import { orderLineReturnItems } from "@/lib/returns/map";
 
 const MAX_CHOICES = 6;
 
@@ -170,14 +171,7 @@ export async function GET(req: NextRequest) {
       if (outMatch.kind === "one") {
         const ord = outMatch.pkg.order;
         const firstLine = ord.lines[0];
-        const items = ord.lines.map((l) => ({
-          name: l.name,
-          variationName: l.variationName,
-          quantity: l.quantity,
-          imageUrl: l.imageUrl,
-          listingId: l.listingId,
-          variationId: l.variationId,
-        }));
+        const items = orderLineReturnItems(ord.lines);
         const preview = redactParcelForStaff({
           id: `early:${outMatch.pkg.id}`,
           platform: ord.platform,
