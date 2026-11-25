@@ -1,4 +1,5 @@
 import { DailyTruthReport } from "@/lib/analytics/daily-returns";
+import { returnCheckLine } from "@/lib/analytics/return-check";
 
 export function formatTelegramDailyBrief(report: DailyTruthReport): string {
   const fd = report.failedDelivery;
@@ -44,6 +45,13 @@ export function formatTelegramDailyBrief(report: DailyTruthReport): string {
     `• Overdue In-Transit (> ${report.overdueRtsDays} days): ${c.overdueRtsCount}`,
     `• Dispute Deadlines < 24h: ${c.urgentDeadlineCount}`,
   ];
+  const checkLine = returnCheckLine(report.returnCheck);
+  if (checkLine) lines.push(`• RETURN CHECK: ${checkLine}`);
+  if (report.returnCheck.refundedNotBackCount > 0) {
+    lines.push(
+      `• REFUNDED, NOT BACK: ${report.returnCheck.refundedNotBackCount} (PHP ${report.returnCheck.refundedNotBackPhp.toLocaleString("en-PH")} paid to buyers, nothing scanned back)`
+    );
+  }
 
   if (fd.byCourier.length > 0) {
     lines.push(``);

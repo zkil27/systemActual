@@ -191,6 +191,9 @@ function MissingStatus({
 }) {
   const missing = report.combined.missingNowCount;
   const { overdueRtsCount, urgentDeadlineCount } = report.combined;
+  const { partialCount, wrongItemCount, refundedNotBackCount, shortPhp } = report.returnCheck;
+  const dateFilter = customDate ? { date: customDate } : { range };
+  const plural = (n: number, word: string) => `${word}${n === 1 ? "" : "s"}`;
 
   return (
     <div className="flex flex-col gap-3 lg:h-full">
@@ -223,8 +226,40 @@ function MissingStatus({
 
       <ReturnTruthCards report={report} range={range} customDate={customDate} />
 
-      {(overdueRtsCount > 0 || urgentDeadlineCount > 0) && (
+      {(overdueRtsCount > 0 ||
+        urgentDeadlineCount > 0 ||
+        partialCount > 0 ||
+        wrongItemCount > 0 ||
+        refundedNotBackCount > 0) && (
         <div className="flex flex-wrap gap-2">
+          {partialCount > 0 && (
+            <Link
+              href={returnsUrl("partial", dateFilter)}
+              className="group pressable inline-flex h-10 items-center gap-1.5 rounded-full bg-missing-soft px-3.5 text-[14px] font-bold text-missing-ink"
+            >
+              <span className="tabular-nums">{partialCount}</span> {plural(partialCount, "partial return")}
+              {shortPhp > 0 && <span className="tabular-nums font-semibold">· {formatPeso(shortPhp)} short</span>}
+              <ChevronRight className="chevron-nudge h-4 w-4" />
+            </Link>
+          )}
+          {wrongItemCount > 0 && (
+            <Link
+              href={returnsUrl("wrong", dateFilter)}
+              className="group pressable inline-flex h-10 items-center gap-1.5 rounded-full bg-missing-soft px-3.5 text-[14px] font-bold text-missing-ink"
+            >
+              <span className="tabular-nums">{wrongItemCount}</span> {plural(wrongItemCount, "wrong item")}
+              <ChevronRight className="chevron-nudge h-4 w-4" />
+            </Link>
+          )}
+          {refundedNotBackCount > 0 && (
+            <Link
+              href={returnsUrl("refund_gap")}
+              className="group pressable inline-flex h-10 items-center gap-1.5 rounded-full bg-failed-soft px-3.5 text-[14px] font-bold text-failed-ink"
+            >
+              <span className="tabular-nums">{refundedNotBackCount}</span> refunded, not back
+              <ChevronRight className="chevron-nudge h-4 w-4" />
+            </Link>
+          )}
           {overdueRtsCount > 0 && (
             <Link
               href="/returns?filter=overdue"

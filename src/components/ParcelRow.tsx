@@ -23,6 +23,10 @@ export interface ParcelRowData {
   disputeDeadlineAt?: string | null;
   isUrgentDeadline?: boolean;
   resolvedAt?: string | null;
+  /** "2 of 3 back · 1 wrong" for parcels checked item by item. */
+  piecesNote?: string | null;
+  /** Buyer refund paid, nothing scanned back. */
+  isRefundedNotBack?: boolean;
 }
 
 /**
@@ -44,6 +48,12 @@ export function ParcelRow({
   const dispute = disputeLabel(parcel.disputeStatus);
   const due = parcel.isUrgentDeadline ? deadlineCountdown(parcel.disputeDeadlineAt)?.label : null;
   const meta = [
+    parcel.piecesNote,
+    parcel.isRefundedNotBack
+      ? parcel.courierReturnedToSellerAt
+        ? "Refunded, courier says returned"
+        : "Refunded, no courier update"
+      : null,
     dispute ? `Dispute ${dispute.toLowerCase()}` : due,
     categoryLabel(parcel.category),
     parcel.variationName,

@@ -13,6 +13,26 @@ import { formatPeso, manilaDateTime } from "@/lib/ui/format";
 import { categoryLabel, getParcelStatus } from "@/lib/ui/parcel-status";
 import { CONDITIONS, conditionLabel } from "@/lib/ui/conditions";
 import { deadlineCountdown, DISPUTE_STATUSES, eventSourceLabel, humanizeStatus, type DisputeStatusId } from "@/lib/ui/dispute";
+import { ReturnCheckCard, type ItemCheckRow } from "@/components/returns/ReturnCheckCard";
+
+/** Words for the "Who did what" list. Unknown actions show as-is. */
+const AUDIT_LABEL: Record<string, string> = {
+  "return.scan": "Checked in",
+  "return.scan_undone": "Undid a check-in",
+  "return.items_corrected": "Fixed items",
+  "return.correct_condition": "Fixed condition",
+  "return.set_dispute": "Updated dispute",
+  "return.resolve": "Closed it",
+  "return.reopen": "Reopened",
+};
+
+interface AuditEntry {
+  id: string;
+  at: string;
+  actorType: string;
+  actorName: string;
+  action: string;
+}
 
 interface ParcelScan {
   id: string;
@@ -20,7 +40,9 @@ interface ParcelScan {
   notes: string | null;
   photoUrls: string[];
   scannedAt: string;
+  packagingTorn?: boolean;
   staffMember: { name: string };
+  itemChecks?: ItemCheckRow[];
 }
 
 interface ParcelEvent {
@@ -64,6 +86,8 @@ interface ParcelDetailData {
   isMissingDiscrepancy: boolean;
   isOverdueRts: boolean;
   isUrgentDeadline: boolean;
+  isRefundedNotBack?: boolean;
+  receivedValuePhp?: number | null;
   events: ParcelEvent[];
   scans: ParcelScan[];
 }
@@ -72,7 +96,12 @@ type ParcelPatch =
   | { action: "set_dispute"; status: DisputeStatusId; ref?: string | null; reimbursedPhp?: number | null }
   | { action: "resolve"; outcome: "FOUND" | "SETTLED"; note?: string | null }
   | { action: "reopen" }
-  | { action: "correct_condition"; condition: string };
+  | { action: "correct_condition"; condition: string }
+  | {
+      action: "correct_items";
+      checks: Array<{ lineKey: string; missing?: number; wrong?: number; damaged?: number }>;
+      packagingTorn: boolean;
+    };
 
 function Stage({
   label,
@@ -158,6 +187,7 @@ function ParcelDetailBody({
   const [photoIndex, setPhotoIndex] = useState<number | null>(null);
   const [disputeRef, setDisputeRef] = useState("");
   const [reimbursed, setReimbursed] = useState("");
+  const [audit, setAudit] = useState<AuditEntry[]>([]);
 
   // A different parcel starts clean; a reload after an action keeps the content on screen.
   useEffect(() => {
@@ -181,6 +211,7 @@ function ParcelDetailBody({
         if (!active) return;
         const p: ParcelDetailData | null = d.parcel ?? null;
         setParcel(p);
+        setAudit(Array.isArray(d.audit) ? d.audit : []);
         setDraft(p?.disputeDraft ?? null);
         setDisputeRef(p?.disputeRef ?? "");
         setReimbursed(p?.reimbursedPhp != null ? String(p.reimbursedPhp) : "");
@@ -296,6 +327,9 @@ function ParcelDetailBody({
     disputeRef.trim() !== (parcel.disputeRef ?? "") ||
     (parcel.disputeStatus === "WON" && reimbursed !== reimbursedSaved);
   const reimbursedNumber = reimbursed && Number.isFinite(Number(reimbursed)) ? Number(reimbursed) : null;
+  const itemRows = scan?.itemChecks ?? [];
+  // One-piece parcels keep the simple condition fix; bigger ones are fixed item by item.
+  const itemChecked = itemRows.length > 1 || (itemRows.length === 1 && itemRows[0].expectedQty > 1);
 
   return (
     <div key={parcel.id} className="anim-fade-in space-y-7 pt-2">
@@ -335,6 +369,28 @@ function ParcelDetailBody({
         <Stage label="Returned to seller" at={parcel.courierReturnedToSellerAt} />
         <Stage label="Arrived" at={parcel.physicallyReceivedAt} last alert={parcel.isMissingDiscrepancy} />
       </ol>
+
+      {parcel.isRefundedNotBack && (
+        <div className="flex items-start gap-2.5 rounded-[var(--radius-control)] bg-missing-soft px-4 py-3 text-[15px] font-semibold text-missing-ink">
+          <AlarmClock className="mt-0.5 h-5 w-5 shrink-0" />
+          <span>
+            Buyer refund paid, nothing scanned back yet.{" "}
+            {parcel.courierReturnedToSellerAt ? "Courier says it was returned." : "No courier update yet."}
+          </span>
+        </div>
+      )}
+
+      {itemChecked && (
+        <ReturnCheckCard
+          rows={itemRows}
+          category={parcel.category}
+          refundPhp={parcel.orderTotalPhp}
+          receivedValuePhp={parcel.receivedValuePhp ?? null}
+          packagingTorn={Boolean(scan?.packagingTorn)}
+          saving={saving}
+          onFix={(body) => patch({ action: "correct_items", ...body }, "Items fixed")}
+        />
+      )}
 
       {scan?.notes && <p className="text-[15px] text-ink-2">“{scan.notes}”</p>}
 
@@ -582,7 +638,27 @@ function ParcelDetailBody({
         </Disclosure>
       )}
 
-      {parcel.physicallyReceivedAt && (
+      {audit.length > 0 && (
+        <Disclosure label={`Who did what (${audit.length})`} summaryClassName={summaryClass} className="-mt-4">
+          <ol className="divide-y divide-hairline border-t border-hairline">
+            {audit.map((a) => (
+              <li key={a.id} className="flex items-start justify-between gap-4 py-3">
+                <span className="min-w-0">
+                  <span className="block text-[15px] font-semibold text-ink">
+                    {AUDIT_LABEL[a.action] ?? a.action}
+                  </span>
+                  <span className="block text-[13px] text-ink-3">
+                    {a.actorType === "SYSTEM" ? "The app" : a.actorName}
+                  </span>
+                </span>
+                <span className="tabular-nums shrink-0 text-[14px] text-ink-2">{manilaDateTime(a.at)}</span>
+              </li>
+            ))}
+          </ol>
+        </Disclosure>
+      )}
+
+      {parcel.physicallyReceivedAt && !itemChecked && (
         <Disclosure label="Fix scanned condition" summaryClassName={summaryClass} className="-mt-4">
           <div className="space-y-1.5 pb-2">
             <p className="pb-1 text-[14px] text-ink-3">

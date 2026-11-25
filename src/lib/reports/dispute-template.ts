@@ -1,5 +1,17 @@
 import { PhysicalCondition, Platform, ReturnCategory } from "@prisma/client";
 import { formatManilaDateTime } from "@/lib/time";
+import { describeLine } from "@/lib/returns/item-check";
+
+/** One line of the warehouse's item-by-item check. */
+export interface DisputeItemCheck {
+  name: string;
+  variationName: string | null;
+  expectedQty: number;
+  goodQty: number;
+  damagedQty: number;
+  wrongQty: number;
+  missingQty: number;
+}
 
 export interface DisputeParcelContext {
   platform: Platform;
@@ -19,6 +31,21 @@ export interface DisputeParcelContext {
   physicalCondition: PhysicalCondition | null;
   staffNotes?: string | null;
   photoCount?: number;
+  /** Latest scan's item-by-item check, when staff did one. */
+  itemChecks?: DisputeItemCheck[];
+}
+
+/** "Item-by-item check" block for parcels with more than one piece or any problem; empty otherwise. */
+export function itemCheckBlock(checks: DisputeItemCheck[] | undefined): string[] {
+  if (!checks?.length) return [];
+  const anyProblem = checks.some((c) => c.goodQty < c.expectedQty);
+  const pieces = checks.reduce((n, c) => n + c.expectedQty, 0);
+  if (!anyProblem && pieces <= 1) return [];
+  return [
+    ``,
+    `Item-by-item check at our warehouse:`,
+    ...checks.map((c) => `- ${describeLine({ ...c, quantity: c.expectedQty })}`),
+  ];
 }
 
 export function buildDisputeAppealDraft(parcel: DisputeParcelContext): string {
@@ -93,6 +120,7 @@ export function buildDisputeAppealDraft(parcel: DisputeParcelContext): string {
     parcel.photoCount && parcel.photoCount > 0
       ? `- Evidence Attached: ${parcel.photoCount} warehouse inspection photo(s) uploaded.`
       : `- Evidence: Warehouse inspection photos available upon request.`,
+    ...itemCheckBlock(parcel.itemChecks),
     ``,
     `We kindly request ${platformName} to review the attached inspection photos and approve seller reimbursement / reject the invalid return.`,
     ``,

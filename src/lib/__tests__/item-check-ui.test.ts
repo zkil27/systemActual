@@ -6,6 +6,7 @@ import {
   markProblem,
   marksSummary,
   needsItemCheck,
+  piecesNote,
   setMarkCount,
   toSubmission,
 } from "@/lib/ui/item-check-ui";
@@ -79,5 +80,16 @@ describe("marksSummary", () => {
   it("says how many pieces are fine", () => {
     expect(marksSummary([top, skirt], {})).toBe("All 3 pieces OK");
     expect(marksSummary([top, skirt], setMarkCount(markProblem({}, top, "MISSING"), top, 1))).toBe("2 of 3 pieces OK");
+  });
+});
+
+describe("piecesNote", () => {
+  it("says how many pieces came back when some didn't", () => {
+    expect(piecesNote({ piecesGood: 1, piecesDamaged: 1, piecesWrong: 0, piecesMissing: 1 })).toBe("2 of 3 back");
+    expect(piecesNote({ piecesGood: 0, piecesDamaged: 0, piecesWrong: 1, piecesMissing: 0 })).toBe("0 of 1 back · 1 wrong");
+  });
+  it("stays quiet for complete or unchecked parcels", () => {
+    expect(piecesNote({ piecesGood: 2, piecesDamaged: 1, piecesWrong: 0, piecesMissing: 0 })).toBeNull();
+    expect(piecesNote({ piecesGood: null, piecesDamaged: null, piecesWrong: null, piecesMissing: null })).toBeNull();
   });
 });

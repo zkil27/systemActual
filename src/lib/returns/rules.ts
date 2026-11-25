@@ -195,3 +195,69 @@ export function isUrgentDeadline(
   const t = p.disputeDeadlineAt.getTime();
   return t > now.getTime() - URGENT_DEADLINE_GRACE_MS && t <= now.getTime() + URGENT_DEADLINE_WINDOW_MS;
 }
+
+// ---------------------------------------------------------------- Item-by-item check
+
+/**
+ * Parcels checked item by item keep piece counts; older ones only have a
+ * parcel condition. Each rule below reads the counts when present and falls
+ * back to the condition, so old and new scans land in the same lists.
+ */
+export interface ItemCheckRuleInput {
+  physicalCondition: string | null;
+  piecesMissing?: number | null;
+  piecesWrong?: number | null;
+}
+
+/** Some pieces never came back. */
+export function isPartialReturn(p: ItemCheckRuleInput): boolean {
+  if (p.piecesMissing !== null && p.piecesMissing !== undefined) return p.piecesMissing > 0;
+  return p.physicalCondition === "MISSING_PIECE";
+}
+
+/** Something other than what we sent came back. */
+export function isWrongItemReturn(p: ItemCheckRuleInput): boolean {
+  if (p.piecesWrong !== null && p.piecesWrong !== undefined) return p.piecesWrong > 0;
+  return p.physicalCondition === "WRONG_OR_SWAPPED_ITEM";
+}
+
+export const partialReturnWhere: Prisma.ReturnParcelWhereInput = {
+  OR: [{ piecesMissing: { gt: 0 } }, { piecesMissing: null, physicalCondition: "MISSING_PIECE" }],
+};
+
+export const wrongItemWhere: Prisma.ReturnParcelWhereInput = {
+  OR: [{ piecesWrong: { gt: 0 } }, { piecesWrong: null, physicalCondition: "WRONG_OR_SWAPPED_ITEM" }],
+};
+
+/**
+ * The buyer's refund is paid but nothing was scanned back in, and the owner
+ * hasn't closed it. Split for the owner into "courier says returned" (also
+ * Missing) and "no courier update yet", never blended.
+ */
+export function isRefundedNotBack(
+  p: Pick<
+    ParcelRuleInput,
+    "category" | "digitalStatus" | "expectsPhysicalReturn" | "physicallyReceivedAt" | "resolvedAt" | "digitalReturnTaggedAt"
+  >,
+  since?: Date | null
+): boolean {
+  if (since && (!p.digitalReturnTaggedAt || p.digitalReturnTaggedAt.getTime() < since.getTime())) return false;
+  return (
+    p.category === ReturnCategory.RETURN_REFUND &&
+    p.expectsPhysicalReturn &&
+    p.digitalStatus === DigitalStatus.RESOLVED_REFUNDED &&
+    !p.physicallyReceivedAt &&
+    !p.resolvedAt
+  );
+}
+
+export function refundedNotBackWhere(since?: Date | null): Prisma.ReturnParcelWhereInput {
+  return {
+    category: ReturnCategory.RETURN_REFUND,
+    expectsPhysicalReturn: true,
+    digitalStatus: DigitalStatus.RESOLVED_REFUNDED,
+    physicallyReceivedAt: null,
+    resolvedAt: null,
+    ...(since ? { digitalReturnTaggedAt: { gte: since } } : {}),
+  };
+}

@@ -96,3 +96,22 @@ export function marksSummary(lines: CheckableLine[], marks: ItemMarks): string {
   const bad = lines.reduce((n, l) => n + (marks[l.lineKey] ? Math.min(l.quantity, marks[l.lineKey].count) : 0), 0);
   return bad === 0 ? `All ${total} pieces OK` : `${total - bad} of ${total} pieces OK`;
 }
+
+/**
+ * Owner-side one-liner for a checked parcel, e.g. "2 of 3 back · 1 wrong".
+ * Null when every piece came back (or the parcel wasn't checked item by item).
+ */
+export function piecesNote(p: {
+  piecesGood: number | null;
+  piecesDamaged: number | null;
+  piecesWrong: number | null;
+  piecesMissing: number | null;
+}): string | null {
+  if (p.piecesGood === null || p.piecesDamaged === null || p.piecesWrong === null || p.piecesMissing === null) {
+    return null;
+  }
+  const back = p.piecesGood + p.piecesDamaged;
+  const expected = back + p.piecesWrong + p.piecesMissing;
+  if (p.piecesWrong === 0 && p.piecesMissing === 0) return null;
+  return [`${back} of ${expected} back`, p.piecesWrong ? `${p.piecesWrong} wrong` : null].filter(Boolean).join(" · ");
+}

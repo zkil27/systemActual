@@ -3,7 +3,14 @@ import { DisputeStatus, PhysicalCondition, Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { buildDisputeAppealDraft } from "@/lib/reports/dispute-template";
-import { isMissingDiscrepancy, isOverdueRts, isUrgentDeadline } from "@/lib/returns/rules";
+import {
+  isMissingDiscrepancy,
+  isOverdueRts,
+  isPartialReturn,
+  isRefundedNotBack,
+  isUrgentDeadline,
+  isWrongItemReturn,
+} from "@/lib/returns/rules";
 import { applyReturnAction, type ReturnAction } from "@/lib/returns/owner-actions";
 import { getOwnerSession } from "@/lib/auth";
 import { actorFromSession } from "@/lib/audit";
@@ -19,6 +26,7 @@ export async function GET(
         where: { id },
         select: {
           id: true,
+          shopConnectionId: true,
           platform: true,
           orderSn: true,
           forwardTrackingNumber: true,
@@ -60,9 +68,35 @@ export async function GET(
               notes: true,
               photoUrls: true,
               scannedAt: true,
+              packagingTorn: true,
               staffMember: { select: { name: true } },
+              itemChecks: {
+                orderBy: { createdAt: "asc" },
+                select: {
+                  lineKey: true,
+                  name: true,
+                  variationName: true,
+                  imageUrl: true,
+                  listingId: true,
+                  variationId: true,
+                  expectedQty: true,
+                  goodQty: true,
+                  damagedQty: true,
+                  wrongQty: true,
+                  missingQty: true,
+                  result: true,
+                  unitPricePhp: true,
+                  priceSource: true,
+                },
+              },
             },
           },
+          piecesGood: true,
+          piecesDamaged: true,
+          piecesWrong: true,
+          piecesMissing: true,
+          receivedValuePhp: true,
+          itemCheckedAt: true,
         },
       }),
       prisma.appSettings.findUnique({
@@ -73,10 +107,46 @@ export async function GET(
     if (!parcel) {
       return NextResponse.json({ error: "Parcel not found." }, { status: 404 });
     }
+    // Who did what, newest first (owner page only; staff never reach this route).
+    const audit = await prisma.auditLog.findMany({
+      where: { entity: "ReturnParcel", entityId: parcel.id },
+      orderBy: { at: "desc" },
+      take: 30,
+      select: { id: true, at: true, actorType: true, actorName: true, action: true, after: true },
+    });
+    const missingSinceAt = settings?.missingSinceAt ?? null;
+    const latestChecks = parcel.scans[0]?.itemChecks ?? [];
+    // Items with no shop link can't be put back on the shelf by the app.
+    const linked = latestChecks.length
+      ? await prisma.listingVariant.findMany({
+          where: {
+            shopConnectionId: parcel.shopConnectionId,
+            garmentVariantId: { not: null },
+            OR: latestChecks
+              .filter((c) => c.listingId && c.variationId)
+              .map((c) => ({ listingId: c.listingId!, variationId: c.variationId! })),
+          },
+          select: { listingId: true, variationId: true },
+        })
+      : [];
+    const linkedKeys = new Set(linked.map((l) => `${l.listingId}:${l.variationId}`));
 
     return NextResponse.json({
+      audit,
       parcel: {
         ...parcel,
+        scans: parcel.scans.map((s) => ({
+          ...s,
+          itemChecks: s.itemChecks.map((c) => ({
+            ...c,
+            unitPricePhp: c.unitPricePhp === null ? null : Number(c.unitPricePhp),
+            stockLinked: Boolean(c.listingId && c.variationId && linkedKeys.has(`${c.listingId}:${c.variationId}`)),
+          })),
+        })),
+        receivedValuePhp: parcel.receivedValuePhp === null ? null : Number(parcel.receivedValuePhp),
+        isPartialReturn: isPartialReturn(parcel),
+        isWrongItemReturn: isWrongItemReturn(parcel),
+        isRefundedNotBack: isRefundedNotBack(parcel, missingSinceAt),
         orderTotalPhp: Number(parcel.orderTotalPhp),
         estimatedUnitCostPhp: Number(parcel.estimatedUnitCostPhp),
         reimbursedPhp: parcel.reimbursedPhp === null ? null : Number(parcel.reimbursedPhp),
@@ -100,7 +170,7 @@ export async function POST(
     const parcel = await prisma.returnParcel.findUnique({
       where: { id },
       include: {
-        scans: { orderBy: { scannedAt: "desc" }, take: 1 },
+        scans: { orderBy: { scannedAt: "desc" }, take: 1, include: { itemChecks: { orderBy: { createdAt: "asc" } } } },
       },
     });
     if (!parcel) {
@@ -126,6 +196,7 @@ export async function POST(
       physicalCondition: parcel.physicalCondition,
       staffNotes: latestScan?.notes ?? null,
       photoCount: latestScan?.photoUrls.length ?? 0,
+      itemChecks: latestScan?.itemChecks ?? [],
     });
 
     await prisma.returnParcel.update({

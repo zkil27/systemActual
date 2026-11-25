@@ -1,4 +1,5 @@
 import { PrintJobStatus, WaveItemStatus, WaveStatus } from "@prisma/client";
+import { returnCheckLine } from "@/lib/analytics/return-check";
 import { prisma } from "@/lib/prisma";
 import { getDailyTruthReport } from "@/lib/analytics/daily-returns";
 import { getCatalog } from "@/lib/catalog/garments";
@@ -150,6 +151,8 @@ export async function buildTelegramReply(rawInput: string): Promise<string> {
       `• Actually Arrived Today: ${rr.physicallyArrivedCount}`,
       `• Shopee: ${rr.shopeeTaggedCount} | TikTok: ${rr.tiktokTaggedCount}`,
       `• Dispute Deadlines < 24h: ${report.combined.urgentDeadlineCount}`,
+      `• Return check: ${returnCheckLine(report.returnCheck) ?? "every checked parcel came back complete"}`,
+      `• Refunded, not back: ${report.returnCheck.refundedNotBackCount}`,
     ].join("\n");
   }
 

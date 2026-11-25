@@ -1,3 +1,4 @@
+import { getReturnCheckSummary, summarizeReturnChecks, type ReturnCheckSummary } from "@/lib/analytics/return-check";
 import {
   PhysicalCondition,
   Platform,
@@ -44,6 +45,8 @@ export interface CategoryDailyTruth {
 
 export interface DailyTruthReport {
   rangeLabel: string;
+  /** Item-by-item return check for parcels scanned in the range. */
+  returnCheck: ReturnCheckSummary;
   dateStr: string;
   money: MoneySummary;
   defaultUnitCostPhp: number;
@@ -170,6 +173,12 @@ export async function getDailyTruthReport(options?: {
   ).size;
   const hasRealShop = connectedPlatforms > 0;
   const realShopFilter = hasRealShop ? { shopConnection: { isDemo: false } } : {};
+  const returnCheckPromise = getReturnCheckSummary({ start, end, missingSinceAt, shopWhere: realShopFilter }).catch(
+    (err): ReturnCheckSummary => {
+      console.error("[dashboard] return check", err);
+      return summarizeReturnChecks([], { count: 0, totalPhp: 0 });
+    }
+  );
   const liveShopee = shops.find(
     (s) => s.platform === Platform.SHOPEE && !s.isDemo && Boolean(s.accessToken)
   );
@@ -441,8 +450,11 @@ export async function getDailyTruthReport(options?: {
 
   const { lowStockCount, outOfStockCount, unlinkedCount, stockPushFailedCount } = stockOps;
 
+  const returnCheck = await returnCheckPromise;
+
   return {
     rangeLabel: label,
+    returnCheck,
     dateStr,
     money,
     defaultUnitCostPhp,

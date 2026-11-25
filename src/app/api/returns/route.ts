@@ -12,7 +12,14 @@ import {
   returnedToSellerWhere,
   isUrgentDeadline,
   urgentDeadlineWhere,
+  isPartialReturn,
+  isRefundedNotBack,
+  isWrongItemReturn,
+  partialReturnWhere,
+  refundedNotBackWhere,
+  wrongItemWhere,
 } from "@/lib/returns/rules";
+import { piecesNote } from "@/lib/ui/item-check-ui";
 import { getManilaDateRangeBounds } from "@/lib/time";
 
 export async function GET(req: NextRequest) {
@@ -58,6 +65,12 @@ export async function GET(req: NextRequest) {
       conditions.push({ category: ReturnCategory.RETURN_REFUND });
     } else if (filter === "missing") {
       conditions.push(missingWhere(missingSinceAt));
+    } else if (filter === "partial") {
+      conditions.push(partialReturnWhere);
+    } else if (filter === "wrong") {
+      conditions.push(wrongItemWhere);
+    } else if (filter === "refund_gap") {
+      conditions.push(refundedNotBackWhere(missingSinceAt));
     } else if (filter === "issues") {
       conditions.push({
         physicalCondition: {
@@ -83,7 +96,7 @@ export async function GET(req: NextRequest) {
       };
       if (filter === "returned" || filter === "missing") {
         conditions.push({ courierReturnedToSellerAt: dtFilter });
-      } else if (filter === "arrived") {
+      } else if (filter === "arrived" || filter === "partial" || filter === "wrong") {
         conditions.push({ physicallyReceivedAt: dtFilter });
       } else {
         conditions.push({
@@ -136,11 +149,17 @@ export async function GET(req: NextRequest) {
           disputeDeadlineAt: true,
           disputeStatus: true,
           resolvedAt: true,
+          piecesGood: true,
+          piecesDamaged: true,
+          piecesWrong: true,
+          piecesMissing: true,
         },
         orderBy:
           filter === "urgent"
             ? [{ disputeDeadlineAt: "asc" }]
-            : [{ courierReturnedToSellerAt: "desc" }, { digitalReturnTaggedAt: "desc" }],
+            : filter === "partial" || filter === "wrong"
+              ? [{ physicallyReceivedAt: "desc" }]
+              : [{ courierReturnedToSellerAt: "desc" }, { digitalReturnTaggedAt: "desc" }],
         take: limit,
         skip: offset,
       }),
@@ -171,6 +190,10 @@ export async function GET(req: NextRequest) {
         disputeDeadlineAt: p.disputeDeadlineAt?.toISOString() ?? null,
         isUrgentDeadline: isUrgentDeadline(p, now),
         resolvedAt: p.resolvedAt?.toISOString() ?? null,
+        piecesNote: piecesNote(p),
+        isPartialReturn: isPartialReturn(p),
+        isWrongItemReturn: isWrongItemReturn(p),
+        isRefundedNotBack: isRefundedNotBack(p, missingSinceAt),
       })),
     });
   } catch (err) {
