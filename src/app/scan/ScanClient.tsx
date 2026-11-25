@@ -39,6 +39,8 @@ import { categoryLabel } from "@/lib/ui/parcel-status";
 import { PIN_LENGTH, applyPinKey, keyFromKeyboard } from "@/lib/ui/pin";
 import { usePullToRefresh } from "@/lib/ui/use-pull-to-refresh";
 import { PickListSection, type StaffRecentWave, type StaffWaveData } from "./PickListSection";
+import { ReturnItemCheck } from "@/components/scan/ReturnItemCheck";
+import { conditionFromMarks, needsItemCheck, toSubmission, type ItemMarks } from "@/lib/ui/item-check-ui";
 
 export interface StaffOption {
   id: string;
@@ -160,6 +162,11 @@ interface PendingScan {
   condition: string;
   notes: string;
   photos: File[];
+  /** Item-by-item check as JSON, for parcels with more than one piece. */
+  itemChecks: string | null;
+  packagingTorn: boolean;
+  /** Time from "parcel found" to Save, so we can see the check stays quick. */
+  checkMs: number | null;
   text: string;
   tries: number;
 }
@@ -224,6 +231,16 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [savingScan, setSavingScan] = useState(false);
   const scanKeyRef = useRef<string>(newClientKey());
+  // Item-by-item check: every piece is received unless staff mark it.
+  const [itemMarks, setItemMarks] = useState<ItemMarks>({});
+  const [packagingTorn, setPackagingTorn] = useState(false);
+  const foundAtRef = useRef<number | null>(null);
+  const matchedParcelId = matchedParcel?.id ?? null;
+  useEffect(() => {
+    setItemMarks({});
+    setPackagingTorn(false);
+    foundAtRef.current = matchedParcelId ? Date.now() : null;
+  }, [matchedParcelId]);
   const [pendingScans, setPendingScans] = useState<PendingScan[]>([]);
   const pendingRef = useRef<PendingScan[]>([]);
   pendingRef.current = pendingScans;
@@ -835,6 +852,9 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
     formData.append("scannedBarcode", p.scannedBarcode);
     formData.append("condition", p.condition);
     formData.append("clientKey", p.clientKey);
+    if (p.itemChecks) formData.append("itemChecks", p.itemChecks);
+    if (p.packagingTorn) formData.append("packagingTorn", "1");
+    if (p.checkMs) formData.append("checkMs", String(p.checkMs));
     if (p.notes) formData.append("notes", p.notes);
     for (const file of p.photos) formData.append("photos", file);
     return formData;
@@ -870,13 +890,17 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
     } catch {
       compressedPhotos = photos;
     }
+    const itemMode = needsItemCheck(matchedParcel.lines);
     const entry = {
       clientKey: scanKeyRef.current,
       parcelId: matchedParcel.id,
       scannedBarcode: lastScannedCode,
-      condition: selectedCondition,
+      condition: itemMode ? conditionFromMarks(itemMarks, packagingTorn) : selectedCondition,
       notes: notes.trim(),
       photos: compressedPhotos,
+      itemChecks: itemMode ? JSON.stringify(toSubmission(matchedParcel.lines, itemMarks)) : null,
+      packagingTorn: itemMode && packagingTorn,
+      checkMs: foundAtRef.current ? Date.now() - foundAtRef.current : null,
     };
     try {
       const res = await fetch("/api/scan/confirm", { method: "POST", body: buildScanForm(entry) });
@@ -1140,7 +1164,8 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
   }
 
   // ── Unlocked: Calm Apple-HIG Packer Station (Pick list & Returns) ──
-  const condition = findCondition(selectedCondition);
+  const itemMode = Boolean(matchedParcel && needsItemCheck(matchedParcel.lines));
+  const condition = findCondition(itemMode ? conditionFromMarks(itemMarks, packagingTorn) : selectedCondition);
   const needsPhotoMissing = Boolean(condition?.needsPhoto && photos.length === 0);
 
   function openCheckSheet() {
@@ -1528,27 +1553,14 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                 </p>
               )}
 
-              {matchedParcel.lines.length > 1 ? (
-                <Group>
-                  <ul className="divide-y divide-hairline px-4">
-                    {matchedParcel.lines.map((line, idx) => (
-                      <li key={`${line.name}-${idx}`} className="flex items-center gap-3.5 py-3">
-                        <ItemThumb src={line.imageUrl} alt={line.name} size="lg" />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[17px] font-bold leading-snug text-ink">
-                            <span className="tabular-nums">{line.quantity}× </span>
-                            {line.name}
-                          </p>
-                          {line.variationName && (
-                            <p className="mt-1 text-[15px] font-semibold text-ink-2">
-                              {line.variationName}
-                            </p>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </Group>
+              {itemMode ? (
+                <ReturnItemCheck
+                  lines={matchedParcel.lines}
+                  marks={itemMarks}
+                  onMarksChange={setItemMarks}
+                  packagingTorn={packagingTorn}
+                  onPackagingTornChange={setPackagingTorn}
+                />
               ) : (
                 <div className="flex items-center gap-4">
                   <ItemThumb src={matchedParcel.itemImageUrl} alt={matchedParcel.itemSummary} size="xl" />
@@ -1566,6 +1578,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                 </div>
               )}
 
+              {!itemMode && (
               <Group>
                 <div role="radiogroup" aria-label="Condition" className="divide-y divide-hairline">
                   {CONDITIONS.map((c) => {
@@ -1598,6 +1611,7 @@ export function ScanClient({ initial }: { initial: ScanInitialState }) {
                   })}
                 </div>
               </Group>
+              )}
 
               <div className="space-y-2">
                 <label
