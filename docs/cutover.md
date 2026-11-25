@@ -160,6 +160,7 @@ The returns, money and Telegram features keep working read-only, so you can roll
 - [ ] Printer: online during work hours, with no failed prints.
 - [ ] The 8 PM Telegram brief arrives. It needs a sync after 8 PM: with the heartbeat (step 1b) it comes within 5 minutes; without it, on a night with no orders it comes with the first sync the next morning.
 - [ ] A few orders compared end to end with Seller Center: status, tracking number, money credited.
+- [ ] Profit: for 3 completed orders per shop, the payout on the Profit screen matches Seller Center's order income. Run `npm run capture:live` once and check `shopee-escrow.json` / `tiktok-order-statement.json`: if a fee shows under "Vouchers, rebates & other" instead of its own line, its field name needs adding in `src/lib/finance/map.ts`.
 
 ## Known limits
 

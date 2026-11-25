@@ -704,6 +704,13 @@ export default function DashboardPage() {
           <div className="anim-fade-in grid grid-cols-1 gap-8 lg:grid-cols-12 lg:gap-6">
             <div className="lg:col-span-5">
               <MoneyCard money={report.money} onOpen={() => setMoneyOpen(true)} />
+              <Link
+                href="/profit"
+                className="group pressable mt-2 flex min-h-11 items-center justify-between rounded-[var(--radius-control)] px-4 text-[15px] font-semibold text-brand hover:bg-brand/10 lg:hidden"
+              >
+                Profit this month, after fees and cost
+                <ChevronRight className="chevron-nudge h-[18px] w-[18px]" />
+              </Link>
             </div>
 
             <div className="lg:col-span-7">

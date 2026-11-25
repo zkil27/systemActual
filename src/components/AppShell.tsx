@@ -13,6 +13,7 @@ import {
   Search,
   Settings2,
   Shirt,
+  TrendingUp,
   type LucideIcon,
 } from "lucide-react";
 import { Toaster } from "@/components/ui/Toast";
@@ -77,6 +78,7 @@ const BADGE_TONE: Record<NavBadge, string> = {
 const CHAT_UNREAD_POLL_MS = 30_000;
 
 const SIDEBAR_OPS: Tab[] = [
+  { href: "/profit", label: "Profit", icon: TrendingUp, match: (p) => p.startsWith("/profit") },
   { href: "/items", label: "Items & stock", icon: Shirt, match: (p) => p.startsWith("/items") },
   { href: "/waves", label: "Waves & pick lists", icon: Printer, match: (p) => p.startsWith("/waves") },
   { href: "/imports", label: "Upload a file", icon: FileUp, match: (p) => p.startsWith("/imports") },

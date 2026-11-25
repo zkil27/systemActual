@@ -26,6 +26,7 @@ export const HELP_TEXT = [
   `/disputes — deadlines and open disputes`,
   `/stock — low & out of stock`,
   `/money — money credited today`,
+  `/profit — profit this month, after shop fees and cost`,
   `/staff — who scanned and packed today`,
   `/health — sync, printer and backup status`,
   `/pause · /resume — stop or restart printing`,

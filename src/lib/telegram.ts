@@ -1,4 +1,6 @@
 import { PrintJobStatus, WaveItemStatus, WaveStatus } from "@prisma/client";
+import { getProfitReport } from "@/lib/finance/report";
+import { formatProfitTelegram } from "@/lib/finance/telegram";
 import { returnCheckLine } from "@/lib/analytics/return-check";
 import { prisma } from "@/lib/prisma";
 import { getDailyTruthReport } from "@/lib/analytics/daily-returns";
@@ -238,6 +240,11 @@ export async function buildTelegramReply(rawInput: string): Promise<string> {
       lines.push(`No items boosted right now. Turn on Auto-Bump in Items & stock.`);
     }
     return lines.join("\n");
+  }
+
+  if (text.startsWith("/profit") || text.includes("profit")) {
+    const r = await getProfitReport();
+    return formatProfitTelegram(r);
   }
 
   if (text.startsWith("/money") || text.includes("credited") || text.includes("sales")) {

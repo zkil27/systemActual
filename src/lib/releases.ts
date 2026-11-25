@@ -20,6 +20,17 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    id: 7,
+    date: "2026-11-26",
+    title: "Profit after fees",
+    changes: [
+      "New Profit screen: what each month really earned after Shopee and TikTok fees and your cost per item. Open it from Today, under Money.",
+      "See what the shops took (commission, fees, shipping) and which items earn the most and the least.",
+      "Pieces that come back good on a return are not counted as cost.",
+      "Download a month for your bookkeeper, or send /profit on Telegram for this month so far.",
+    ],
+  },
+  {
     id: 6,
     date: "2026-11-26",
     title: "Item-by-item return check",
