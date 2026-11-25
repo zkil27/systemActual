@@ -77,23 +77,24 @@ export function eventFields(platform: Platform, payload: Raw): EventFields {
 /** Stores a push. Returns its id, or null when this exact push was already stored. */
 export async function storeEvent(platform: Platform, payload: Raw, rawBody: string): Promise<string | null> {
   const fields = eventFields(platform, payload);
-  try {
-    const row = await prisma.integrationEvent.create({
-      data: {
+  const externalKey = eventKey(platform, payload, rawBody);
+  // ON CONFLICT DO NOTHING instead of create() + catch, so resends don't spam prisma:error logs.
+  const created = await prisma.integrationEvent.createMany({
+    data: [
+      {
         platform,
         eventType: fields.eventType.slice(0, 80),
-        externalKey: eventKey(platform, payload, rawBody),
+        externalKey,
         shopExternalId: fields.shopExternalId,
         orderSn: fields.orderSn,
         payload: payload as Prisma.InputJsonValue,
       },
-      select: { id: true },
-    });
-    return row.id;
-  } catch (err) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") return null;
-    throw err;
-  }
+    ],
+    skipDuplicates: true,
+  });
+  if (created.count === 0) return null;
+  const row = await prisma.integrationEvent.findUnique({ where: { externalKey }, select: { id: true } });
+  return row?.id ?? null;
 }
 
 /** Can this event be taken now? Pure; mirrors the claim query. */

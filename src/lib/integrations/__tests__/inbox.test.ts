@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { Platform, Prisma } from "@prisma/client";
+import { Platform } from "@prisma/client";
 
 const { mockPrisma } = vi.hoisted(() => ({
   mockPrisma: {
     integrationEvent: {
-      create: vi.fn(),
+      createMany: vi.fn(),
       updateMany: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
@@ -82,14 +82,14 @@ describe("storeEvent", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns null for a push already stored", async () => {
-    mockPrisma.integrationEvent.create.mockRejectedValue(
-      new Prisma.PrismaClientKnownRequestError("dup", { code: "P2002", clientVersion: "x" })
-    );
+    mockPrisma.integrationEvent.createMany.mockResolvedValue({ count: 0 });
     expect(await storeEvent(Platform.SHOPEE, { code: 3 }, "{}")).toBeNull();
+    expect(mockPrisma.integrationEvent.createMany.mock.calls[0][0].skipDuplicates).toBe(true);
   });
 
   it("returns the new id", async () => {
-    mockPrisma.integrationEvent.create.mockResolvedValue({ id: "e1" });
+    mockPrisma.integrationEvent.createMany.mockResolvedValue({ count: 1 });
+    mockPrisma.integrationEvent.findUnique.mockResolvedValue({ id: "e1" });
     expect(await storeEvent(Platform.SHOPEE, { code: 3 }, "{}")).toBe("e1");
   });
 });
