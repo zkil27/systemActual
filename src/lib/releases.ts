@@ -20,6 +20,17 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    id: 6,
+    date: "2026-11-26",
+    title: "Item-by-item return check",
+    changes: [
+      "For returns with more than one item, every item starts as Received. Staff tap only the one that's missing, wrong or damaged. Only good pieces go back on the shelf.",
+      "Returns has new filters: Partial return, Wrong item, and Refunded, not back.",
+      "Open a parcel to see what was refunded next to what actually came back, item by item.",
+      "Dispute messages and the 8 PM summary now list partial returns and wrong items.",
+    ],
+  },
+  {
     id: 5,
     date: "2026-11-24",
     title: "Smarter replies, tidier Settings",
