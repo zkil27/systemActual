@@ -24,10 +24,10 @@ export const RELEASES: Release[] = [
     date: "2026-11-26",
     title: "Shopee coming soon, softer colors",
     changes: [
-      "The Shopee tab in Chats now says Coming soon while Shopee reviews Kyna Ops. Your TikTok chats work as before.",
-      "Shopee in Settings, Upload, Items and Today also shows Coming soon.",
+      "Shopee in Chats, Settings, Upload, Items and Today says Coming soon while Shopee reviews Kyna Ops. Your TikTok chats work as before.",
       "The sample chats and sample returns are gone, so everything you see is from your real shop.",
-      "Chats and orders show soft TikTok or Shopee colors behind the cards, and a soft glow and a light tap confirm what you do. Turn the colors off in Settings → Appearance.",
+      "Chats and orders show soft TikTok or Shopee colors behind the cards, and the app icon has a soft pink glow. Turn the colors off in Settings → Appearance.",
+      "A soft glow and a light tap confirm what you do, like saving a scan or sending a reply.",
     ],
   },
   {

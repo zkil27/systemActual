@@ -1,8 +1,9 @@
 import { ImageResponse } from "next/og";
-import { BRAND_INK, BRAND_PINK } from "./icons";
+import { BRAND_ICON_GRADIENT, BRAND_INK, BRAND_PINK } from "./icons";
 
 /**
- * Draws the Kyna Ops mark: a rounded-stroke "K" on a full-bleed pastel pink square.
+ * Draws the Kyna Ops mark: a rounded-stroke "K" on a full-bleed pastel pink
+ * square with the same soft wash as the app's background field.
  * The phone applies its own corner mask, so the square stays square unless
  * `rounded` is set (browser tab favicon).
  *
@@ -23,7 +24,8 @@ export function renderAppIcon(
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: BRAND_PINK,
+          backgroundColor: BRAND_PINK,
+          backgroundImage: BRAND_ICON_GRADIENT,
           borderRadius: rounded ? size * 0.22 : 0,
         }}
       >

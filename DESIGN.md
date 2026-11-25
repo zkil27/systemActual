@@ -211,7 +211,7 @@ Inputs are 16px or larger, which stops iOS from zooming in on focus.
     - **Chats:** Shopee / TikTok switch and chat list on the left (320–380px), the open chat on the right in a card that fills the window height.
   - Scan, Stock-in and Login stay phone-width.
 - **Home-screen app:**
-  - `display: standalone` manifest with 192, 512 and maskable icons, generated in code.
+  - `display: standalone` manifest with 192, 512 and maskable icons, generated in code (`src/lib/brand/app-icon.tsx`). The icon is the `on-brand` "K" on `brand-solid` pink with the ambient field's wash: a pale highlight top-left, a cool mist top-right, and deeper rose at the bottom.
   - Both `mobile-web-app-capable` and `apple-mobile-web-app-capable` tags, plus `viewport-fit=cover`.
   - `.safe-top` and `.safe-bottom` pad around the notch and home indicator.
   - The status bar style is `default`, which gives dark text over the white header. `black-translucent` would make the clock white against a light UI.
