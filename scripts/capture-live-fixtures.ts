@@ -80,6 +80,18 @@ async function main() {
           await shopeeGet("/api/v2/returns/get_reverse_tracking_info", shop.shopId, token, { return_sn: firstReturn })
         );
       }
+      // Profit: fees and payout of one completed order (checks the field names in src/lib/finance/map.ts).
+      const doneShopee = await prisma.order.findFirst({
+        where: { shopConnectionId: shop.id, status: "COMPLETED" },
+        orderBy: { platformUpdatedAt: "desc" },
+        select: { orderSn: true },
+      });
+      if (doneShopee) {
+        await save(
+          "shopee-escrow",
+          await shopeeGet("/api/v2/payment/get_escrow_detail", shop.shopId, token, { order_sn: doneShopee.orderSn })
+        );
+      }
       await save(
         "shopee-wallet",
         await shopeeGet("/api/v2/payment/get_wallet_transaction_list", shop.shopId, token, {
@@ -97,6 +109,17 @@ async function main() {
         "tiktok-returns",
         await call("POST", "/return_refund/202309/returns/search", { page_size: "50" }, { update_time_ge: sec(new Date(now.getTime() - 14 * 24 * 3600_000)), update_time_lt: sec(now) })
       );
+      const doneTikTok = await prisma.order.findFirst({
+        where: { shopConnectionId: shop.id, status: "COMPLETED" },
+        orderBy: { platformUpdatedAt: "desc" },
+        select: { orderSn: true },
+      });
+      if (doneTikTok) {
+        await save(
+          "tiktok-order-statement",
+          await call("GET", `/finance/202309/orders/${encodeURIComponent(doneTikTok.orderSn)}/statement_transactions`)
+        );
+      }
       await save(
         "tiktok-statements",
         await call("GET", "/finance/202309/statements", {

@@ -97,6 +97,8 @@ model ShopConnection {
   stockImportCursor  String?
   stockImportedAt    DateTime?
   walletTransactions WalletTransaction[]
+  orderFinances      OrderFinance[]
+  financeMonths      FinanceMonth[]
   lastSyncedAt       DateTime?
   orders             Order[]
   listings           ListingVariant[]
@@ -452,6 +454,10 @@ model Order {
   stockRecordedAt         DateTime?
   /// Set once a cancelled-after-shipping order has been checked for a failed delivery.
   failedDeliveryCheckedAt DateTime?
+  /// Last time we asked the shop for this completed order's fees and payout.
+  financeCheckedAt        DateTime?
+  /// Set once its OrderFinance is saved; the order isn't asked about again.
+  financeSavedAt          DateTime?
   lines                   OrderLine[]
   packages                Package[]
   syncedAt                DateTime       @updatedAt
@@ -460,6 +466,7 @@ model Order {
   @@index([shopConnectionId, status])
   @@index([status, platformUpdatedAt])
   @@index([platformCreatedAt])
+  @@index([status, financeSavedAt, financeCheckedAt])
 }
 
 model OrderLine {
@@ -605,6 +612,114 @@ model WalletTransaction {
 
   @@unique([platform, externalId])
   @@index([occurredAt, kind])
+}
+
+/// What one completed order really earned: the shop's payout, its fees, and
+/// our cost of the pieces the buyer kept. A snapshot, kept 120 days; months
+/// are summed into FinanceMonth / ItemProfitMonth, which are kept for good.
+/// Not tied to Order (orders are deleted after 90 days).
+model OrderFinance {
+  id                String             @id @default(cuid())
+  shopConnectionId  String
+  shopConnection    ShopConnection     @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
+  platform          Platform
+  orderSn           String
+  /// When the shop paid it out (Shopee escrow release / TikTok settlement).
+  settledAt         DateTime
+  /// Manila month of settledAt, "2026-11".
+  month             String
+  pieces            Int
+  /// Pieces that came back good on a return (back on the shelf, so not a cost).
+  piecesBackGood    Int                @default(0)
+  /// What the buyer paid (incl. shipping they paid).
+  buyerPaidPhp      Decimal            @db.Decimal(12, 2)
+  /// What the shop actually paid us for this order.
+  netPayoutPhp      Decimal            @db.Decimal(12, 2)
+  /// Fees as positive pesos. Missing fields are 0; the rest of what the shop took is in otherPhp.
+  commissionPhp     Decimal            @default(0) @db.Decimal(12, 2)
+  serviceFeePhp     Decimal            @default(0) @db.Decimal(12, 2)
+  transactionFeePhp Decimal            @default(0) @db.Decimal(12, 2)
+  affiliatePhp      Decimal            @default(0) @db.Decimal(12, 2)
+  shippingPhp       Decimal            @default(0) @db.Decimal(12, 2)
+  withholdingTaxPhp Decimal            @default(0) @db.Decimal(12, 2)
+  /// buyerPaid - netPayout - the fees above: vouchers, rebates, anything unnamed.
+  otherPhp          Decimal            @default(0) @db.Decimal(12, 2)
+  /// Our cost (puhunan) of the pieces the buyer kept.
+  costPhp           Decimal            @db.Decimal(12, 2)
+  /// netPayout - cost.
+  profitPhp         Decimal            @db.Decimal(12, 2)
+  /// The shop's own numeric fields, for checking field names against live data.
+  breakdown         Json?
+  lines             OrderFinanceLine[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@unique([platform, orderSn])
+  @@index([month])
+  @@index([settledAt])
+}
+
+/// One item of an OrderFinance, with its share of the payout. For profit per item.
+model OrderFinanceLine {
+  id           String       @id @default(cuid())
+  financeId    String
+  finance      OrderFinance @relation(fields: [financeId], references: [id], onDelete: Cascade)
+  month        String
+  /// Garment id, or "lv:<listingId>:<variationId>" when the listing isn't linked to an item.
+  itemKey      String
+  garmentId    String?
+  name         String
+  imageUrl     String?
+  pieces       Int
+  netPayoutPhp Decimal      @db.Decimal(12, 2)
+  costPhp      Decimal      @db.Decimal(12, 2)
+
+  @@index([month, itemKey])
+  @@index([financeId])
+}
+
+/// One shop's month, summed from OrderFinance. Kept for good (small): the
+/// bookkeeper's monthly numbers and tax summary.
+model FinanceMonth {
+  id                String         @id @default(cuid())
+  month             String
+  shopConnectionId  String
+  shopConnection    ShopConnection @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
+  platform          Platform
+  orders            Int
+  pieces            Int
+  piecesBackGood    Int
+  buyerPaidPhp      Decimal        @db.Decimal(14, 2)
+  netPayoutPhp      Decimal        @db.Decimal(14, 2)
+  commissionPhp     Decimal        @db.Decimal(14, 2)
+  serviceFeePhp     Decimal        @db.Decimal(14, 2)
+  transactionFeePhp Decimal        @db.Decimal(14, 2)
+  affiliatePhp      Decimal        @db.Decimal(14, 2)
+  shippingPhp       Decimal        @db.Decimal(14, 2)
+  withholdingTaxPhp Decimal        @db.Decimal(14, 2)
+  otherPhp          Decimal        @db.Decimal(14, 2)
+  costPhp           Decimal        @db.Decimal(14, 2)
+  profitPhp         Decimal        @db.Decimal(14, 2)
+  updatedAt         DateTime       @updatedAt
+
+  @@unique([month, shopConnectionId])
+}
+
+/// One item's month across both shops, summed from OrderFinanceLine. Kept for good.
+model ItemProfitMonth {
+  id           String   @id @default(cuid())
+  month        String
+  itemKey      String
+  garmentId    String?
+  name         String
+  imageUrl     String?
+  pieces       Int
+  netPayoutPhp Decimal  @db.Decimal(14, 2)
+  costPhp      Decimal  @db.Decimal(14, 2)
+  profitPhp    Decimal  @db.Decimal(14, 2)
+  updatedAt    DateTime @updatedAt
+
+  @@unique([month, itemKey])
 }
 
 enum StockReason {

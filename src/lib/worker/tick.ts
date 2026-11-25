@@ -20,6 +20,8 @@ import { finishDoneWaves, maybeStartScheduledWave } from "@/lib/waves/run";
 import { claimReadyReconcile, reconcileReadyOrders } from "@/lib/waves/reconcile";
 import { withSpan } from "@/lib/otel";
 import { drainIntegrationEvents } from "@/lib/integrations/inbox";
+import { syncOrderFinance } from "@/lib/finance/sync";
+import { maybeRollUpFinance } from "@/lib/finance/report";
 import { handleMarketplaceEvent } from "@/lib/integrations/handle-event";
 import { runLocked } from "./lock";
 
@@ -47,6 +49,8 @@ export interface ShopTickResult {
   parcelsChecked: number;
   courierReturned: number;
   moneySaved: number;
+  /** Completed orders whose fees and payout were saved. */
+  financeSaved?: number;
   stockImportPages?: number;
   caughtUp: boolean;
   error?: string;
@@ -112,6 +116,13 @@ async function tickShop(shopId: string, deadline: number): Promise<ShopTickResul
       // Money problems must not hide return updates; report and continue.
       result.error = `Money sync: ${err instanceof Error ? err.message : String(err)}`;
       console.error(`[tick] ${shop.shopName} money`, err);
+    }
+    try {
+      // Read-only: fees and payout of completed orders, for Profit.
+      result.financeSaved = (await syncOrderFinance(fresh, token, sliceDeadline(deadline, 0.4))).saved;
+    } catch (err) {
+      result.error = `Profit sync: ${err instanceof Error ? err.message : String(err)}`;
+      console.error(`[tick] ${shop.shopName} finance`, err);
     }
     let stockImportFinished = true;
     try {
@@ -255,6 +266,13 @@ async function tickOnce(
     }
   } catch (err) {
     console.error("[tick] ready reconcile", err);
+  }
+
+  try {
+    // Monthly profit totals (kept for good), at most every 30 minutes.
+    if (hasTime(deadline, 15_000)) await withSpan("worker.tick.financeRollup", () => maybeRollUpFinance());
+  } catch (err) {
+    console.error("[tick] finance rollup", err);
   }
 
   try {
