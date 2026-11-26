@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 
-const SCHEMA_VERSION = "2026-11-23-auth-hardening";
+const SCHEMA_VERSION = "2026-11-26-phase5-listings-and-prices";
 
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
@@ -21,7 +21,9 @@ function createClient(): PrismaClient {
   if (
     process.env.NODE_ENV !== "production" &&
     globalForPrisma.prisma &&
-    globalForPrisma.prismaSchemaVersion !== SCHEMA_VERSION
+    (globalForPrisma.prismaSchemaVersion !== SCHEMA_VERSION ||
+      !("priceChange" in globalForPrisma.prisma) ||
+      !("channelProduct" in globalForPrisma.prisma))
   ) {
     void globalForPrisma.prisma.$disconnect().catch(() => {});
     try {

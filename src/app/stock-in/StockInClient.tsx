@@ -74,6 +74,7 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
   const [pickedPo, setPickedPo] = useState<StaffPurchaseOrderView | null>(null);
   const [undoing, setUndoing] = useState<string | null>(null);
   const [backHref, setBackHref] = useState("/scan");
+  const [backLabel, setBackLabel] = useState("Back to Scan");
   const keyRef = useRef(newKey());
 
   const loadToday = useCallback(async () => {
@@ -127,7 +128,16 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
     const paramQuery = params.get("q");
     const paramVariantId = params.get("variantId");
     const from = params.get("from");
-    if (from && /^[a-z]{2,12}$/.test(from)) setBackHref(`/scan?tab=${from}`);
+    if (from === "items") {
+      setBackHref("/items");
+      setBackLabel("Back to Stock");
+    } else if (from === "owner") {
+      setBackHref("/");
+      setBackLabel("Back to Today");
+    } else if (from && /^[a-z]{2,12}$/.test(from)) {
+      setBackHref(`/scan?tab=${from}`);
+      setBackLabel("Back to Scan");
+    }
 
     if (paramMode === "EMPTY_SHELF" || paramMode === "DEFECTIVE" || paramMode === "SUPPLIER_IN") {
       setMode(paramMode);
@@ -211,7 +221,7 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
       <header className="flex items-center gap-2">
         <Link
           href={backHref}
-          aria-label="Back to Scan"
+          aria-label={backLabel}
           className="pressable flex h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05]"
         >
           <ArrowLeft className="h-6 w-6" />

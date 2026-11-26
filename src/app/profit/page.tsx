@@ -170,6 +170,8 @@ export default function ProfitPage() {
   return (
     <AppShell
       title="Profit"
+      backHref="/"
+      backLabel="Today"
       subtitle={report ? `${monthLabel(report.month)} · by payout date` : undefined}
       onRefresh={() => load(month)}
     >

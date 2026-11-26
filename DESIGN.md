@@ -196,9 +196,10 @@ Inputs are 16px or larger, which stops iOS from zooming in on focus.
 
 - **Phone & tablet (`< 1024px`):**
   - 20px side margins and 32px between sections.
-  - A 48px top bar holds icon actions. It's transparent at rest, and turns white at 80% with blur and a hairline once the large title scrolls under it.
-  - A floating translucent pill tab bar holds Today, Ship, Returns (crimson Missing badge), Stock and Chats (pastel pink unread badge, `brand-solid` with `on-brand` text), with safe-area padding.
-  - Scan sits in the top bar as an icon next to the Settings gear on every owner screen. Staff open `/scan` directly; it has its own header and no tab bar.
+  - A 48px top bar stays free of top-right navigation icons (showing only the scrolled compact title and, on drill-down screens, a left-aligned back link). It's transparent at rest, and turns white at 80% with blur and a hairline once the large title scrolls under it.
+  - A floating translucent pill tab bar in the bottom thumb zone holds Today, Ship, Returns (crimson Missing badge), Chats (pastel pink unread badge, `brand-solid` with `on-brand` text), and Menu (pastel pink pending approvals badge, opening the `MobileMenuSheet` bottom sheet with quick actions for Find order, Scan parcel, Add delivery, Stock, Prices, Restock, Approvals, Profit, Upload, and Settings), with safe-area padding.
+  - Items & stock, Listings & prices, and Restock & suppliers share a labeled 3-tab `StockHubNav` switcher (`Stock | Prices | Restock`) right under the title.
+  - Staff open `/scan` directly; it has its own header and no tab bar.
   - An open chat (`/chats/[id]`) fills the screen with no tab bar: back button and buyer name on top, the order card folded to one row under it, messages, then the reply box pinned above the keyboard (`visualViewport`) and the home indicator.
 - **Desktop (`>= 1024px`):**
   - A fixed 240px left sidebar replaces the bottom tab bar, grouped into Today, Returns (with the Missing badge), Chats (with the unread badge), Scan and Find an order; Items & stock, Waves & pick lists and Upload a file; and Settings pinned at the bottom.
@@ -261,7 +262,7 @@ Shared building blocks live in `src/components/ui/`:
   - It fires past 72px of finger travel with one vibration tick. A white capsule drops from under the top bar: "Pull to sync" → "Release to sync" → "Syncing…" → check.
   - The browser's own pull-to-reload is off (`overscroll-behavior-y: contain` on `html`).
   - On phones the top-bar sync button is replaced by a tappable "Updated 4 min ago · Pull to sync" line under the title. Desktop keeps the button.
-- **ScrollChips:** every sideways chip row. The hidden side fades out and a round white chevron button pages the row along. The first row a device ever sees nudges 56px and back, once.
+- **ScrollChips:** every sideways chip row. The hidden side fades out softly without covering active chips, and supports touch, mouse drag, and trackpad/wheel horizontal scrolling. The first row a device ever sees nudges 56px and back, once.
 
 Composite components:
 

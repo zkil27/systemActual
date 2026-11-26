@@ -104,7 +104,7 @@ export default function AssistantSettingsPage() {
   const textDirty = settings && (label.trim() !== settings.autoLabel || handover.trim() !== settings.handoverText);
 
   return (
-    <AppShell title="Chats assistant" onRefresh={load}>
+    <AppShell title="Chats assistant" backHref="/settings" backLabel="Settings" onRefresh={load}>
       <div className="space-y-8">
         {error && (
           <p role="alert" className="px-1 text-[15px] font-semibold text-missing-ink">

@@ -129,6 +129,7 @@ html.theme-transition * {
     color: var(--color-ink);
     -webkit-tap-highlight-color: transparent;
     -webkit-text-size-adjust: 100%;
+    overflow-x: clip;
     /* The app draws its own pull-to-sync; stop the browser's pull-to-reload. */
     overscroll-behavior-y: contain;
   }

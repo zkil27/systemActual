@@ -620,7 +620,7 @@ export default function DashboardPage() {
             href="/orders"
             aria-label="Find an order"
             title="Find an order"
-            className="pressable flex h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05]"
+            className="pressable hidden h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05] lg:flex"
           >
             <Search className="h-[22px] w-[22px]" />
           </Link>
@@ -643,7 +643,7 @@ export default function DashboardPage() {
       }
     >
       <div className="space-y-8">
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex items-center gap-2">
           <SegmentedControl
             label="Date range"
             options={RANGES}
@@ -652,38 +652,40 @@ export default function DashboardPage() {
               setCustomDate("");
               setRange(id);
             }}
-            className="w-full sm:w-auto sm:min-w-[300px] lg:max-w-md"
+            className="min-w-0 flex-1 sm:flex-none sm:min-w-[300px] lg:max-w-md"
           />
 
-          <div className="flex items-center gap-2">
-            <div
-              className={`inline-flex h-10 items-center rounded-full transition-colors ${
-                customDate
-                  ? "bg-brand/12 text-brand ring-1 ring-inset ring-brand/35"
-                  : "bg-surface text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] hover:text-ink active:bg-surface-muted"
+          <div
+            className={`inline-flex h-11 shrink-0 items-center rounded-full transition-colors ${
+              customDate
+                ? "bg-brand/12 text-brand ring-1 ring-inset ring-brand/35"
+                : "bg-surface text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] hover:text-ink active:bg-surface-muted"
+            }`}
+          >
+            <button
+              type="button"
+              aria-label={customDate ? `Change date, ${manilaDayLabel(customDate)}` : "Choose specific date"}
+              aria-haspopup="dialog"
+              onClick={() => setDatePickerOpen(true)}
+              className={`pressable relative flex h-full items-center gap-1.5 text-[14px] font-semibold ${
+                customDate ? "px-3" : "min-w-11 justify-center px-2.5 sm:px-3.5"
               }`}
             >
+              <CalendarDays className="h-[18px] w-[18px] shrink-0" />
+              <span className={customDate ? "whitespace-nowrap" : "hidden sm:inline"}>
+                {customDate ? manilaDayLabel(customDate) : "Pick date"}
+              </span>
+            </button>
+            {customDate && (
               <button
                 type="button"
-                aria-label={customDate ? `Change date, ${manilaDayLabel(customDate)}` : "Choose specific date"}
-                aria-haspopup="dialog"
-                onClick={() => setDatePickerOpen(true)}
-                className="pressable relative flex h-full items-center gap-1.5 px-3.5 text-[14px] font-semibold"
+                aria-label="Clear selected date"
+                onClick={() => setCustomDate("")}
+                className="pressable relative mr-1.5 flex h-7 w-7 items-center justify-center rounded-full text-brand/80 after:absolute after:-inset-2 after:content-[''] hover:bg-brand/15 hover:text-brand"
               >
-                <CalendarDays className="h-4 w-4 shrink-0" />
-                <span>{customDate ? manilaDayLabel(customDate) : "Pick date"}</span>
+                <X className="h-3.5 w-3.5" />
               </button>
-              {customDate && (
-                <button
-                  type="button"
-                  aria-label="Clear selected date"
-                  onClick={() => setCustomDate("")}
-                  className="pressable relative mr-1.5 flex h-6 w-6 items-center justify-center rounded-full text-brand/80 after:absolute after:-inset-2.5 after:content-[''] hover:bg-brand/15 hover:text-brand"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
+            )}
           </div>
         </div>
 

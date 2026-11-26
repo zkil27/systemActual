@@ -10,6 +10,7 @@ import { useLiveRefresh } from "@/lib/ui/use-live-refresh";
 
 export default function ApprovalsPage() {
   const [requests, setRequests] = useState<ActionRequestDto[]>([]);
+  const [pendingCount, setPendingCount] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -21,6 +22,7 @@ export default function ApprovalsPage() {
       }
       const data = await res.json();
       setRequests(data.requests ?? []);
+      if (typeof data.pendingCount === "number") setPendingCount(data.pendingCount);
     } catch {
       toast("Couldn't refresh approvals.", "error");
     } finally {
@@ -35,7 +37,7 @@ export default function ApprovalsPage() {
   useLiveRefresh({ onRefresh: load });
 
   return (
-    <AppShell title="Approvals" onRefresh={load}>
+    <AppShell title="Approvals" approvalsCount={pendingCount} onRefresh={load}>
       {loading ? (
         <Group className="p-6 text-center text-[14px] text-ink-3">
           Loading approvals...

@@ -1,19 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { activeTabIndex, BOTTOM_TABS, SIDEBAR_PRIMARY_ITEMS } from "@/lib/ui/nav";
+import { activeTabIndex, BOTTOM_TABS, isMenuRoute, SIDEBAR_PRIMARY_ITEMS } from "@/lib/ui/nav";
 import { fitWithin, newClientKey, timeoutSignal } from "@/lib/chats/client";
 
 describe("owner navigation", () => {
-  it("has Chats in the fifth tab slot and Scan out of the tab bar", () => {
-    expect(BOTTOM_TABS.map((t) => t.label)).toEqual(["Today", "Ship", "Returns", "Stock", "Chats"]);
+  it("has Today, Ship, Returns, Chats in the first 4 slots and leaves Scan out of the tab bar", () => {
+    expect(BOTTOM_TABS.map((t) => t.label)).toEqual(["Today", "Ship", "Returns", "Chats"]);
     expect(BOTTOM_TABS.some((t) => t.href === "/scan")).toBe(false);
   });
 
-  it("marks Chats active on the list and inside a chat", () => {
-    expect(activeTabIndex("/chats")).toBe(4);
-    expect(activeTabIndex("/chats/abc")).toBe(4);
-    expect(activeTabIndex("/chatsx")).toBe(-1);
+  it("highlights the right direct tab or the 5th Menu slot for Menu routes", () => {
     expect(activeTabIndex("/")).toBe(0);
+    expect(activeTabIndex("/waves")).toBe(1);
     expect(activeTabIndex("/returns")).toBe(2);
+    expect(activeTabIndex("/chats")).toBe(3);
+    expect(activeTabIndex("/chats/abc")).toBe(3);
+    expect(activeTabIndex("/chatsx")).toBe(-1);
+    expect(activeTabIndex("/scan")).toBe(-1);
+
+    for (const p of [
+      "/items",
+      "/listings",
+      "/restock",
+      "/approvals",
+      "/profit",
+      "/orders",
+      "/imports",
+      "/settings",
+      "/settings/assistant",
+    ]) {
+      expect(isMenuRoute(p)).toBe(true);
+      expect(activeTabIndex(p)).toBe(4);
+    }
+    expect(isMenuRoute("/itemsx")).toBe(false);
+    expect(isMenuRoute("/")).toBe(false);
   });
 
   it("keeps Scan in the computer sidebar, with Chats above it", () => {

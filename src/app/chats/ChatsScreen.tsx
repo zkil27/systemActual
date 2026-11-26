@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CheckCircle2, MessageCircle } from "lucide-react";
+import { CheckCircle2, ChevronRight, MessageCircle } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { toast } from "@/components/ui/Toast";
@@ -56,6 +56,7 @@ export function ChatsScreen() {
 
   const [list, setList] = useState<ListState | null>(null);
   const [unread, setUnread] = useState<ChatUnread | null>(null);
+  const [pendingApprovals, setPendingApprovals] = useState<number | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
 
@@ -108,8 +109,21 @@ export function ChatsScreen() {
 
   useEffect(() => {
     void load(shop);
+    const loadApprovals = () => {
+      if (document.visibilityState !== "visible") return;
+      fetch("/api/approvals?countOnly=1", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (d && typeof d.pendingCount === "number") setPendingApprovals(d.pendingCount);
+        })
+        .catch(() => {});
+    };
+    loadApprovals();
     const tick = () => {
-      if (document.visibilityState === "visible") void load(shop);
+      if (document.visibilityState === "visible") {
+        void load(shop);
+        loadApprovals();
+      }
     };
     const id = setInterval(tick, LIST_POLL_MS);
     document.addEventListener("visibilitychange", tick);
@@ -189,20 +203,44 @@ export function ChatsScreen() {
       title="Chats"
       width={wide ? "wide" : "default"}
       chatUnread={unread?.total}
+      approvalsCount={pendingApprovals}
       onRefresh={wide ? undefined : refresh}
       headerRight={
         <Link
           href="/approvals"
           aria-label="Approvals"
           title="Approvals"
-          className="pressable flex h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05]"
+          className="pressable hidden h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05] lg:flex"
         >
           <CheckCircle2 className="h-[22px] w-[22px]" />
         </Link>
       }
     >
       <div className="space-y-4 lg:space-y-0">
-        {!wide && <SegmentedControl label="Shop" options={options} value={shop} onChange={changeShop} />}
+        {!wide && (
+          <>
+            <SegmentedControl label="Shop" options={options} value={shop} onChange={changeShop} />
+            <Link
+              href="/approvals"
+              className="pressable-row flex min-h-12 items-center justify-between gap-3 rounded-[var(--radius-control)] bg-surface px-4 py-2.5 shadow-[var(--shadow-card)]"
+            >
+              <span className="flex items-center gap-2.5 text-[15px] font-semibold text-ink">
+                <CheckCircle2 className="h-5 w-5 text-brand" />
+                Approvals
+              </span>
+              <span className="flex items-center gap-1.5">
+                {pendingApprovals && pendingApprovals > 0 ? (
+                  <span className="tabular-nums rounded-full bg-brand-solid px-2 py-0.5 text-[12px] font-bold text-on-brand">
+                    {pendingApprovals} waiting
+                  </span>
+                ) : (
+                  <span className="text-[13px] text-ink-3">None waiting</span>
+                )}
+                <ChevronRight className="h-4 w-4 text-ink-3" />
+              </span>
+            </Link>
+          </>
+        )}
 
         {wide ? (
           <div className="grid h-[calc(100dvh-13rem)] min-h-[480px] grid-cols-[minmax(320px,380px)_1fr] gap-5">

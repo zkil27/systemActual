@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { OptionPickerSheet } from "@/components/ui/OptionPickerSheet";
 import { Sheet } from "@/components/ui/Sheet";
 import { toast } from "@/components/ui/Toast";
+import { buildPriceVariantOptions } from "@/lib/listings/price-picker";
 import type { ShopSummaryDto, UnifiedListingItemDto } from "@/lib/listings/service";
 
 export function PriceEditSheet({
@@ -22,9 +24,11 @@ export function PriceEditSheet({
 }) {
   const [priceText, setPriceText] = useState("");
   const [variantId, setVariantId] = useState<string>("");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    setPickerOpen(false);
     if (!open || !item) return;
     const firstPrice =
       item.sellingPricePhp ??
@@ -32,6 +36,16 @@ export function PriceEditSheet({
     setPriceText(firstPrice !== null && firstPrice !== undefined ? String(firstPrice) : "");
     setVariantId("");
   }, [open, item]);
+
+  const variantOptions = useMemo(
+    () => (item ? buildPriceVariantOptions(item) : []),
+    [item]
+  );
+
+  const selectedOption = useMemo(
+    () => variantOptions.find((o) => o.value === variantId) ?? variantOptions[0],
+    [variantOptions, variantId]
+  );
 
   const targetShops = useMemo(() => {
     if (!item) return [];
@@ -98,45 +112,64 @@ export function PriceEditSheet({
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={item ? `Price: ${item.garmentName}` : "Update price"}>
-      {item && (
-        <div className="space-y-4">
-          {item.variants.length > 1 && (
+    <>
+      <Sheet open={open} onClose={onClose} title={item ? `Price: ${item.garmentName}` : "Update price"}>
+        {item && (
+          <div className="space-y-4">
+            {item.variants.length > 1 && selectedOption && (
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="price-apply-to-trigger"
+                  className="block text-[13px] font-semibold text-ink-2"
+                >
+                  Apply to
+                </label>
+                <button
+                  id="price-apply-to-trigger"
+                  type="button"
+                  aria-haspopup="listbox"
+                  aria-expanded={pickerOpen}
+                  onClick={() => setPickerOpen(true)}
+                  className="pressable flex min-h-[52px] w-full items-center justify-between gap-3 rounded-[var(--radius-control)] border border-hairline-strong bg-surface px-3.5 py-2.5 text-left hover:bg-surface-subtle active:bg-surface-muted"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[15px] font-semibold text-ink">
+                      {selectedOption.label}
+                    </span>
+                    {selectedOption.description && (
+                      <span className="mt-0.5 block truncate text-[12px] tabular-nums text-ink-3">
+                        {selectedOption.description}
+                      </span>
+                    )}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    {selectedOption.trailing && (
+                      <span className="text-[13px] font-semibold tabular-nums text-ink-2">
+                        {selectedOption.trailing}
+                      </span>
+                    )}
+                    <ChevronDown className="h-4 w-4 shrink-0 text-ink-3" />
+                  </span>
+                </button>
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <label className="block text-[13px] font-semibold text-ink-2">
-                Apply to
+                New selling price (₱ PHP)
               </label>
-              <select
-                value={variantId}
-                onChange={(e) => setVariantId(e.target.value)}
-                className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[14px] text-ink outline-none focus:border-brand"
-              >
-                <option value="">All sizes &amp; colours ({item.variants.length})</option>
-                {item.variants.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.label} ({v.listings.length} listing{v.listings.length === 1 ? "" : "s"})
-                  </option>
-                ))}
-              </select>
+              <input
+                type="number"
+                min={1}
+                max={100000}
+                step="0.01"
+                inputMode="decimal"
+                value={priceText}
+                onChange={(e) => setPriceText(e.target.value)}
+                placeholder="e.g. 199"
+                className="h-12 w-full rounded-[var(--radius-control)] border border-hairline-strong bg-surface px-3.5 text-[18px] font-bold tabular-nums text-ink outline-none focus:border-brand"
+              />
             </div>
-          )}
-
-          <div className="space-y-1.5">
-            <label className="block text-[13px] font-semibold text-ink-2">
-              New selling price (₱ PHP)
-            </label>
-            <input
-              type="number"
-              min={1}
-              max={100000}
-              step="0.01"
-              inputMode="decimal"
-              value={priceText}
-              onChange={(e) => setPriceText(e.target.value)}
-              placeholder="e.g. 199"
-              className="h-12 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3.5 text-[18px] font-bold tabular-nums text-ink outline-none focus:border-brand"
-            />
-          </div>
 
           <div className="space-y-2 rounded-[var(--radius-card)] bg-surface-subtle p-3.5">
             <p className="text-[12px] font-bold uppercase tracking-[0.03em] text-ink-3">
@@ -194,8 +227,20 @@ export function PriceEditSheet({
           >
             {saving ? "Queuing..." : "Queue price update for approval"}
           </Button>
-        </div>
-      )}
-    </Sheet>
+          </div>
+        )}
+      </Sheet>
+
+      <OptionPickerSheet
+        open={open && pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        title="Apply price to"
+        options={variantOptions}
+        value={variantId}
+        onChange={setVariantId}
+        searchPlaceholder="Search colour or size..."
+        emptyLabel="No matching sizes or colours"
+      />
+    </>
   );
 }

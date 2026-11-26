@@ -20,6 +20,17 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    id: 11,
+    date: "2026-11-26",
+    title: "Easier one-handed phone layout",
+    changes: [
+      "Moved top-right corner icons into the new Menu button at the bottom right so every screen is easy to reach with one thumb.",
+      "Added a Stock, Prices, and Restock switcher bar and cleaned up overlapping item rows in Items & stock.",
+      "Put labeled Ship tool buttons, a cleaner Returns date picker, and Approvals links right where your thumb lands.",
+      "Apply to in Listings & prices now opens a searchable picker modal that works cleanly on phones and computers.",
+    ],
+  },
+  {
     id: 10,
     date: "2026-11-26",
     title: "Restock, chat approvals, and prices",

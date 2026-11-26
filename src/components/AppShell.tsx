@@ -6,7 +6,9 @@ import { usePathname } from "next/navigation";
 import {
   CalendarCheck2,
   CheckCircle2,
+  ChevronLeft,
   FileUp,
+  LayoutGrid,
   MessageCircle,
   PackageSearch,
   Printer,
@@ -19,11 +21,13 @@ import {
   Truck,
   type LucideIcon,
 } from "lucide-react";
+import { MobileMenuSheet } from "@/components/MobileMenuSheet";
 import { Toaster } from "@/components/ui/Toast";
 import { PullIndicator } from "@/components/ui/PullToRefresh";
 import { usePullToRefresh } from "@/lib/ui/use-pull-to-refresh";
 import { formatBadgeCount } from "@/lib/ui/format";
-import { BOTTOM_TABS, SIDEBAR_PRIMARY_ITEMS, type NavBadge, type NavItem } from "@/lib/ui/nav";
+import { haptic, prefersReducedMotion } from "@/lib/ui/motion";
+import { activeTabIndex, BOTTOM_TABS, SIDEBAR_PRIMARY_ITEMS, type NavBadge, type NavItem } from "@/lib/ui/nav";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -32,6 +36,9 @@ interface AppShellProps {
   /** Small element beside the large title, e.g. the "Sample" pill. */
   titleAccessory?: React.ReactNode;
   headerRight?: React.ReactNode;
+  /** Optional mobile back link for drill-down screens (e.g. Settings -> Chats assistant). */
+  backHref?: string;
+  backLabel?: string;
   /** Pass on screens that know the count; others reuse the last known value. */
   missingCount?: number;
   /** Content max-width on desktop; "wide" opens up to max-w-6xl. */
@@ -44,6 +51,8 @@ interface AppShellProps {
   pullEnabled?: boolean;
   /** Pass on screens that know the unread chat count (Chats); others poll for it. */
   chatUnread?: number;
+  /** Pass on screens that know the pending approvals count (Approvals); others poll for it. */
+  approvalsCount?: number;
 }
 
 interface Tab extends NavItem {
@@ -71,21 +80,29 @@ interface BadgeView {
   count: number;
 }
 
-/** Missing is crimson (DESIGN.md reserves it); unread chats use the brand pink. */
+/** Missing is crimson (DESIGN.md reserves it); unread chats & approvals use the brand pink. */
 const BADGE_TONE: Record<NavBadge, string> = {
   missing: "bg-missing-solid text-white",
   chats: "bg-brand-solid text-on-brand",
+  approvals: "bg-brand-solid text-on-brand",
 };
 
-/** How often other screens re-check unread chats while open. */
+/** How often other screens re-check unread chats and pending approvals while open. */
 const CHAT_UNREAD_POLL_MS = 30_000;
+const APPROVALS_POLL_MS = 45_000;
 
 const SIDEBAR_OPS: Tab[] = [
   { href: "/profit", label: "Profit", icon: TrendingUp, match: (p) => p.startsWith("/profit") },
   { href: "/items", label: "Items & stock", icon: Shirt, match: (p) => p.startsWith("/items") },
   { href: "/listings", label: "Listings & prices", icon: Tag, match: (p) => p.startsWith("/listings") },
   { href: "/restock", label: "Restock & suppliers", icon: Truck, match: (p) => p.startsWith("/restock") },
-  { href: "/approvals", label: "Approvals", icon: CheckCircle2, match: (p) => p.startsWith("/approvals") },
+  {
+    href: "/approvals",
+    label: "Approvals",
+    icon: CheckCircle2,
+    match: (p) => p.startsWith("/approvals"),
+    badge: "approvals",
+  },
   { href: "/waves", label: "Waves & pick lists", icon: Printer, match: (p) => p.startsWith("/waves") },
   { href: "/imports", label: "Upload a file", icon: FileUp, match: (p) => p.startsWith("/imports") },
 ];
@@ -132,7 +149,13 @@ function SidebarList({
               {item.badge && b?.text && (
                 <span
                   key={b.changed ? `sb-${b.count}` : "sb"}
-                  aria-label={item.badge === "chats" ? `${b.text} unread` : `${b.text} missing`}
+                  aria-label={
+                    item.badge === "chats"
+                      ? `${b.text} unread`
+                      : item.badge === "approvals"
+                        ? `${b.text} pending`
+                        : `${b.text} missing`
+                  }
                   className={`tabular-nums rounded-full px-1.5 py-0.5 text-[11px] font-bold leading-none ${
                     BADGE_TONE[item.badge]
                   } ${b.changed ? "anim-pop" : ""}`}
@@ -156,23 +179,34 @@ let lastMissing = 0;
 let missingKnown = false;
 let lastChatUnread = 0;
 let chatUnreadFetchedAt = 0;
+let lastApprovals = 0;
+let approvalsFetchedAt = 0;
 
 export function AppShell({
   children,
   title,
   titleAccessory,
   headerRight,
+  backHref,
+  backLabel,
   missingCount,
   width = "default",
   subtitle,
   onRefresh,
   pullEnabled = true,
   chatUnread,
+  approvalsCount,
 }: AppShellProps) {
   const pull = usePullToRefresh(onRefresh, pullEnabled);
   const pathname = usePathname();
-  const activeIndex = TABS.findIndex((t) => t.match(pathname));
+  const [menuOpen, setMenuOpen] = useState(false);
+  const routeIndex = activeTabIndex(pathname);
+  const activeIndex = menuOpen ? BOTTOM_TABS.length : routeIndex;
   const maxW = width === "wide" ? "max-w-6xl" : "max-w-3xl";
+
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
 
   const [indicatorIndex, setIndicatorIndex] = useState(
     lastTabIndex >= 0 ? lastTabIndex : activeIndex
@@ -246,9 +280,45 @@ export function AppShell({
     if (chatUnread !== undefined) chatUnreadFetchedAt = Date.now();
   }, [chats, chatUnread]);
 
+  // Pending approvals: lightweight countOnly check for Menu tab & sidebar badge.
+  const [fetchedApprovals, setFetchedApprovals] = useState<number | null>(null);
+  useEffect(() => {
+    if (approvalsCount !== undefined) return;
+    let active = true;
+    const load = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - approvalsFetchedAt < APPROVALS_POLL_MS - 1000) return;
+      approvalsFetchedAt = Date.now();
+      fetch("/api/approvals?countOnly=1", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (active && d && typeof d.pendingCount === "number") setFetchedApprovals(d.pendingCount);
+        })
+        .catch(() => {
+          approvalsFetchedAt = 0;
+        });
+    };
+    load();
+    const id = setInterval(load, APPROVALS_POLL_MS);
+    document.addEventListener("visibilitychange", load);
+    return () => {
+      active = false;
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", load);
+    };
+  }, [approvalsCount]);
+
+  const approvals = approvalsCount ?? fetchedApprovals ?? lastApprovals;
+  const approvalsChanged = approvals !== lastApprovals;
+  useEffect(() => {
+    lastApprovals = approvals;
+    if (approvalsCount !== undefined) approvalsFetchedAt = Date.now();
+  }, [approvals, approvalsCount]);
+
   const badges: Record<NavBadge, BadgeView> = {
     missing: { text: badge, changed: badgeChanged, count: missing },
     chats: { text: formatBadgeCount(chats), changed: chatChanged, count: chats },
+    approvals: { text: formatBadgeCount(approvals), changed: approvalsChanged, count: approvals },
   };
 
   // Large title → compact title once it scrolls under the bar.
@@ -264,8 +334,11 @@ export function AppShell({
     return () => io.disconnect();
   }, []);
 
+  const menuBadge = badges.approvals;
+  const menuActive = activeIndex === BOTTOM_TABS.length;
+
   return (
-    <div className="min-h-dvh pb-[calc(max(12px,env(safe-area-inset-bottom))+100px)] lg:pb-16 lg:pl-60">
+    <div className="min-h-dvh overflow-x-clip pb-[calc(max(12px,env(safe-area-inset-bottom))+100px)] lg:pb-16 lg:pl-60">
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-hairline bg-ground/60 px-3 pb-4 lg:flex">
         <Link
           href="/"
@@ -289,38 +362,28 @@ export function AppShell({
         }`}
       >
         <div className={`relative mx-auto flex h-12 items-center justify-between px-5 lg:h-16 lg:px-8 ${maxW}`}>
+          {backHref ? (
+            <Link
+              href={backHref}
+              onClick={() => haptic("tap")}
+              className="pressable -ml-2 flex h-11 items-center gap-0.5 whitespace-nowrap rounded-full px-2 text-[16px] font-semibold text-brand hover:bg-ink/[0.05] lg:hidden"
+            >
+              <ChevronLeft className="h-5 w-5 shrink-0" strokeWidth={2.4} />
+              <span>{backLabel ?? "Back"}</span>
+            </Link>
+          ) : null}
+
           {/* Compact title, fades in when the large title scrolls under the bar */}
           <p
             aria-hidden={!collapsed}
-            className={`pointer-events-none absolute left-20 right-20 text-center text-[17px] font-bold text-ink transition-[opacity,translate] duration-200 ease-[var(--ease-ios)] lg:left-8 lg:right-auto lg:text-left ${
+            className={`pointer-events-none absolute left-16 right-16 truncate text-center text-[17px] font-bold text-ink transition-[opacity,translate] duration-200 ease-[var(--ease-ios)] lg:left-8 lg:right-auto lg:text-left ${
               collapsed ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0"
             }`}
           >
             {title}
           </p>
 
-          <div className="ml-auto flex items-center gap-1">
-            {headerRight}
-            {/* Scan left the tab bar for Chats; it stays one tap away on every phone screen. */}
-            <Link
-              href="/scan"
-              aria-label="Scan"
-              title="Scan"
-              className="pressable flex h-11 w-11 items-center justify-center rounded-full text-ink-2 hover:bg-ink/[0.05] lg:hidden"
-            >
-              <ScanBarcode className="h-[22px] w-[22px]" />
-            </Link>
-            {pathname !== "/settings" && (
-              <Link
-                href="/settings"
-                aria-label="Settings"
-                title="Settings"
-                className="pressable flex h-11 w-11 items-center justify-center rounded-full text-ink-2 hover:bg-ink/[0.05] lg:hidden"
-              >
-                <Settings2 className="h-[22px] w-[22px]" />
-              </Link>
-            )}
-          </div>
+          {headerRight && <div className="ml-auto flex items-center gap-1">{headerRight}</div>}
         </div>
       </header>
 
@@ -338,7 +401,7 @@ export function AppShell({
         {children}
       </main>
 
-      {/* Floating pill tab bar. Sits above the home indicator, not flush with the edge. */}
+      {/* Floating pill tab bar. Sits above the home indicator, right in the natural thumb zone. */}
       <nav
         aria-label="Tabs"
         className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-3 pb-[max(12px,env(safe-area-inset-bottom))] lg:hidden"
@@ -357,13 +420,21 @@ export function AppShell({
           )}
           {TABS.map((tab, i) => {
             const Icon = tab.icon;
-            const active = i === activeIndex;
+            const active = !menuOpen && i === routeIndex;
             const b = tab.badge ? badges[tab.badge] : null;
             return (
               <Link
                 key={tab.href}
                 href={tab.href}
                 aria-current={active ? "page" : undefined}
+                onClick={(e) => {
+                  haptic("select");
+                  if (menuOpen) setMenuOpen(false);
+                  if (active) {
+                    e.preventDefault();
+                    window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+                  }
+                }}
                 className={`pressable relative flex flex-col items-center justify-center gap-0.5 rounded-full text-[11px] font-semibold ${
                   active ? "text-brand" : "text-ink-3 active:text-ink"
                 }`}
@@ -391,8 +462,51 @@ export function AppShell({
               </Link>
             );
           })}
+
+          <button
+            type="button"
+            aria-label="Menu"
+            aria-haspopup="dialog"
+            aria-expanded={menuOpen}
+            aria-current={menuActive ? "page" : undefined}
+            onClick={() => {
+              haptic("select");
+              setMenuOpen((v) => !v);
+            }}
+            className={`pressable relative flex flex-col items-center justify-center gap-0.5 rounded-full text-[11px] font-semibold ${
+              menuActive ? "text-brand" : "text-ink-3 active:text-ink"
+            }`}
+          >
+            <span className="relative flex h-6 items-center">
+              <LayoutGrid
+                className={`h-[22px] w-[22px] transition-transform duration-200 ease-[var(--ease-ios)] ${
+                  menuActive ? "scale-[1.06]" : ""
+                }`}
+                strokeWidth={menuActive ? 2.3 : 1.9}
+              />
+              {menuBadge.text && (
+                <span
+                  key={menuBadge.changed ? `bm-${menuBadge.count}` : "bm"}
+                  aria-label={`${menuBadge.text} pending approvals`}
+                  className={`tabular-nums absolute -right-3.5 -top-1 min-w-[18px] rounded-full px-1 py-[3px] text-center text-[10px] font-bold leading-none ring-2 ring-surface ${
+                    BADGE_TONE.approvals
+                  } ${menuBadge.changed ? "anim-pop" : ""}`}
+                >
+                  {menuBadge.text}
+                </span>
+              )}
+            </span>
+            <span>Menu</span>
+          </button>
         </div>
       </nav>
+
+      <MobileMenuSheet
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        pathname={pathname}
+        pendingApprovals={approvals}
+      />
 
       {onRefresh && <PullIndicator {...pull} />}
 

@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronRight, Link2, PackagePlus, RotateCw, Search, Sparkles, Star, Tag, Truck } from "lucide-react";
+import { ChevronRight, Link2, PackagePlus, RotateCw, Search, Sparkles, Star } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { StockHubNav } from "@/components/StockHubNav";
 import { Button, Group } from "@/components/ui/Button";
 import { ComingSoonPill } from "@/components/ui/ComingSoon";
 import { useConfirm } from "@/components/ui/ConfirmSheet";
@@ -106,7 +107,11 @@ function ItemFilterChips({
     const el = refs.current[value];
     if (!el) return;
     setBox({ x: el.offsetLeft, w: el.offsetWidth });
-    el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    const parent = el.parentElement;
+    if (parent) {
+      const targetLeft = Math.max(0, el.offsetLeft - (parent.clientWidth - el.offsetWidth) / 2);
+      parent.scrollTo({ left: targetLeft, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    }
   }, [value, needsCheck, errors, archived]);
 
   const options = [
@@ -520,6 +525,7 @@ export default function ItemsPage() {
   const [filter, setFilter] = useState<ItemFilter>("all");
   const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [bumpSheetOpen, setBumpSheetOpen] = useState(false);
   const [linkFrom, setLinkFrom] = useState<CatalogGarment | null>(null);
   const [linkTo, setLinkTo] = useState<CatalogGarment | null>(null);
   const [busy, setBusy] = useState(false);
@@ -624,139 +630,116 @@ export default function ItemsPage() {
   const pinnedSet = new Set(bump?.pinnedItemIds ?? []);
 
   return (
-    <AppShell
-      title="Items & stock"
-      onRefresh={load}
-      headerRight={
-        <div className="flex items-center gap-1">
-          <Link
-            href="/listings"
-            aria-label="Listings and prices"
-            title="Listings & prices"
-            className="pressable flex h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05]"
-          >
-            <Tag className="h-[22px] w-[22px]" />
-          </Link>
-          <Link
-            href="/restock"
-            aria-label="Restock and suppliers"
-            title="Restock & suppliers"
-            className="pressable flex h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05]"
-          >
-            <Truck className="h-[22px] w-[22px]" />
-          </Link>
-          <Link
-            href="/stock-in"
-            aria-label="Add a delivery"
-            title="Add a delivery"
-            className="pressable flex h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05]"
-          >
-            <PackagePlus className="h-[22px] w-[22px]" />
-          </Link>
-        </div>
-      }
-    >
-      <div className="space-y-6">
-        <Group className="p-4">
+    <AppShell title="Items & stock" onRefresh={load}>
+      <div className="space-y-5">
+        <StockHubNav active="items" />
+
+        <Group className="divide-y divide-hairline">
           {importing ? (
-            <p className="text-[16px] font-semibold text-ink">Getting stock from your shops… This page updates by itself.</p>
-          ) : (
-            <div className="space-y-3">
+            <p className="p-4 text-[16px] font-semibold text-ink">
+              Getting stock from your shops… This page updates by itself.
+            </p>
+          ) : !shops.some((s) => s.stockImportedAt) ? (
+            <div className="space-y-3 p-4">
               <p className="text-[15px] text-ink-2">
-                {shops.some((s) => s.stockImportedAt)
-                  ? "Stock syncs from your shops and links matching Shopee & TikTok items automatically."
-                  : "Read every listing and its stock from Shopee and TikTok. Nothing is changed on the shops."}
+                Read every listing and its stock from Shopee and TikTok. Nothing is changed on the shops.
               </p>
-              <div className="flex flex-wrap gap-2">
+              <Button
+                full
+                variant="primary"
+                disabled={busy || !shops.some((s) => s.connected)}
+                onClick={() => run({ action: "start_import" }, "Started")}
+              >
+                Get stock from shops
+              </Button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2 p-3">
+              <Button
+                variant="secondary"
+                disabled={busy || !shops.some((s) => s.connected)}
+                onClick={() => run({ action: "start_import" }, "Started")}
+                className="h-11 flex-1 whitespace-nowrap px-3.5 text-[14px]"
+              >
+                <RotateCw className="h-4 w-4 shrink-0" />
+                Sync stock
+              </Button>
+              {bothConnected && hasUnlinked && (
                 <Button
-                  full={!bothConnected || !hasUnlinked}
-                  variant={shops.some((s) => s.stockImportedAt) ? "secondary" : "primary"}
-                  disabled={busy || !shops.some((s) => s.connected)}
-                  onClick={() => run({ action: "start_import" }, "Started")}
-                  className={bothConnected && hasUnlinked ? "flex-1" : undefined}
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => run({ action: "auto_link" }, "Linked {n} items")}
+                  className="h-11 flex-1 whitespace-nowrap px-3.5 text-[14px]"
                 >
-                  {shops.some((s) => s.stockImportedAt) ? "Read stock again" : "Get stock from shops"}
+                  <Sparkles className="h-4 w-4 shrink-0" />
+                  Auto-link
                 </Button>
-                {bothConnected && hasUnlinked && (
-                  <Button
-                    variant="secondary"
-                    disabled={busy}
-                    onClick={() => run({ action: "auto_link" }, "Linked {n} items")}
-                    className="flex-1"
-                  >
-                    <Sparkles className="mr-1.5 h-4 w-4" />
-                    Auto-link twins
-                  </Button>
-                )}
-              </div>
+              )}
+              <Link
+                href="/stock-in?from=items"
+                onClick={() => haptic("tap")}
+                className="pressable inline-flex h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius-control)] bg-brand-soft px-3.5 text-[14px] font-bold text-brand hover:bg-brand/15"
+              >
+                <PackagePlus className="h-4 w-4 shrink-0" />
+                Delivery
+              </Link>
             </div>
           )}
-        </Group>
 
-        {bump && !bump.connected && (
-          <Group className="flex items-center justify-between gap-3 p-4">
-            <div>
-              <h2 className="text-[17px] font-bold text-ink">Shopee Auto-Bump</h2>
-              <p className="text-[13px] text-ink-3">Shopee is still reviewing Kyna Ops.</p>
-            </div>
-            <ComingSoonPill />
-          </Group>
-        )}
-
-        {bump?.connected && (
-          <Group className="space-y-3 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-[17px] font-bold text-ink">Shopee Auto-Bump</h2>
-                <p className="text-[13px] text-ink-3 tabular-nums">
-                  {bump.boosted.length}/{bump.slotsTotal} slots active · rotates every 4 hours
-                </p>
+          {bump && !bump.connected && (
+            <div className="flex items-center justify-between gap-3 px-3.5 py-3">
+              <div className="min-w-0">
+                <h2 className="text-[15px] font-bold text-ink">Shopee Auto-Bump</h2>
+                <p className="truncate text-[13px] text-ink-3">Shopee is still reviewing Kyna Ops.</p>
               </div>
+              <ComingSoonPill />
+            </div>
+          )}
+
+          {bump?.connected && (
+            <div className="flex items-center gap-2 px-3.5 py-2.5">
+              <button
+                type="button"
+                onClick={() => setBumpSheetOpen(true)}
+                className="group pressable flex min-h-11 min-w-0 flex-1 items-center justify-between gap-2 rounded-[var(--radius-control)] text-left"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-[15px] font-bold text-ink">Shopee Auto-Bump</span>
+                  <span className="block truncate text-[13px] text-ink-3 tabular-nums">
+                    {bump.lastError ? (
+                      <span className="font-semibold text-missing-ink">{bump.lastError}</span>
+                    ) : (
+                      `${bump.boosted.length}/${bump.slotsTotal} slots active · tap for details`
+                    )}
+                  </span>
+                </span>
+                <ChevronRight className="chevron-nudge h-4 w-4 shrink-0 text-ink-3" />
+              </button>
               <Switch
                 checked={bump.enabled}
                 disabled={busy}
-                onChange={() => run({ action: "toggle_bump", enabled: !bump.enabled }, bump.enabled ? "Auto-bump off" : "Auto-bump on")}
+                onChange={() =>
+                  run(
+                    { action: "toggle_bump", enabled: !bump.enabled },
+                    bump.enabled ? "Auto-bump off" : "Auto-bump on"
+                  )
+                }
                 label="Shopee Auto-Bump"
               />
             </div>
-
-            {bump.boosted.length > 0 && (
-              <ul className="divide-y divide-hairline rounded-[var(--radius-control)] bg-surface-subtle px-3">
-                {bump.boosted.map((b) => (
-                  <li key={b.itemId} className="flex items-center justify-between gap-3 py-2">
-                    <span className="min-w-0 truncate text-[14px] font-medium text-ink">{b.name}</span>
-                    <span className="shrink-0 text-[13px] font-semibold text-brand tabular-nums">
-                      {formatCooldown(b.cooldownSecond)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {bump.lastError && <p className="text-[13px] font-semibold text-missing-ink">{bump.lastError}</p>}
-
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[13px] text-ink-3">
-                Tap ★ on any Shopee item below to prioritize it.
-              </span>
-              <Button
-                variant="secondary"
-                disabled={busy || bump.boosted.length >= bump.slotsTotal}
-                onClick={() => run({ action: "bump_now" }, "Bumped {n} items")}
-                className="h-11 shrink-0 px-3"
-              >
-                {bump.boosted.length >= bump.slotsTotal ? "Slots full" : "Bump now"}
-              </Button>
-            </div>
-          </Group>
-        )}
+          )}
+        </Group>
 
         {linkFrom && (
           <div className="anim-rise-in flex items-center justify-between gap-3 rounded-[var(--radius-card)] bg-brand-soft px-4 py-3">
             <span className="text-[15px] font-semibold text-ink">
               Tap the {SHOP_LABEL[otherPlatform(linkFrom) ?? "TIKTOK"]} listing for &ldquo;{linkFrom.name}&rdquo;
             </span>
-            <button type="button" onClick={() => setLinkFrom(null)} className="pressable text-[15px] font-bold text-brand">
+            <button
+              type="button"
+              onClick={() => setLinkFrom(null)}
+              className="pressable inline-flex min-h-11 shrink-0 items-center px-2 text-[15px] font-bold text-brand"
+            >
               Cancel
             </button>
           </div>
@@ -800,15 +783,18 @@ export default function ItemsPage() {
           <Group>
             <ul className="divide-y divide-hairline">
               {shown.map((g, idx) => {
-                const linkTarget = linkFrom && linkFrom.id !== g.id && otherPlatform(linkFrom) === g.platforms[0] && g.platforms.length === 1;
+                const linkTarget =
+                  linkFrom && linkFrom.id !== g.id && otherPlatform(linkFrom) === g.platforms[0] && g.platforms.length === 1;
                 const checks = g.variants.filter(variantNeedsCheck).length;
                 const shopeeItemId = shopeeListingIdFor(g);
                 const isPinned = shopeeItemId ? pinnedSet.has(shopeeItemId) : false;
+                const showStar = !linkFrom && Boolean(shopeeItemId && bump?.connected && (bump.enabled || isPinned));
+                const showInlineLink = !linkFrom && Boolean(otherPlatform(g) && bothConnected && filter === "unlinked");
                 const stagger = firstLoad.current && idx < 12;
                 return (
                   <li
                     key={g.id}
-                    className={`flex items-center gap-2 px-4 py-3 [content-visibility:auto] [contain-intrinsic-size:auto_76px]${stagger ? " anim-rise-in" : ""}`}
+                    className={`flex items-center gap-1.5 px-4 py-3 [content-visibility:auto] [contain-intrinsic-size:auto_76px]${stagger ? " anim-rise-in" : ""}`}
                     style={stagger ? { animationDelay: `${idx * 25}ms` } : undefined}
                   >
                     <button
@@ -819,19 +805,27 @@ export default function ItemsPage() {
                       <ItemThumb src={g.imageUrl} alt={g.name} size="md" />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[16px] font-semibold text-ink">{g.name}</span>
-                        <span className="mt-1 flex items-center gap-2 text-[13px] text-ink-3">
+                        <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-ink-3">
                           <ShopTags platforms={g.platforms} />
-                          {g.variants.length} sizes/colours
-                          {checks > 0 && <span className="font-semibold text-failed-ink">· {checks} to check</span>}
+                          <span className="whitespace-nowrap tabular-nums">
+                            {g.variants.length} {g.variants.length === 1 ? "size/colour" : "sizes/colours"}
+                          </span>
+                          {checks > 0 && (
+                            <span className="whitespace-nowrap rounded-full bg-failed-soft px-2 py-0.5 text-[12px] font-bold text-failed-ink tabular-nums">
+                              {checks} to check
+                            </span>
+                          )}
                         </span>
                       </span>
                       {linkTarget ? (
-                        <span className="rounded-full bg-brand-solid px-3 py-1.5 text-[14px] font-bold text-on-brand">Link here</span>
-                      ) : (
+                        <span className="shrink-0 rounded-full bg-brand-solid px-3 py-1.5 text-[14px] font-bold text-on-brand">
+                          Link here
+                        </span>
+                      ) : !showStar && !showInlineLink ? (
                         <ChevronRight className="chevron-nudge h-5 w-5 shrink-0 text-ink-3" />
-                      )}
+                      ) : null}
                     </button>
-                    {!linkFrom && shopeeItemId && bump?.connected && (
+                    {showStar && shopeeItemId && (
                       <button
                         type="button"
                         disabled={busy}
@@ -855,7 +849,7 @@ export default function ItemsPage() {
                         />
                       </button>
                     )}
-                    {!linkFrom && otherPlatform(g) && bothConnected && (
+                    {showInlineLink && (
                       <button
                         type="button"
                         onClick={() => setLinkFrom(g)}
@@ -863,6 +857,16 @@ export default function ItemsPage() {
                         className="pressable flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-brand hover:bg-brand-soft"
                       >
                         <Link2 className="h-5 w-5" />
+                      </button>
+                    )}
+                    {!linkTarget && (showStar || showInlineLink) && (
+                      <button
+                        type="button"
+                        onClick={() => setOpenId(g.id)}
+                        aria-label={`Open ${g.name}`}
+                        className="pressable -mr-1.5 flex h-11 w-9 shrink-0 items-center justify-center rounded-full text-ink-3"
+                      >
+                        <ChevronRight className="h-5 w-5" />
                       </button>
                     )}
                   </li>
@@ -885,6 +889,74 @@ export default function ItemsPage() {
           </div>
         )}
       </div>
+
+      <Sheet
+        open={bumpSheetOpen}
+        onClose={() => setBumpSheetOpen(false)}
+        title="Shopee Auto-Bump"
+        footer={
+          bump?.connected ? (
+            <Button
+              full
+              size="lg"
+              disabled={busy || bump.boosted.length >= bump.slotsTotal}
+              onClick={() => run({ action: "bump_now" }, "Bumped {n} items")}
+            >
+              {bump.boosted.length >= bump.slotsTotal ? "All 5 slots active" : "Bump now"}
+            </Button>
+          ) : undefined
+        }
+      >
+        {bump?.connected && (
+          <div className="space-y-4 pt-1">
+            <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] bg-surface-subtle px-4 py-3">
+              <div>
+                <p className="text-[16px] font-bold text-ink">Rotate every 4 hours</p>
+                <p className="text-[13px] text-ink-3 tabular-nums">
+                  {bump.boosted.length}/{bump.slotsTotal} slots active
+                </p>
+              </div>
+              <Switch
+                checked={bump.enabled}
+                disabled={busy}
+                onChange={() =>
+                  run(
+                    { action: "toggle_bump", enabled: !bump.enabled },
+                    bump.enabled ? "Auto-bump off" : "Auto-bump on"
+                  )
+                }
+                label="Shopee Auto-Bump"
+              />
+            </div>
+
+            {bump.lastError && <p className="text-[14px] font-semibold text-missing-ink">{bump.lastError}</p>}
+
+            {bump.boosted.length > 0 ? (
+              <div className="space-y-1.5">
+                <p className="text-[13px] font-semibold uppercase tracking-[0.04em] text-ink-3">Currently boosted</p>
+                <ul className="divide-y divide-hairline rounded-[var(--radius-control)] bg-surface-subtle px-3.5">
+                  {bump.boosted.map((b) => (
+                    <li key={b.itemId} className="flex items-center justify-between gap-3 py-2.5">
+                      <span className="min-w-0 truncate text-[15px] font-semibold text-ink">{b.name}</span>
+                      <span className="shrink-0 text-[13px] font-semibold text-brand tabular-nums">
+                        {formatCooldown(b.cooldownSecond)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className="text-[14px] text-ink-2">
+                No Shopee items are boosted yet. Turn Auto-Bump on or tap &ldquo;Bump now&rdquo; below.
+              </p>
+            )}
+
+            <p className="text-[14px] text-ink-3">
+              Open any Shopee item (or tap ★ when Auto-Bump is on) to pin priority items.
+            </p>
+          </div>
+        )}
+      </Sheet>
 
       <Sheet open={Boolean(linkFrom && linkTo)} onClose={() => setLinkTo(null)} title="Same item?">
         {linkFrom && linkTo && (
@@ -934,8 +1006,51 @@ export default function ItemsPage() {
                 <StockRow key={v.id} variant={v} others={open.variants} onSaved={load} />
               ))}
             </ul>
+            {(() => {
+              const sid = shopeeListingIdFor(open);
+              const pinned = sid ? pinnedSet.has(sid) : false;
+              const other = otherPlatform(open);
+              return (
+                <>
+                  {sid && bump?.connected && (
+                    <div className="flex min-h-12 items-center justify-between gap-3 rounded-[var(--radius-control)] bg-surface-subtle px-3.5 py-2.5">
+                      <span className="min-w-0">
+                        <span className="block text-[15px] font-semibold text-ink">Pin for Shopee Auto-Bump</span>
+                        <span className="block text-[13px] text-ink-3">Boosts first when slots open</span>
+                      </span>
+                      <Switch
+                        checked={pinned}
+                        disabled={busy}
+                        onChange={() => {
+                          setLastToggledPinId(sid);
+                          void run(
+                            { action: "pin_bump", itemId: sid },
+                            pinned ? "Unpinned from bump" : "Pinned for auto-bump"
+                          );
+                        }}
+                        label="Pin for Shopee Auto-Bump"
+                      />
+                    </div>
+                  )}
+                  {other && bothConnected && (
+                    <Button
+                      variant="secondary"
+                      full
+                      onClick={() => {
+                        const target = open;
+                        setOpenId(null);
+                        setLinkFrom(target);
+                      }}
+                    >
+                      <Link2 className="h-4 w-4" />
+                      Link to {SHOP_LABEL[other]} listing
+                    </Button>
+                  )}
+                </>
+              );
+            })()}
             <Link
-              href="/stock-in"
+              href="/stock-in?from=items"
               className="pressable flex min-h-12 items-center justify-center gap-2 rounded-[var(--radius-control)] bg-surface-muted text-[16px] font-semibold text-ink hover:bg-surface-track"
             >
               <PackagePlus className="h-5 w-5" /> Add a supplier delivery

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { resistDrag, shouldDismiss } from "@/lib/ui/sheet";
+import {
+  getSheetDepth,
+  isTopSheet,
+  pushSheet,
+  removeSheet,
+  resistDrag,
+  shouldDismiss,
+} from "@/lib/ui/sheet";
 
 describe("shouldDismiss", () => {
   it("never closes on an upward drag or no drag", () => {
@@ -33,5 +40,33 @@ describe("resistDrag", () => {
   it("passes downward drags through and damps upward ones", () => {
     expect(resistDrag(50)).toBe(50);
     expect(resistDrag(-100)).toBe(-20);
+  });
+});
+
+describe("sheet stack helpers", () => {
+  it("pushes, moves to top, reports depth and top status, and removes ids", () => {
+    const first = Symbol("first");
+    const second = Symbol("second");
+
+    let stack = pushSheet([], first);
+    expect(isTopSheet(stack, first)).toBe(true);
+    expect(getSheetDepth(stack, first)).toBe(0);
+
+    stack = pushSheet(stack, second);
+    expect(isTopSheet(stack, first)).toBe(false);
+    expect(isTopSheet(stack, second)).toBe(true);
+    expect(getSheetDepth(stack, first)).toBe(0);
+    expect(getSheetDepth(stack, second)).toBe(1);
+
+    stack = pushSheet(stack, first);
+    expect(isTopSheet(stack, first)).toBe(true);
+    expect(getSheetDepth(stack, first)).toBe(1);
+
+    stack = removeSheet(stack, first);
+    expect(isTopSheet(stack, second)).toBe(true);
+    expect(getSheetDepth(stack, first)).toBe(0);
+
+    stack = removeSheet(stack, second);
+    expect(isTopSheet(stack, second)).toBe(false);
   });
 });

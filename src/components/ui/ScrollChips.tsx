@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import { prefersReducedMotion } from "@/lib/ui/motion";
 import { scrollEdges, type ScrollEdges } from "@/lib/ui/pull";
 
@@ -25,15 +24,14 @@ function writeFlag() {
 
 function maskFor({ start, end }: ScrollEdges): string | undefined {
   if (!start && !end) return undefined;
-  const left = start ? "transparent 0, #000 40px" : "#000 0";
-  const right = end ? "#000 calc(100% - 64px), transparent 100%" : "#000 100%";
+  const left = start ? "transparent 0, #000 24px" : "#000 0";
+  const right = end ? "#000 calc(100% - 24px), transparent 100%" : "#000 100%";
   return `linear-gradient(to right, ${left}, ${right})`;
 }
 
 /**
- * A row of chips that scrolls sideways and looks like it does: the hidden side
- * fades out, a chevron button pages it along, and the very first row a device
- * sees nudges once to show it moves.
+ * A row of chips that scrolls sideways smoothly with touch, wheel, or mouse drag,
+ * softly fading overflowed edges without any overlapping buttons covering chips.
  */
 export function ScrollChips({
   children,
@@ -52,6 +50,8 @@ export function ScrollChips({
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState<ScrollEdges>({ start: false, end: false });
+  const dragRef = useRef<{ x: number; left: number; moved: boolean } | null>(null);
+  const suppressClickRef = useRef(false);
 
   const measure = useCallback(() => {
     const el = rowRef.current;
@@ -69,8 +69,21 @@ export function ScrollChips({
     el.addEventListener("scroll", measure, { passive: true });
     const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
     ro?.observe(el);
+
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth + 2) return;
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      const canForward = e.deltaY > 0 && el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+      const canBack = e.deltaY < 0 && el.scrollLeft > 1;
+      if (!canForward && !canBack) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+
     return () => {
       el.removeEventListener("scroll", measure);
+      el.removeEventListener("wheel", onWheel);
       ro?.disconnect();
     };
   }, [measure]);
@@ -91,46 +104,55 @@ export function ScrollChips({
     };
   }, []);
 
-  function page(dir: 1 | -1) {
-    const el = rowRef.current;
-    if (!el) return;
-    el.scrollBy({ left: dir * el.clientWidth * 0.7, behavior: prefersReducedMotion() ? "auto" : "smooth" });
-  }
-
   const mask = maskFor(edges);
 
   return (
-    <div className={`relative ${className}`}>
+    <div data-no-pull="" className={`relative ${className}`}>
       <div
         ref={rowRef}
         role={role}
         aria-label={label}
-        className={`no-scrollbar relative flex overflow-x-auto ${rowClassName}`}
+        onPointerDown={(e) => {
+          if (e.pointerType !== "mouse" || e.button !== 0 || !rowRef.current) return;
+          dragRef.current = { x: e.clientX, left: rowRef.current.scrollLeft, moved: false };
+        }}
+        onPointerMove={(e) => {
+          const d = dragRef.current;
+          const el = rowRef.current;
+          if (!d || !el) return;
+          const dx = e.clientX - d.x;
+          if (!d.moved && Math.abs(dx) > 5) {
+            d.moved = true;
+            suppressClickRef.current = true;
+          }
+          if (d.moved) {
+            el.scrollLeft = d.left - dx;
+          }
+        }}
+        onPointerUp={() => {
+          dragRef.current = null;
+          if (suppressClickRef.current) {
+            setTimeout(() => {
+              suppressClickRef.current = false;
+            }, 0);
+          }
+        }}
+        onPointerCancel={() => {
+          dragRef.current = null;
+          suppressClickRef.current = false;
+        }}
+        onClickCapture={(e) => {
+          if (suppressClickRef.current) {
+            e.preventDefault();
+            e.stopPropagation();
+            suppressClickRef.current = false;
+          }
+        }}
+        className={`no-scrollbar overscroll-x-contain touch-pan-x relative flex overflow-x-auto ${rowClassName}`}
         style={mask ? { maskImage: mask, WebkitMaskImage: mask } : undefined}
       >
         {children}
       </div>
-      {edges.start && (
-        <EdgeButton side="start" onClick={() => page(-1)} label={`Scroll ${label.toLowerCase()} back`} />
-      )}
-      {edges.end && <EdgeButton side="end" onClick={() => page(1)} label={`More ${label.toLowerCase()}`} />}
     </div>
-  );
-}
-
-function EdgeButton({ side, onClick, label }: { side: "start" | "end"; onClick: () => void; label: string }) {
-  const Icon = side === "end" ? ChevronRight : ChevronLeft;
-  return (
-    <button
-      type="button"
-      tabIndex={-1}
-      aria-label={label}
-      onClick={onClick}
-      className={`anim-fade-in pressable absolute top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-ground/90 text-ink-3 after:absolute after:-inset-2 after:content-[''] hover:text-ink active:bg-ink/[0.06] ${
-        side === "end" ? "right-1.5" : "left-1.5"
-      }`}
-    >
-      <Icon className="h-4 w-4" strokeWidth={2.2} />
-    </button>
   );
 }

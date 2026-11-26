@@ -28,6 +28,10 @@ export async function GET(req: NextRequest) {
   if (!(await getOwnerSession())) {
     return NextResponse.json({ error: "Owner sign-in required." }, { status: 401 });
   }
+  if (req.nextUrl.searchParams.get("countOnly") === "1") {
+    const pendingCount = await countPendingActionRequests();
+    return NextResponse.json({ pendingCount });
+  }
   const statusParam = (req.nextUrl.searchParams.get("status") || "ALL").toUpperCase();
   const status =
     statusParam === "PENDING" ||

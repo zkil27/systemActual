@@ -131,7 +131,22 @@ export function CopyListingSheet({
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title="Copy listing as draft">
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title="Copy listing as draft"
+      footer={
+        selectedSource ? (
+          <Button
+            full
+            onClick={submit}
+            disabled={saving || !selectedTarget || !title.trim() || !categoryId.trim()}
+          >
+            {saving ? "Queuing..." : "Queue draft copy for approval"}
+          </Button>
+        ) : undefined
+      }
+    >
       {!selectedSource ? (
         <p className="text-[14px] text-ink-2">
           Run &ldquo;Read stock again&rdquo; in Items &amp; stock first so Kyna Ops captures the full listing title, description, and photos.
@@ -153,7 +168,7 @@ export function CopyListingSheet({
                     setDescription(next.description ?? next.title);
                   }
                 }}
-                className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[14px] text-ink outline-none focus:border-brand"
+                className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[16px] text-ink outline-none focus:border-brand"
               >
                 {sources.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -176,7 +191,7 @@ export function CopyListingSheet({
               <select
                 value={selectedTarget?.id ?? ""}
                 onChange={(e) => setTargetShopId(e.target.value)}
-                className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[14px] text-ink outline-none focus:border-brand"
+                className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[16px] text-ink outline-none focus:border-brand"
               >
                 {targetChoices.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -196,7 +211,7 @@ export function CopyListingSheet({
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[14px] text-ink outline-none focus:border-brand"
+              className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[16px] text-ink outline-none focus:border-brand"
             />
           </div>
 
@@ -208,7 +223,7 @@ export function CopyListingSheet({
               rows={3}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface p-3 text-[13px] text-ink outline-none focus:border-brand"
+              className="w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface p-3 text-[16px] text-ink outline-none focus:border-brand"
             />
           </div>
 
@@ -222,7 +237,7 @@ export function CopyListingSheet({
                 value={categoryId}
                 onChange={(e) => setCategoryId(e.target.value)}
                 placeholder="e.g. 601226"
-                className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[14px] text-ink outline-none focus:border-brand"
+                className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[16px] text-ink outline-none focus:border-brand"
               />
             </div>
 
@@ -236,7 +251,7 @@ export function CopyListingSheet({
                 step="0.01"
                 value={priceText}
                 onChange={(e) => setPriceText(e.target.value)}
-                className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[14px] font-bold text-ink outline-none focus:border-brand"
+                className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[16px] font-bold text-ink outline-none focus:border-brand"
               />
             </div>
           </div>
@@ -257,14 +272,6 @@ export function CopyListingSheet({
               ))}
             </div>
           )}
-
-          <Button
-            full
-            onClick={submit}
-            disabled={saving || !selectedTarget || !title.trim() || !categoryId.trim()}
-          >
-            {saving ? "Queuing..." : "Queue draft copy for approval"}
-          </Button>
         </div>
       )}
     </Sheet>

@@ -195,7 +195,22 @@ export function CreatePoSheet({
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title="New supplier order">
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title="New supplier order"
+      footer={
+        activeSuppliers.length ? (
+          <Button full onClick={submit} disabled={saving || !lines.length}>
+            {saving
+              ? "Saving..."
+              : markOrdered
+                ? "Place supplier order"
+                : "Save draft order"}
+          </Button>
+        ) : undefined
+      }
+    >
       <div className="space-y-4">
         {!activeSuppliers.length ? (
           <div className="rounded-[var(--radius-card)] bg-surface-muted p-4 text-[14px] text-ink-2">
@@ -210,7 +225,7 @@ export function CreatePoSheet({
               <select
                 value={supplierId}
                 onChange={(e) => setSupplierId(e.target.value)}
-                className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[15px] font-medium text-ink outline-none focus:border-brand"
+                className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[16px] font-medium text-ink outline-none focus:border-brand"
               >
                 {activeSuppliers.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -229,7 +244,7 @@ export function CreatePoSheet({
                   type="date"
                   value={expectedDate}
                   onChange={(e) => setExpectedDate(e.target.value)}
-                  className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[14px] text-ink outline-none focus:border-brand"
+                  className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[16px] text-ink outline-none focus:border-brand"
                 />
                 {!expectedDate && selectedSupplier && (
                   <p className="text-[12px] text-ink-3">
@@ -245,7 +260,7 @@ export function CreatePoSheet({
                 <select
                   value={markOrdered ? "ORDERED" : "DRAFT"}
                   onChange={(e) => setMarkOrdered(e.target.value === "ORDERED")}
-                  className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[14px] text-ink outline-none focus:border-brand"
+                  className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[16px] text-ink outline-none focus:border-brand"
                 >
                   <option value="ORDERED">Ordered now</option>
                   <option value="DRAFT">Save as draft</option>
@@ -264,7 +279,7 @@ export function CreatePoSheet({
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search item, size, or bin..."
-                  className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface pl-9 pr-3 text-[14px] text-ink outline-none focus:border-brand"
+                  className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface pl-9 pr-3 text-[16px] text-ink outline-none focus:border-brand"
                 />
               </div>
 
@@ -276,7 +291,7 @@ export function CreatePoSheet({
                         key={v.variantId}
                         type="button"
                         onClick={() => addVariant(v)}
-                        className="pressable flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-ink/[0.03]"
+                        className="pressable flex min-h-12 w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-ink/[0.03]"
                       >
                         <ItemThumb src={v.imageUrl} alt={v.garmentName} size="sm" />
                         <div className="min-w-0 flex-1">
@@ -320,7 +335,7 @@ export function CreatePoSheet({
                         type="button"
                         onClick={() => removeLine(line.variant.variantId)}
                         aria-label="Remove item"
-                        className="flex h-9 w-9 items-center justify-center rounded-full text-ink-3 hover:bg-ink/[0.06] hover:text-missing-ink"
+                        className="flex h-11 w-11 items-center justify-center rounded-full text-ink-3 hover:bg-ink/[0.06] hover:text-missing-ink"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -340,7 +355,7 @@ export function CreatePoSheet({
                               orderedQtyText: e.target.value,
                             })
                           }
-                          className="h-10 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface-card px-3 text-[15px] font-semibold text-ink outline-none focus:border-brand"
+                          className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface-card px-3 text-[16px] font-semibold text-ink outline-none focus:border-brand"
                         />
                       </div>
                       <div>
@@ -359,7 +374,7 @@ export function CreatePoSheet({
                               unitCostText: e.target.value,
                             })
                           }
-                          className="h-10 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface-card px-3 text-[15px] text-ink outline-none focus:border-brand"
+                          className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface-card px-3 text-[16px] text-ink outline-none focus:border-brand"
                         />
                       </div>
                     </div>
@@ -377,7 +392,7 @@ export function CreatePoSheet({
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 placeholder="Batch colour, downpayment, or pickup instructions"
-                className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[14px] text-ink outline-none focus:border-brand"
+                className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[16px] text-ink outline-none focus:border-brand"
               />
             </div>
 
@@ -389,14 +404,6 @@ export function CreatePoSheet({
                 </span>
               </div>
             )}
-
-            <Button full onClick={submit} disabled={saving || !lines.length}>
-              {saving
-                ? "Saving..."
-                : markOrdered
-                  ? "Place supplier order"
-                  : "Save draft order"}
-            </Button>
           </>
         )}
       </div>

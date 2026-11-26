@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
-import { Group } from "@/components/ui/Button";
+import { StockHubNav } from "@/components/StockHubNav";
+import { Button, Group } from "@/components/ui/Button";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { toast } from "@/components/ui/Toast";
 import {
@@ -96,13 +97,15 @@ export default function RestockPage() {
           onClick={() => openNewPo(null)}
           aria-label="New supplier order"
           title="New supplier order"
-          className="pressable flex h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05]"
+          className="pressable hidden h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05] lg:flex"
         >
           <Plus className="h-[22px] w-[22px]" />
         </button>
       }
     >
       <div className="space-y-4">
+        <StockHubNav active="restock" />
+
         <div className="grid grid-cols-3 gap-2.5">
           <Group className="p-3.5 text-center">
             <div className="text-[22px] font-extrabold tabular-nums text-ink">
@@ -144,11 +147,17 @@ export default function RestockPage() {
             Loading restock data...
           </Group>
         ) : tab === "orders" ? (
-          <PurchaseOrdersPanel
-            purchaseOrders={purchaseOrders}
-            onChanged={load}
-            onOpenNewPo={() => openNewPo(null)}
-          />
+          <div className="space-y-3">
+            <Button full onClick={() => openNewPo(null)}>
+              <Plus className="h-4 w-4" />
+              New supplier order
+            </Button>
+            <PurchaseOrdersPanel
+              purchaseOrders={purchaseOrders}
+              onChanged={load}
+              onOpenNewPo={() => openNewPo(null)}
+            />
+          </div>
         ) : tab === "reorder" ? (
           <ReorderSoonPanel
             suggestions={suggestions}

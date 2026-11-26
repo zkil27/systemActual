@@ -161,7 +161,7 @@ export function ApprovalsPanel({
                   {r.conversationId && (
                     <Link
                       href={`/chats/${encodeURIComponent(r.conversationId)}`}
-                      className="pressable inline-flex h-9 shrink-0 items-center gap-1 rounded-full px-3 text-[13px] font-bold text-brand hover:bg-brand-soft"
+                      className="pressable inline-flex min-h-11 shrink-0 items-center gap-1 rounded-full px-3 text-[13px] font-bold text-brand hover:bg-brand-soft"
                     >
                       Open chat
                       <ExternalLink className="h-3.5 w-3.5" />
@@ -195,7 +195,7 @@ export function ApprovalsPanel({
                         onChange={(e) =>
                           setDrafts((prev) => ({ ...prev, [r.id]: e.target.value }))
                         }
-                        className="w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 py-2 text-[14px] leading-snug text-ink outline-none focus:border-brand"
+                        className="w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 py-2 text-[16px] leading-snug text-ink outline-none focus:border-brand"
                       />
                     </label>
                   ) : (
@@ -226,7 +226,7 @@ export function ApprovalsPanel({
                       size="md"
                       disabled={busyId === r.id}
                       onClick={() => decide(r, "reject")}
-                      className="!h-10 !px-4 !text-[13px]"
+                      className="!h-11 !px-4 !text-[14px]"
                     >
                       <X className="h-4 w-4" />
                       Reject
@@ -239,7 +239,7 @@ export function ApprovalsPanel({
                         (r.kind === "chat.reply" && !getReplyText(r).trim())
                       }
                       onClick={() => decide(r, "approve")}
-                      className="!h-10 !px-4 !text-[13px]"
+                      className="!h-11 !px-4 !text-[14px]"
                     >
                       <Check className="h-4 w-4" />
                       {busyId === r.id

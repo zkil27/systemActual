@@ -3,9 +3,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
-import { resistDrag, shouldDismiss } from "@/lib/ui/sheet";
+import {
+  getSheetDepth,
+  isTopSheet,
+  pushSheet,
+  removeSheet,
+  resistDrag,
+  shouldDismiss,
+} from "@/lib/ui/sheet";
 
 const EXIT_MS = 280;
+
+let openStack: symbol[] = [];
+let mountedCount = 0;
+let savedBodyOverflow = "";
 
 /**
  * Bottom sheet on phones, centred panel on desktop.
@@ -16,14 +27,28 @@ export function Sheet({
   open,
   onClose,
   title,
+  stickyHeader,
+  footer,
+  bodyClassName = "",
+  panelClassName = "",
   children,
 }: {
   open: boolean;
   onClose: () => void;
   /** Visible heading and accessible name. */
   title: string;
+  /** Optional non-scrolling region rendered below the header (outside drag handle). */
+  stickyHeader?: React.ReactNode;
+  /** Optional non-scrolling footer rendered below the scrollable body. */
+  footer?: React.ReactNode;
+  /** Extra classes merged onto the scrollable body container. */
+  bodyClassName?: string;
+  /** Extra classes merged onto the sheet dialog panel. */
+  panelClassName?: string;
   children: React.ReactNode;
 }) {
+  const [sheetId] = useState(() => Symbol("sheet"));
+  const [zIndex, setZIndex] = useState(50);
   const [mounted, setMounted] = useState(open);
   const [shown, setShown] = useState(false);
   const [drag, setDrag] = useState(0);
@@ -31,6 +56,15 @@ export function Sheet({
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreFocus = useRef<HTMLElement | null>(null);
   const dragStart = useRef<{ y: number; t: number; lastY: number; lastT: number } | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    openStack = pushSheet(openStack, sheetId);
+    setZIndex(50 + getSheetDepth(openStack, sheetId) * 10);
+    return () => {
+      openStack = removeSheet(openStack, sheetId);
+    };
+  }, [open, sheetId]);
 
   // Mount → next frame slide in. Close → slide out, then unmount.
   useEffect(() => {
@@ -56,10 +90,16 @@ export function Sheet({
 
   useEffect(() => {
     if (!mounted) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    if (mountedCount === 0) {
+      savedBodyOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+    }
+    mountedCount += 1;
     return () => {
-      document.body.style.overflow = prev;
+      mountedCount = Math.max(0, mountedCount - 1);
+      if (mountedCount === 0) {
+        document.body.style.overflow = savedBodyOverflow;
+      }
       restoreFocus.current?.focus?.();
     };
   }, [mounted]);
@@ -71,6 +111,7 @@ export function Sheet({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
+      if (!isTopSheet(openStack, sheetId)) return;
       if (e.key === "Escape") onClose();
       if (e.key === "Tab" && panelRef.current) {
         // Keep Tab inside the sheet.
@@ -91,7 +132,7 @@ export function Sheet({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, sheetId]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
@@ -130,7 +171,10 @@ export function Sheet({
   if (!mounted || typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center md:items-center md:p-6">
+    <div
+      style={{ zIndex }}
+      className="fixed inset-0 flex items-end justify-center md:items-center md:p-6"
+    >
       <div
         aria-hidden="true"
         onClick={onClose}
@@ -156,7 +200,7 @@ export function Sheet({
           shown
             ? "translate-y-0 opacity-100"
             : "translate-y-full motion-reduce:opacity-0 md:translate-y-6 md:opacity-0"
-        }`}
+        } ${panelClassName}`}
         style={shown && drag !== 0 ? { transform: `translateY(${drag}px)` } : undefined}
       >
         {/* Grab area: handle + title. Dragging here pulls the sheet down. */}
@@ -175,7 +219,7 @@ export function Sheet({
               onClick={onClose}
               onPointerDown={(e) => e.stopPropagation()}
               aria-label="Close"
-              className="pressable -mr-1.5 flex h-11 w-11 items-center justify-center rounded-full text-ink-3 hover:bg-surface-muted"
+              className="pressable -mr-1.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-3 hover:bg-surface-muted"
             >
               <span className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-muted">
                 <X className="h-4 w-4" strokeWidth={2.6} />
@@ -183,9 +227,17 @@ export function Sheet({
             </button>
           </div>
         </div>
-        <div className="safe-bottom min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-6">
+        {stickyHeader && <div className="shrink-0 px-5 pb-3">{stickyHeader}</div>}
+        <div
+          className={`${footer ? "" : "safe-bottom "}min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-6 ${bodyClassName}`}
+        >
           {children}
         </div>
+        {footer && (
+          <div className="safe-bottom shrink-0 border-t border-hairline px-5 py-3">
+            {footer}
+          </div>
+        )}
       </div>
     </div>,
     document.body

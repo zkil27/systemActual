@@ -2,13 +2,14 @@
 
 import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, PackageSearch, Search } from "lucide-react";
+import { CalendarDays, Check, ChevronRight, PackageSearch, Search } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { ParcelDetailPanel, ParcelDetailSheet } from "@/components/ParcelDetailSheet";
 import { ParcelRow } from "@/components/ParcelRow";
 import { Button, Group } from "@/components/ui/Button";
 import { DatePickerSheet } from "@/components/ui/DatePickerSheet";
 import { ScrollChips } from "@/components/ui/ScrollChips";
+import { Sheet } from "@/components/ui/Sheet";
 import { toast } from "@/components/ui/Toast";
 import { manilaDayLabel } from "@/lib/ui/format";
 import { haptic, prefersReducedMotion } from "@/lib/ui/motion";
@@ -67,7 +68,11 @@ function FilterChips({
     const el = refs.current[value];
     if (!el) return;
     setBox({ x: el.offsetLeft, w: el.offsetWidth });
-    el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    const parent = el.parentElement;
+    if (parent) {
+      const targetLeft = Math.max(0, el.offsetLeft - (parent.clientWidth - el.offsetWidth) / 2);
+      parent.scrollTo({ left: targetLeft, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    }
   }, [value, count]);
 
   return (
@@ -147,6 +152,8 @@ function ReturnsExplorerInner() {
     parseReturnDateFilter(searchParams)
   );
   const [customOpen, setCustomOpen] = useState(false);
+  const [dateSheetOpen, setDateSheetOpen] = useState(false);
+  const [stuck, setStuck] = useState(false);
   const [query, setQuery] = useState("");
   const [parcels, setParcels] = useState<ReturnRow[] | null>(null);
   const [totalCount, setTotalCount] = useState<number | null>(null);
@@ -156,6 +163,7 @@ function ReturnsExplorerInner() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   const searchRef = useRef<HTMLInputElement>(null);
+  const stickySentinelRef = useRef<HTMLDivElement>(null);
   const asideRef = useRef<HTMLElement>(null);
   // Rows stagger in on the first load only; filter changes swap in place.
   const firstLoad = useRef(true);
@@ -277,10 +285,29 @@ function ReturnsExplorerInner() {
   const dateActive = hasActiveDateFilter(dateFilter);
   const customLabel = customDateSummary(dateFilter);
   const isCustomActive = Boolean(customLabel);
+  const activePresetLabel =
+    RETURN_DATE_PRESETS.find((p) => p.id === dateFilter.range)?.label ?? "All dates";
+  const dateButtonLabel = customLabel ?? activePresetLabel;
 
   useEffect(() => {
     asideRef.current?.scrollTo({ top: 0 });
   }, [selectedId]);
+
+  useEffect(() => {
+    const update = () => {
+      const sentinel = stickySentinelRef.current;
+      if (!sentinel) return;
+      const threshold = window.innerWidth >= 1024 ? 68 : 52;
+      setStuck(sentinel.getBoundingClientRect().top <= threshold);
+    };
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isDesktop) return;
@@ -356,60 +383,102 @@ function ReturnsExplorerInner() {
     >
       <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_420px] lg:items-start lg:gap-6 xl:grid-cols-[minmax(0,1fr)_460px]">
         <div className="min-w-0">
-          <div className="sticky top-[calc(env(safe-area-inset-top)+48px)] z-20 -mx-5 space-y-2.5 bg-ground/75 px-5 pb-3.5 backdrop-blur-xl backdrop-saturate-150 lg:top-16 lg:mr-0 lg:pr-0">
-            <label className="relative block">
-              <span className="sr-only">Search returns</span>
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-ink-3" />
-              <input
-                ref={searchRef}
-                type="search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Item, tracking or order"
-                enterKeyHint="search"
-                className="h-11 w-full rounded-[var(--radius-control)] bg-surface-track/60 pl-10 pr-3 text-[16px] text-ink transition-colors focus:bg-surface focus:shadow-[inset_0_0_0_1.5px_var(--color-brand)] focus:outline-none"
-              />
-            </label>
+          <div ref={stickySentinelRef} aria-hidden="true" className="h-px w-full" />
+          <div
+            className={`sticky top-[calc(env(safe-area-inset-top)+48px)] z-20 -mx-5 space-y-2.5 px-5 pt-2 pb-3 transition-[background-color,border-color,backdrop-filter,box-shadow] duration-200 lg:top-16 lg:mr-0 lg:pr-0 ${
+              stuck
+                ? "border-b border-hairline bg-surface/95 backdrop-blur-xl backdrop-saturate-150 shadow-[0_6px_20px_-12px_rgb(15_23_42/0.25)]"
+                : "border-b border-transparent bg-transparent"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <label className="relative min-w-0 flex-1">
+                <span className="sr-only">Search returns</span>
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-ink-3" />
+                <input
+                  ref={searchRef}
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Item, tracking or order"
+                  enterKeyHint="search"
+                  className="h-11 w-full rounded-[var(--radius-control)] bg-surface-track/60 pl-10 pr-3 text-[16px] text-ink transition-colors focus:bg-surface focus:shadow-[inset_0_0_0_1.5px_var(--color-brand)] focus:outline-none"
+                />
+              </label>
+
+              <button
+                type="button"
+                aria-label={`Filter by date, ${dateButtonLabel}`}
+                aria-haspopup="dialog"
+                onClick={() => {
+                  haptic("select");
+                  setDateSheetOpen(true);
+                }}
+                className={`pressable inline-flex h-11 shrink-0 items-center gap-1.5 rounded-[var(--radius-control)] px-3 text-[14px] font-semibold ${
+                  dateActive
+                    ? "bg-brand/12 text-brand ring-1 ring-inset ring-brand/35"
+                    : "bg-surface text-ink-2 shadow-[var(--shadow-card)] hover:text-ink"
+                }`}
+              >
+                <CalendarDays className="h-4 w-4 shrink-0" />
+                <span className="max-w-[104px] truncate">{dateButtonLabel}</span>
+              </button>
+            </div>
 
             <FilterChips value={filter} count={loading ? null : totalCount} onChange={selectFilter} />
 
-            <ScrollChips label="Dates" className="-mx-5 lg:mr-0" rowClassName="items-center gap-1.5 px-5 pt-0.5 lg:pr-0">
-              {RETURN_DATE_PRESETS.map((preset) => {
-                const active = !isCustomActive && dateFilter.range === preset.id;
-                return (
+            <Sheet
+              open={dateSheetOpen}
+              onClose={() => setDateSheetOpen(false)}
+              title="Filter by date"
+            >
+              <div className="space-y-2 pt-1">
+                <ul className="-mx-2 space-y-0.5" role="radiogroup" aria-label="Date range">
+                  {RETURN_DATE_PRESETS.map((preset) => {
+                    const active = !isCustomActive && dateFilter.range === preset.id;
+                    return (
+                      <li key={preset.id}>
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={active}
+                          onClick={() => {
+                            haptic("select");
+                            selectDatePreset(preset.id);
+                            setDateSheetOpen(false);
+                          }}
+                          className={`pressable-row flex min-h-12 w-full items-center gap-3 rounded-[var(--radius-control)] px-3 text-left text-[16px] font-semibold ${
+                            active ? "bg-brand-soft text-brand" : "text-ink hover:bg-surface-subtle active:bg-surface-muted"
+                          }`}
+                        >
+                          <span className="min-w-0 flex-1 truncate">{preset.label}</span>
+                          <Check className={`h-5 w-5 shrink-0 ${active ? "" : "invisible"}`} strokeWidth={2.4} />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <div className="border-t border-hairline pt-2">
                   <button
-                    key={preset.id}
                     type="button"
-                    aria-pressed={active}
                     onClick={() => {
-                      if (!active) haptic("select");
-                      selectDatePreset(preset.id);
+                      haptic("select");
+                      setDateSheetOpen(false);
+                      setCustomOpen(true);
                     }}
-                    className={`pressable h-9 shrink-0 rounded-full px-3.5 text-[14px] font-semibold ${
-                      active
-                        ? "bg-brand/12 text-brand ring-1 ring-inset ring-brand/35"
-                        : "bg-surface text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] hover:text-ink active:bg-surface-muted"
+                    className={`pressable-row flex min-h-12 w-full items-center gap-3 rounded-[var(--radius-control)] px-3 text-left text-[16px] font-semibold ${
+                      isCustomActive ? "bg-brand-soft text-brand" : "text-ink hover:bg-surface-subtle active:bg-surface-muted"
                     }`}
                   >
-                    {preset.label}
+                    <CalendarDays className="h-5 w-5 shrink-0 text-brand" />
+                    <span className="min-w-0 flex-1 truncate">
+                      {customLabel ? `Custom: ${customLabel}` : "Pick specific dates…"}
+                    </span>
+                    <ChevronRight className="h-5 w-5 shrink-0 text-ink-3" />
                   </button>
-                );
-              })}
-              <button
-                type="button"
-                aria-pressed={isCustomActive}
-                aria-haspopup="dialog"
-                onClick={() => setCustomOpen(true)}
-                className={`pressable inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-semibold ${
-                  isCustomActive || customOpen
-                    ? "bg-brand/12 text-brand ring-1 ring-inset ring-brand/35"
-                    : "bg-surface text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] hover:text-ink active:bg-surface-muted"
-                }`}
-              >
-                <CalendarDays className="h-3.5 w-3.5" />
-                <span>{customLabel ?? "Custom"}</span>
-              </button>
-            </ScrollChips>
+                </div>
+              </div>
+            </Sheet>
 
             <DatePickerSheet
               mode="range"

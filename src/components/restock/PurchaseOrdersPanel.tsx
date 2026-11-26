@@ -198,7 +198,7 @@ export function PurchaseOrdersPanel({
                   size="md"
                   disabled={busyId === line.id}
                   onClick={() => decideCost(line.id, "dismiss")}
-                  className="!h-9 !px-3 !text-[12px]"
+                  className="!h-11 !px-3 !text-[13px]"
                 >
                   <X className="h-3.5 w-3.5" />
                   Keep old
@@ -208,7 +208,7 @@ export function PurchaseOrdersPanel({
                   size="md"
                   disabled={busyId === line.id}
                   onClick={() => decideCost(line.id, "apply")}
-                  className="!h-9 !px-3 !text-[12px]"
+                  className="!h-11 !px-3 !text-[13px]"
                 >
                   <Check className="h-3.5 w-3.5" />
                   Use ₱{line.unitCostPhp?.toFixed(2)}
@@ -349,7 +349,7 @@ export function PurchaseOrdersPanel({
                         size="md"
                         disabled={busyId === po.id}
                         onClick={() => setStatus(po, "CANCELLED")}
-                        className="!h-10 !px-3 !text-[13px] !text-missing-ink"
+                        className="!h-11 !px-3 !text-[14px] !text-missing-ink"
                       >
                         Cancel
                       </Button>
@@ -360,7 +360,7 @@ export function PurchaseOrdersPanel({
                         size="md"
                         disabled={busyId === po.id}
                         onClick={() => setStatus(po, "ORDERED")}
-                        className="!h-10 !px-4 !text-[13px]"
+                        className="!h-11 !px-4 !text-[14px]"
                       >
                         Mark ordered
                       </Button>
@@ -370,7 +370,7 @@ export function PurchaseOrdersPanel({
                         variant="primary"
                         size="md"
                         onClick={() => setReceivingPo(po)}
-                        className="!h-10 !px-4 !text-[13px]"
+                        className="!h-11 !px-4 !text-[14px]"
                       >
                         <PackageCheck className="h-4 w-4" />
                         Receive delivery

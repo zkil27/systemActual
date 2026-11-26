@@ -47,14 +47,14 @@ export function ListingsPanel({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search items..."
-            className="h-11 w-full rounded-[var(--radius-control)] bg-surface pl-10 pr-3 text-[14px] text-ink shadow-[var(--shadow-card)] outline-none focus:ring-2 focus:ring-brand"
+            className="h-11 w-full rounded-[var(--radius-control)] bg-surface pl-10 pr-3 text-[16px] text-ink shadow-[var(--shadow-card)] outline-none focus:ring-2 focus:ring-brand"
           />
         </div>
         {mismatchCount > 0 && (
           <button
             type="button"
             onClick={() => setMismatchOnly((v) => !v)}
-            className={`pressable h-11 rounded-[var(--radius-control)] px-3.5 text-[13px] font-bold ${
+            className={`pressable h-11 rounded-[var(--radius-control)] px-3.5 text-[14px] font-bold ${
               mismatchOnly
                 ? "bg-brand-solid text-on-brand"
                 : "bg-surface text-ink-2 shadow-[var(--shadow-card)]"
@@ -139,7 +139,7 @@ export function ListingsPanel({
                       variant="secondary"
                       size="md"
                       onClick={() => onCopyListing(item)}
-                      className="!h-10 !px-3.5 !text-[13px]"
+                      className="!h-11 !px-3.5 !text-[14px]"
                     >
                       <Copy className="h-3.5 w-3.5" />
                       Copy draft
@@ -149,7 +149,7 @@ export function ListingsPanel({
                     variant="primary"
                     size="md"
                     onClick={() => onEditPrice(item)}
-                    className="!h-10 !px-3.5 !text-[13px]"
+                    className="!h-11 !px-3.5 !text-[14px]"
                   >
                     <Pencil className="h-3.5 w-3.5" />
                     Edit price

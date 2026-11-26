@@ -112,7 +112,11 @@ function PickFilterStrip({
     const el = refs.current[value];
     if (!el) return;
     setBox({ x: el.offsetLeft, w: el.offsetWidth });
-    el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    const parent = el.parentElement;
+    if (parent) {
+      const targetLeft = Math.max(0, el.offsetLeft - (parent.clientWidth - el.offsetWidth) / 2);
+      parent.scrollTo({ left: targetLeft, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    }
   }, [value, optionsKey]);
 
   return (
@@ -296,7 +300,7 @@ export function PickListSection({
         )}
 
         {recentWaves.length > 1 && onSelectWave && (
-          <ScrollChips role="tablist" label="Switch wave" rowClassName="gap-1.5 pt-1">
+          <ScrollChips role="tablist" label="Switch wave" rowClassName="gap-1.5 px-5 pt-1">
             {recentWaves.map((w) => {
               const active = w.id === waveData?.id;
               const labelTime = isSameManilaDay(w.createdAt)

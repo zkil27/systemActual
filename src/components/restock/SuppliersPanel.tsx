@@ -193,7 +193,7 @@ export function SuppliersPanel({
                     type="button"
                     onClick={() => openEdit(s)}
                     aria-label={`Edit ${s.name}`}
-                    className="flex h-10 w-10 items-center justify-center rounded-full text-ink-2 hover:bg-ink/[0.06]"
+                    className="flex h-11 w-11 items-center justify-center rounded-full text-ink-2 hover:bg-ink/[0.06]"
                   >
                     <Pencil className="h-4 w-4" />
                   </button>
@@ -201,7 +201,7 @@ export function SuppliersPanel({
                     type="button"
                     onClick={() => toggleArchive(s)}
                     aria-label={s.archivedAt ? `Restore ${s.name}` : `Archive ${s.name}`}
-                    className="flex h-10 w-10 items-center justify-center rounded-full text-ink-2 hover:bg-ink/[0.06]"
+                    className="flex h-11 w-11 items-center justify-center rounded-full text-ink-2 hover:bg-ink/[0.06]"
                   >
                     {s.archivedAt ? (
                       <RotateCcw className="h-4 w-4" />
@@ -220,6 +220,11 @@ export function SuppliersPanel({
         open={sheetOpen}
         onClose={() => setSheetOpen(false)}
         title={editing ? "Edit supplier" : "Add supplier"}
+        footer={
+          <Button full onClick={save} disabled={saving}>
+            {saving ? "Saving..." : editing ? "Save changes" : "Save supplier"}
+          </Button>
+        }
       >
         <div className="space-y-4">
           <div className="space-y-1.5">
@@ -231,7 +236,7 @@ export function SuppliersPanel({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Taytay Tahian — Ate Rose"
-              className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[15px] text-ink outline-none focus:border-brand"
+              className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[16px] text-ink outline-none focus:border-brand"
             />
           </div>
 
@@ -245,7 +250,7 @@ export function SuppliersPanel({
                 value={contact}
                 onChange={(e) => setContact(e.target.value)}
                 placeholder="0917..."
-                className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[14px] text-ink outline-none focus:border-brand"
+                className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[16px] text-ink outline-none focus:border-brand"
               />
             </div>
 
@@ -260,7 +265,7 @@ export function SuppliersPanel({
                 inputMode="numeric"
                 value={leadTimeText}
                 onChange={(e) => setLeadTimeText(e.target.value)}
-                className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[15px] font-semibold text-ink outline-none focus:border-brand"
+                className="h-11 w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 text-[16px] font-semibold text-ink outline-none focus:border-brand"
               />
             </div>
           </div>
@@ -274,13 +279,9 @@ export function SuppliersPanel({
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Min. order, payment terms, pickup schedule..."
-              className="w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface p-3 text-[14px] text-ink outline-none focus:border-brand"
+              className="w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface p-3 text-[16px] text-ink outline-none focus:border-brand"
             />
           </div>
-
-          <Button full onClick={save} disabled={saving}>
-            {saving ? "Saving..." : editing ? "Save changes" : "Save supplier"}
-          </Button>
         </div>
       </Sheet>
     </div>

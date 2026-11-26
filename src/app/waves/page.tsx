@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Wrench, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Clock, Printer, Truck, Wrench, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { WaveParcelSheet, type WaveParcelSelection } from "@/components/WaveParcelSheet";
 import { AutoShipSheet, type WaveSchedule } from "@/components/waves/AutoShipSheet";
@@ -439,7 +439,7 @@ export default function WavesPage() {
           onClick={() => setToolSheet("menu")}
           aria-label="Ship tools"
           title="Ship tools"
-          className="pressable relative flex h-11 w-11 items-center justify-center rounded-full text-ink-2 hover:bg-ink/[0.05]"
+          className="pressable relative hidden h-11 w-11 items-center justify-center rounded-full text-ink-2 hover:bg-ink/[0.05] lg:flex"
         >
           <Wrench className="h-[21px] w-[21px]" />
           {handoverWaiting > 0 && (
@@ -449,7 +449,7 @@ export default function WavesPage() {
       }
     >
       <div className="space-y-6 lg:grid lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
-        <div className="space-y-6">
+        <div className="space-y-4">
           <Group className="p-4">
             {ready && header && (
               <div>
@@ -549,11 +549,50 @@ export default function WavesPage() {
               </p>
             </div>
           </Group>
+
+          <div className="grid grid-cols-3 gap-2 lg:hidden">
+            <button
+              type="button"
+              onClick={() => setToolSheet("schedule")}
+              className="pressable flex min-h-12 flex-col items-center justify-center gap-1 rounded-[var(--radius-control)] bg-surface px-2 py-2.5 text-center shadow-[var(--shadow-card)] active:bg-surface-muted"
+            >
+              <span className="relative flex items-center justify-center text-ink-2">
+                <Clock className="h-[18px] w-[18px]" />
+                {schedule?.auto && (
+                  <span aria-hidden="true" className="absolute -right-1.5 -top-0.5 h-2 w-2 rounded-full bg-arrived" />
+                )}
+              </span>
+              <span className="text-[12px] font-semibold text-ink">Auto-ship</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setToolSheet("reprint")}
+              className="pressable flex min-h-12 flex-col items-center justify-center gap-1 rounded-[var(--radius-control)] bg-surface px-2 py-2.5 text-center shadow-[var(--shadow-card)] active:bg-surface-muted"
+            >
+              <Printer className="h-[18px] w-[18px] text-ink-2" />
+              <span className="text-[12px] font-semibold text-ink">Reprint</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setToolSheet("handover")}
+              className="pressable relative flex min-h-12 flex-col items-center justify-center gap-1 rounded-[var(--radius-control)] bg-surface px-2 py-2.5 text-center shadow-[var(--shadow-card)] active:bg-surface-muted"
+            >
+              <span className="relative flex items-center justify-center text-ink-2">
+                <Truck className="h-[18px] w-[18px]" />
+                {handoverWaiting > 0 && (
+                  <span className="tabular-nums absolute -right-3.5 -top-1.5 min-w-[16px] rounded-full bg-brand-solid px-1 py-0.5 text-[10px] font-bold leading-none text-on-brand">
+                    {handoverWaiting}
+                  </span>
+                )}
+              </span>
+              <span className="text-[12px] font-semibold text-ink">Handover</span>
+            </button>
+          </div>
         </div>
 
         <div className="space-y-4">
           {waves && waves.length > 1 && (
-            <ScrollChips role="tablist" label="Recent waves" rowClassName="gap-1.5 py-0.5">
+            <ScrollChips role="tablist" label="Recent waves" rowClassName="gap-1.5 px-5 py-0.5">
               {waves.map((w) => {
                 const active = w.id === latest?.id;
                 const failCount = w.failed.length;

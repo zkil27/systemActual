@@ -1017,24 +1017,6 @@ export default function SettingsPage() {
               <GroupLabel>Health</GroupLabel>
               <HealthPanel />
             </section>
-
-            <section className="lg:hidden">
-              <GroupLabel>Shortcuts</GroupLabel>
-              <Group className="divide-y divide-hairline">
-                <Link href="/items" className={rowLinkClass}>
-                  <span className="text-[17px] text-ink">Items &amp; stock</span>
-                  <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
-                </Link>
-                <Link href="/waves" className={rowLinkClass}>
-                  <span className="text-[17px] text-ink">Waves &amp; pick lists</span>
-                  <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
-                </Link>
-                <Link href="/imports" className={rowLinkClass}>
-                  <span className="text-[17px] text-ink">Upload a file</span>
-                  <ChevronRight className="chevron-nudge h-5 w-5 text-ink-3" />
-                </Link>
-              </Group>
-            </section>
           </div>
 
           <div className="space-y-5">

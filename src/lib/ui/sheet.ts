@@ -17,3 +17,23 @@ export function shouldDismiss(dragPx: number, velocity: number, sheetHeight: num
 export function resistDrag(dy: number): number {
   return dy >= 0 ? dy : -Math.sqrt(-dy) * 2;
 }
+
+/** Push or move a sheet id to the top of the open sheet stack. */
+export function pushSheet(stack: readonly symbol[], id: symbol): symbol[] {
+  return [...stack.filter((entry) => entry !== id), id];
+}
+
+/** Remove a sheet id from the open sheet stack. */
+export function removeSheet(stack: readonly symbol[], id: symbol): symbol[] {
+  return stack.filter((entry) => entry !== id);
+}
+
+/** True when `id` is currently the topmost open sheet. */
+export function isTopSheet(stack: readonly symbol[], id: symbol): boolean {
+  return stack.length > 0 && stack[stack.length - 1] === id;
+}
+
+/** Zero-based depth of `id` in the open sheet stack. */
+export function getSheetDepth(stack: readonly symbol[], id: symbol): number {
+  return Math.max(0, stack.indexOf(id));
+}
