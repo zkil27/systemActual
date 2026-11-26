@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   CalendarCheck2,
+  CheckCircle2,
   FileUp,
   MessageCircle,
   PackageSearch,
@@ -82,6 +83,7 @@ const SIDEBAR_OPS: Tab[] = [
   { href: "/profit", label: "Profit", icon: TrendingUp, match: (p) => p.startsWith("/profit") },
   { href: "/items", label: "Items & stock", icon: Shirt, match: (p) => p.startsWith("/items") },
   { href: "/restock", label: "Restock & suppliers", icon: Truck, match: (p) => p.startsWith("/restock") },
+  { href: "/approvals", label: "Approvals", icon: CheckCircle2, match: (p) => p.startsWith("/approvals") },
   { href: "/waves", label: "Waves & pick lists", icon: Printer, match: (p) => p.startsWith("/waves") },
   { href: "/imports", label: "Upload a file", icon: FileUp, match: (p) => p.startsWith("/imports") },
 ];

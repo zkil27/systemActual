@@ -1,4 +1,4 @@
-import { DigitalStatus, Prisma, PrintJobStatus, StockReason, WaveStatus } from "@prisma/client";
+import { ActionRequestStatus, DigitalStatus, Prisma, PrintJobStatus, StockReason, WaveStatus } from "@prisma/client";
 import { del } from "@vercel/blob";
 import { prisma } from "@/lib/prisma";
 import { pruneOldOrders } from "@/lib/ledger/store";
@@ -222,10 +222,21 @@ export async function pruneDailyData(
 
   if (!partial && !outOfTime()) {
     try {
+      const actionCutoff = new Date(now.getTime() - 60 * 24 * 3600_000);
       await Promise.all([
         prisma.aiEvent.deleteMany({ where: { createdAt: { lt: aiEventCutoff } } }),
         prisma.aiUsage.deleteMany({ where: { updatedAt: { lt: aiUsageCutoff } } }),
         prisma.importJob.deleteMany({ where: { createdAt: { lt: importJobCutoff } } }),
+        prisma.actionRequest.updateMany({
+          where: { status: ActionRequestStatus.PENDING, expiresAt: { lt: now } },
+          data: { status: ActionRequestStatus.EXPIRED },
+        }),
+        prisma.actionRequest.deleteMany({
+          where: {
+            status: { not: ActionRequestStatus.PENDING },
+            createdAt: { lt: actionCutoff },
+          },
+        }),
       ]);
     } catch (err) {
       console.error("[prune] ai/import tables", err);

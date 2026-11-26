@@ -4,6 +4,7 @@ import { ensureFreshToken } from "@/lib/connectors/tokens";
 import { pruneDailyData } from "@/lib/worker/prune";
 import { notifyNewBuyerMessage } from "@/lib/chats/notify";
 import { syncAllTikTokChats } from "@/lib/chats/tiktok-sync";
+import { processPendingChatReplies } from "@/lib/ai/auto-reply";
 import { syncOrders } from "@/lib/ledger/sync";
 import { detectFailedDeliveries, refreshOpenParcels, syncReturnRequests } from "@/lib/returns/sync";
 import { syncMoney } from "@/lib/money/sync";
@@ -293,6 +294,16 @@ async function tickOnce(
     }
   } catch (err) {
     console.error("[tick] chats", err);
+  }
+
+  try {
+    if (hasTime(deadline, 12_000)) {
+      await withSpan("worker.tick.chatAutoReply", () =>
+        processPendingChatReplies(sliceDeadline(deadline, 0.35))
+      );
+    }
+  } catch (err) {
+    console.error("[tick] chat auto-reply", err);
   }
 
   try {

@@ -1,4 +1,4 @@
-import { ChatMessageStatus, Platform, Prisma } from "@prisma/client";
+import { ActionRequestStatus, ChatMessageStatus, Platform, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { buildOrderPanel } from "./order-panel";
 import { sendReply, type ReplyContent, type ReplyStore, type StoredReply } from "./send";
@@ -9,12 +9,14 @@ import {
   chatSourceFor,
   PHOTO_OFF_NOTE,
   REPLY_OFF_NOTE,
+  resolveChatSendSetting,
   tiktokSendSetting,
 } from "./source";
 
 export { ChatSendDisabledError };
 import { refreshDraft } from "@/lib/ai/drafts";
 import { isHoldingReply } from "@/lib/ai/intent";
+import { getAiSettings } from "@/lib/ai/settings-store";
 import { chatsComingSoon } from "./format";
 import type { ChatCard, ChatListItem, ChatMessageView, ChatPlatform, ChatThread, ChatUnread } from "./types";
 
@@ -204,15 +206,22 @@ export async function getThread(id: string, afterId?: string | null): Promise<Ch
         })
       : null;
 
+  const [draft, ai] = await Promise.all([draftFor(conv.id), getAiSettings()]);
+
   return {
     id: conv.id,
     platform: conv.platform as ChatPlatform,
     buyerName: conv.buyerName,
     buyerAvatarUrl: conv.buyerAvatarUrl,
-    ...replyState(conv.canReply, conv.shopConnection, conv.externalId),
+    ...replyState(
+      conv.canReply,
+      conv.shopConnection,
+      conv.externalId,
+      resolveChatSendSetting(ai.chatSendEnabled)
+    ),
     order: buildOrderPanel({ order, sampleOrder: conv.shopConnection.isDemo ? conv.sampleOrder : null }),
     messages: messages.map(toMessageView),
-    ...(await draftFor(conv.id)),
+    ...draft,
   };
 }
 
@@ -339,25 +348,55 @@ export const prismaReplyStore: ReplyStore = {
 
 export class ChatNotFoundError extends Error {}
 
-export async function sendChatMessage(id: string, clientKey: string, content: ReplyContent): Promise<ChatMessageView> {
-  const conv = await loadSourceConversation(id);
+const HUMAN_REPLY_AI_PAUSE_MS = 2 * 3600_000;
+
+export async function sendChatMessage(
+  id: string,
+  clientKey: string,
+  content: ReplyContent,
+  opts: { isAutoReply?: boolean } = {}
+): Promise<ChatMessageView> {
+  const [conv, ai] = await Promise.all([loadSourceConversation(id), getAiSettings()]);
   if (!conv) throw new ChatNotFoundError("Chat not found.");
+  const sendSetting = resolveChatSendSetting(ai.chatSendEnabled);
   // Refuse before saving anything, so no "Not sent" bubble is left behind.
-  if (!canSendFrom(conv.shopConnection, conv.externalId)) throw new ChatSendDisabledError(REPLY_OFF_NOTE);
-  if ("imageUrl" in content && !canSendPhotosFrom(conv.shopConnection)) throw new ChatSendDisabledError(PHOTO_OFF_NOTE);
+  if (!canSendFrom(conv.shopConnection, conv.externalId, sendSetting)) {
+    throw new ChatSendDisabledError(REPLY_OFF_NOTE);
+  }
+  if ("imageUrl" in content && !canSendPhotosFrom(conv.shopConnection)) {
+    throw new ChatSendDisabledError(PHOTO_OFF_NOTE);
+  }
   const source = chatSourceFor(conv.shopConnection);
   const stored = await sendReply(
     { conversation: { ...conv, platform: conv.platform as ChatPlatform }, clientKey, content },
     { store: prismaReplyStore, source }
   );
+  if (!opts.isAutoReply && stored.status === "SENT") {
+    const pauseUntil = new Date(Date.now() + HUMAN_REPLY_AI_PAUSE_MS);
+    await Promise.all([
+      prisma.chatConversation.update({
+        where: { id },
+        data: { aiPausedUntil: pauseUntil },
+      }),
+      prisma.actionRequest.updateMany({
+        where: {
+          conversationId: id,
+          kind: "chat.reply",
+          status: ActionRequestStatus.PENDING,
+        },
+        data: { status: ActionRequestStatus.EXPIRED },
+      }),
+    ]).catch((err) => console.error("[chats] pause after reply", id, err));
+  }
   const row = await prisma.chatMessage.findUniqueOrThrow({ where: { id: stored.id }, select: messageSelect });
   return toMessageView(row);
 }
 
 /** Checked before uploading a photo, so a refused photo is never stored. */
 export async function canSendPhotoTo(id: string): Promise<boolean> {
-  const conv = await loadSourceConversation(id);
-  return Boolean(conv && canSendFrom(conv.shopConnection, conv.externalId) && canSendPhotosFrom(conv.shopConnection));
+  const [conv, ai] = await Promise.all([loadSourceConversation(id), getAiSettings()]);
+  const sendSetting = resolveChatSendSetting(ai.chatSendEnabled);
+  return Boolean(conv && canSendFrom(conv.shopConnection, conv.externalId, sendSetting) && canSendPhotosFrom(conv.shopConnection));
 }
 
 /** Whether a reply with this clientKey was already saved (so a retry can skip the upload). */

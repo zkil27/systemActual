@@ -66,7 +66,7 @@ async function logEvent(data: {
 type ChatShop = Parameters<typeof ensureFreshToken>[0] & { isDemo: boolean; shopCipher: string | null };
 
 /** The TikTok listings this chat is about, read live from the shop. Sample chats have none. */
-async function chatListings(
+export async function chatListings(
   shop: ChatShop,
   platform: string,
   orderSn: string | null,

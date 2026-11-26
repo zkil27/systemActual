@@ -16,7 +16,11 @@ import { missingWhere, overdueWhere } from "@/lib/returns/rules";
 import { getReadyCounts } from "@/lib/waves/build";
 import { addHeld, HELD_LABELS } from "@/lib/waves/ready";
 
-export async function sendTelegramMessage(chatId: string, text: string): Promise<boolean> {
+export async function sendTelegramMessage(
+  chatId: string,
+  text: string,
+  replyMarkup?: Record<string, unknown>
+): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token || !chatId) return false;
   try {
@@ -27,6 +31,7 @@ export async function sendTelegramMessage(chatId: string, text: string): Promise
         chat_id: chatId,
         text,
         disable_web_page_preview: true,
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
       }),
     });
     return res.ok;
@@ -36,10 +41,61 @@ export async function sendTelegramMessage(chatId: string, text: string): Promise
   }
 }
 
-export async function notifyOwnerTelegram(text: string): Promise<boolean> {
+export async function notifyOwnerTelegram(
+  text: string,
+  replyMarkup?: Record<string, unknown>
+): Promise<boolean> {
   const settings = await prisma.appSettings.findUnique({ where: { id: "default" } });
   if (!settings?.telegramChatId) return false;
-  return sendTelegramMessage(settings.telegramChatId, text);
+  return sendTelegramMessage(settings.telegramChatId, text, replyMarkup);
+}
+
+export async function answerTelegramCallback(
+  callbackQueryId: string,
+  text: string
+): Promise<boolean> {
+  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  if (!token || !callbackQueryId) return false;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        callback_query_id: callbackQueryId,
+        text: text.slice(0, 180),
+      }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error("[Telegram answerCallbackQuery error]", err);
+    return false;
+  }
+}
+
+export async function editTelegramMessageText(
+  chatId: string,
+  messageId: number,
+  text: string
+): Promise<boolean> {
+  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  if (!token || !chatId || !messageId) return false;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        text,
+        disable_web_page_preview: true,
+        reply_markup: { inline_keyboard: [] },
+      }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error("[Telegram editMessageText error]", err);
+    return false;
+  }
 }
 
 /**

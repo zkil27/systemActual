@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { MessageCircle } from "lucide-react";
+import { CheckCircle2, MessageCircle } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { toast } from "@/components/ui/Toast";
@@ -189,6 +190,16 @@ export function ChatsScreen() {
       width={wide ? "wide" : "default"}
       chatUnread={unread?.total}
       onRefresh={wide ? undefined : refresh}
+      headerRight={
+        <Link
+          href="/approvals"
+          aria-label="Approvals"
+          title="Approvals"
+          className="pressable flex h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05]"
+        >
+          <CheckCircle2 className="h-[22px] w-[22px]" />
+        </Link>
+      }
     >
       <div className="space-y-4 lg:space-y-0">
         {!wide && <SegmentedControl label="Shop" options={options} value={shop} onChange={changeShop} />}

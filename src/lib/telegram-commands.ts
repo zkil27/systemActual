@@ -30,6 +30,7 @@ export const HELP_TEXT = [
   `/staff — who scanned and packed today`,
   `/health — sync, printer and backup status`,
   `/pause · /resume — stop or restart printing`,
+  `/approvals — pending chat replies to approve`,
   `/aioff · /aion — stop or restart the chats assistant`,
   `/sync — sync both shops now`,
 ].join("\n");
@@ -143,10 +144,31 @@ async function setPrintPaused(paused: boolean): Promise<string> {
 
 async function setAssistant(on: boolean): Promise<string> {
   const { setAiEnabled } = await import("@/lib/ai/settings-store");
-  await setAiEnabled(on);
+  const { systemActor } = await import("@/lib/audit");
+  await setAiEnabled(on, systemActor("telegram"));
   return on
-    ? "Chats assistant is ON. It writes reply drafts in Chats (auto-replies only go to test chats)."
+    ? "Chats assistant is ON. Drafts and any auto-replies you turned on in Settings are active."
     : "Chats assistant is OFF. No drafts or automatic replies until you send /aion.";
+}
+
+async function approvalsReply(): Promise<string> {
+  const { listActionRequests } = await import("@/lib/approvals/service");
+  const pending = await listActionRequests({ status: "PENDING" });
+  if (!pending.length) {
+    return "No pending approvals right now.";
+  }
+  const base = process.env.APP_BASE_URL?.trim().replace(/\/$/, "");
+  const lines = [
+    `PENDING APPROVALS (${pending.length})`,
+    ...pending.slice(0, 5).map((r) => `• ${r.title} — ${r.summary.slice(0, 120)}`),
+  ];
+  if (pending.length > 5) {
+    lines.push(`…and ${pending.length - 5} more.`);
+  }
+  if (base) {
+    lines.push(``, `Review in Kyna Ops: ${base}/approvals`);
+  }
+  return lines.join("\n");
 }
 
 /**
@@ -177,6 +199,8 @@ export async function buildOpsCommandReply(raw: string): Promise<string | null> 
       return setPrintPaused(true);
     case "resume":
       return setPrintPaused(false);
+    case "approvals":
+      return approvalsReply();
     case "aioff":
       return setAssistant(false);
     case "aion":

@@ -51,6 +51,9 @@ export const MAX_ANSWER = 1500;
 
 export const aiSettingsInput = z.object({
   enabled: z.boolean().optional(),
+  chatSendEnabled: z.boolean().optional(),
+  autoSendEnabled: z.boolean().optional(),
+  approvalQueueEnabled: z.boolean().optional(),
   topicModes: z.record(z.string(), z.enum(["off", "draft", "auto"])).optional(),
   autoLabel: z.string().trim().min(1).max(MAX_LABEL).optional(),
   handoverText: z.string().trim().min(1).max(MAX_HANDOVER).optional(),
@@ -87,6 +90,19 @@ export function aiAutosendSetting(raw: string | undefined = process.env.AI_AUTOS
   if (!v || v.toLowerCase() === "off") return "off";
   if (v.toLowerCase() === "all") return "all";
   return new Set(v.split(",").map((s) => s.trim()).filter(Boolean));
+}
+
+/**
+ * Resolves the effective auto-send allowlist from the owner Settings switch and
+ * optional AI_AUTOSEND_TIKTOK env override (used for test-buyer allowlists while off).
+ */
+export function resolveAutoSendSetting(
+  autoSendEnabled: boolean,
+  rawEnv: string | undefined = process.env.AI_AUTOSEND_TIKTOK
+): "off" | "all" | Set<string> {
+  if (autoSendEnabled) return "all";
+  const env = aiAutosendSetting(rawEnv);
+  return env instanceof Set ? env : "off";
 }
 
 export function mayAutoSendTo(

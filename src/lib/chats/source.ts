@@ -54,7 +54,20 @@ export function tiktokSendSetting(raw: string | undefined = process.env.CHAT_SEN
   return new Set(v.split(",").map((s) => s.trim()).filter(Boolean));
 }
 
-/** Replying from Kyna Ops: always for sample chats; for TikTok only where CHAT_SEND_TIKTOK allows it. */
+/**
+ * Resolves the effective TikTok send policy from the owner Settings switch and
+ * optional CHAT_SEND_TIKTOK env override (test-buyer allowlist while switch is off).
+ */
+export function resolveChatSendSetting(
+  chatSendEnabled: boolean,
+  rawEnv: string | undefined = process.env.CHAT_SEND_TIKTOK
+): "off" | "all" | Set<string> {
+  if (chatSendEnabled) return "all";
+  const env = tiktokSendSetting(rawEnv);
+  return env instanceof Set ? env : "off";
+}
+
+/** Replying from Kyna Ops: always for sample chats; for TikTok when Settings allows it (or test allowlist). */
 export function canSendFrom(shop: ChatShopRef, conversationExternalId?: string, setting = tiktokSendSetting()): boolean {
   if (shop.isDemo) return true;
   if (shop.platform !== "TIKTOK" || setting === "off") return false;
@@ -67,7 +80,7 @@ export function canSendPhotosFrom(shop: ChatShopRef): boolean {
   return shop.isDemo || shop.platform === "TIKTOK";
 }
 
-export const REPLY_OFF_NOTE = "Replying from Kyna Ops is coming soon. For now, reply in TikTok Seller Center.";
+export const REPLY_OFF_NOTE = "Replying from Kyna Ops is switched off. Turn it on in Settings → Chats assistant, or reply in TikTok Seller Center.";
 export const PHOTO_OFF_NOTE = "Sending photos from Kyna Ops isn't available for this shop yet.";
 
 const tiktokChatSource: ChatSource = {

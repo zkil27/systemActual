@@ -56,6 +56,7 @@ const topicLabel = (id: string) => SHOP_ANSWER_TOPICS.find((t) => t.id === id)?.
 
 export default function AssistantSettingsPage() {
   const [settings, setSettings] = useState<AiSettingsView | null>(null);
+  const [testAutosendCount, setTestAutosendCount] = useState(0);
   const [answers, setAnswers] = useState<ShopAnswerView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [label, setLabel] = useState("");
@@ -68,6 +69,7 @@ export default function AssistantSettingsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setSettings(data.settings);
+      setTestAutosendCount(typeof data.testAutosendCount === "number" ? data.testAutosendCount : 0);
       setAnswers(data.answers);
       setLabel(data.settings.autoLabel);
       setHandover(data.settings.handoverText);
@@ -126,9 +128,65 @@ export default function AssistantSettingsPage() {
                 onChange={(on) => void save({ enabled: on }, on ? "Assistant on" : "Assistant off")}
               />
             </div>
+
+            <div className={`${rowClass} py-3`}>
+              <span className="min-w-0">
+                <span className="block text-[17px] text-ink">Reply to buyers from Kyna Ops</span>
+                <span className="block text-[13px] text-ink-3">
+                  Sends your replies to TikTok buyers. Shopee chats stay Coming soon until live approval.
+                </span>
+              </span>
+              <Switch
+                label="Reply to buyers from Kyna Ops"
+                checked={settings?.chatSendEnabled ?? false}
+                disabled={!settings}
+                onChange={(on) =>
+                  void save(
+                    { chatSendEnabled: on, ...(!on ? { autoSendEnabled: false } : {}) },
+                    on ? "Chat sending on" : "Chat sending off"
+                  )
+                }
+              />
+            </div>
+
+            <div className={`${rowClass} py-3`}>
+              <span className="min-w-0">
+                <span className="block text-[17px] text-ink">Automatic replies (all buyers)</span>
+                <span className="block text-[13px] text-ink-3">
+                  Sends by itself only for topics set to Auto. Returns, refunds and complaints stay person-only.
+                </span>
+              </span>
+              <Switch
+                label="Automatic replies"
+                checked={settings?.autoSendEnabled ?? false}
+                disabled={!settings || !settings.enabled || !settings.chatSendEnabled}
+                onChange={(on) =>
+                  void save({ autoSendEnabled: on }, on ? "Automatic replies on" : "Automatic replies off")
+                }
+              />
+            </div>
+
+            <div className={`${rowClass} py-3`}>
+              <span className="min-w-0">
+                <span className="block text-[17px] text-ink">Approval queue &amp; Telegram 1-tap</span>
+                <span className="block text-[13px] text-ink-3">
+                  Sends draft or uncertain replies to Approvals and Telegram so you can approve with one tap.
+                </span>
+              </span>
+              <Switch
+                label="Approval queue and Telegram 1-tap"
+                checked={settings?.approvalQueueEnabled ?? true}
+                disabled={!settings || !settings.enabled || !settings.chatSendEnabled}
+                onChange={(on) =>
+                  void save({ approvalQueueEnabled: on }, on ? "Approval queue on" : "Approval queue off")
+                }
+              />
+            </div>
           </Group>
           <p className="px-4 pt-2 text-[13px] text-ink-3">
-            For now, real buyers only get drafts you can check and send. Automatic replies go only to test chats.
+            {testAutosendCount > 0 && !settings?.autoSendEnabled
+              ? `Test buyer allowlist active (${testAutosendCount} chat): topics set to Auto will reply automatically only to your test account while Automatic replies is off.`
+              : "Every automatic reply carries your label and stays logged. Replying yourself pauses the assistant on that chat for 2 hours."}
           </p>
         </section>
 
@@ -151,8 +209,8 @@ export default function AssistantSettingsPage() {
             ))}
           </Group>
           <p className="px-4 pt-2 text-[13px] text-ink-3">
-            Draft: you check it first. Auto: sends by itself in test chats only. Returns, refunds and complaints always
-            go to you.
+            Draft: waits for you in Chats and Approvals. Auto: sends automatically when Automatic replies (or your test
+            allowlist) is on. Returns, refunds and complaints always go to you.
           </p>
         </section>
 

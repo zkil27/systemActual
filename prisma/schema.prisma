@@ -181,6 +181,7 @@ model ChatConversation {
   remoteCheckedAt    DateTime?
   messages           ChatMessage[]
   drafts             ChatDraft[]
+  actionRequests     ActionRequest[]
   /// The assistant leaves this chat alone until then (a person replied, or a trick attempt).
   aiPausedUntil      DateTime?
   createdAt          DateTime       @default(now())
@@ -924,17 +925,58 @@ model WaveItem {
 
 /// Chats assistant settings (one row, id "default"). Off until the owner turns it on.
 model AiSettings {
-  id                String   @id @default("default")
-  enabled           Boolean  @default(false)
+  id                   String   @id @default("default")
+  enabled              Boolean  @default(false)
+  /// Owner switch replacing env-only CHAT_SEND_TIKTOK: lets Kyna Ops send buyer replies.
+  chatSendEnabled      Boolean  @default(false)
+  /// Owner switch replacing env-only AI_AUTOSEND_TIKTOK: auto-send for topics set to "auto".
+  autoSendEnabled      Boolean  @default(false)
+  /// Route draft / uncertain actions into the Approval Queue & Telegram 1-tap cards.
+  approvalQueueEnabled Boolean  @default(true)
   /// Per topic: "off" | "draft" | "auto". Topics missing here are "draft".
-  topicModes        Json     @default("{}")
+  topicModes           Json     @default("{}")
   /// Added to every automatic reply so buyers know it's automated.
-  autoLabel         String   @default("(Auto-reply)")
+  autoLabel            String   @default("(Auto-reply)")
   /// Sent when the assistant can't answer and a person will take over.
-  handoverText      String   @default("Salamat po! Our team will reply shortly.")
+  handoverText         String   @default("Salamat po! Our team will reply shortly.")
   /// Share of the daily free AI allowance kept for 6 PM to midnight (Manila).
-  eveningReservePct Int      @default(15)
-  updatedAt         DateTime @updatedAt
+  eveningReservePct    Int      @default(15)
+  updatedAt            DateTime @updatedAt
+}
+
+enum ActionRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+  DONE
+  FAILED
+}
+
+/// Shared owner approval queue for AI chat replies (Phase 4) and listing/price updates (Phase 5).
+model ActionRequest {
+  id             String              @id @default(cuid())
+  kind           String
+  status         ActionRequestStatus @default(PENDING)
+  title          String
+  summary        String              @db.Text
+  payloadJson    Json
+  conversationId String?
+  conversation   ChatConversation?   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  proposedBy     String
+  dedupeKey      String?             @unique
+  expiresAt      DateTime?
+  decidedBy      String?
+  decidedAt      DateTime?
+  resultJson     Json?
+  error          String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([status, createdAt])
+  @@index([kind, status])
+  @@index([conversationId, status])
+  @@index([expiresAt])
 }
 
 /// Shop rules the assistant may quote (COD, shipping times, returns, sizes...).

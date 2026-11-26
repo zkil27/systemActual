@@ -22,11 +22,12 @@ export const RELEASES: Release[] = [
   {
     id: 10,
     date: "2026-11-26",
-    title: "Suppliers and restock orders",
+    title: "Restock orders and chat approvals",
     changes: [
-      "Added Restock & suppliers so you can save suppliers, place orders, and see items running low before they sell out.",
-      "Staff can now pick an expected supplier delivery in Shelf & stock and adjust only short or damaged pieces.",
-      "The nightly Telegram summary now lists items to reorder soon and alerts when a supplier delivery is overdue.",
+      "Added Restock & suppliers to track suppliers, place orders, and see items to reorder before they run out.",
+      "Staff can now pick an expected delivery in Shelf & stock and adjust only short or damaged pieces.",
+      "Added Approvals and Chats assistant switches so safe TikTok replies send automatically while uncertain replies wait for your tap in Approvals or Telegram.",
+      "Nightly Telegram updates now include items to reorder soon and alerts for overdue supplier orders.",
     ],
   },
   {

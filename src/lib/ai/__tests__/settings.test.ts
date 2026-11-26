@@ -5,11 +5,13 @@ import {
   canAutoSend,
   cleanTopicModes,
   mayAutoSendTo,
+  resolveAutoSendSetting,
   shopAnswerInput,
   topicMode,
   withAutoLabel,
 } from "@/lib/ai/settings";
 import { toSettingsView } from "@/lib/ai/settings-store";
+import { resolveChatSendSetting } from "@/lib/chats/source";
 import { parseCommand } from "@/lib/telegram-commands";
 import { isPublicPath } from "@/lib/public-paths";
 
@@ -79,8 +81,23 @@ describe("labels and input checks", () => {
   it("starts switched off with safe defaults when nothing is saved", () => {
     const v = toSettingsView(null);
     expect(v.enabled).toBe(false);
+    expect(v.chatSendEnabled).toBe(false);
+    expect(v.autoSendEnabled).toBe(false);
+    expect(v.approvalQueueEnabled).toBe(true);
     expect(v.topicModes.order).toBe("draft");
     expect(v.autoLabel).toBe("(Auto-reply)");
+  });
+
+  it("lets Settings switches turn on sending/auto-reply while preserving test allowlists when off", () => {
+    expect(resolveChatSendSetting(true, "off")).toBe("all");
+    expect(resolveChatSendSetting(false, "off")).toBe("off");
+    expect(resolveChatSendSetting(false, "all")).toBe("off");
+    expect(resolveChatSendSetting(false, TEST_CHAT)).toEqual(new Set([TEST_CHAT]));
+
+    expect(resolveAutoSendSetting(true, "off")).toBe("all");
+    expect(resolveAutoSendSetting(false, "off")).toBe("off");
+    expect(resolveAutoSendSetting(false, "all")).toBe("off");
+    expect(resolveAutoSendSetting(false, TEST_CHAT)).toEqual(new Set([TEST_CHAT]));
   });
 });
 

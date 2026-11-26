@@ -1,4 +1,5 @@
 import type { AiSettings, ShopAnswer } from "@prisma/client";
+import { recordAudit, type AuditActor } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import {
   AI_TOPIC_IDS,
@@ -14,6 +15,9 @@ const ID = "default";
 
 export interface AiSettingsView {
   enabled: boolean;
+  chatSendEnabled: boolean;
+  autoSendEnabled: boolean;
+  approvalQueueEnabled: boolean;
   topicModes: Record<AiTopic, AiMode>;
   autoLabel: string;
   handoverText: string;
@@ -26,6 +30,9 @@ export function toSettingsView(row: AiSettings | null): AiSettingsView {
   for (const t of AI_TOPIC_IDS) modes[t] = topicMode(row?.topicModes, t);
   return {
     enabled: row?.enabled ?? false,
+    chatSendEnabled: row?.chatSendEnabled ?? false,
+    autoSendEnabled: row?.autoSendEnabled ?? false,
+    approvalQueueEnabled: row?.approvalQueueEnabled ?? true,
     topicModes: modes,
     autoLabel: row?.autoLabel ?? "(Auto-reply)",
     handoverText: row?.handoverText ?? "Salamat po! Our team will reply shortly.",
@@ -39,21 +46,50 @@ export async function getAiSettings(): Promise<AiSettingsView> {
   return toSettingsView(await prisma.aiSettings.findUnique({ where: { id: ID } }));
 }
 
-export async function updateAiSettings(input: AiSettingsInput): Promise<AiSettingsView> {
+export async function updateAiSettings(
+  input: AiSettingsInput,
+  actor?: AuditActor
+): Promise<AiSettingsView> {
   const current = await prisma.aiSettings.findUnique({ where: { id: ID } });
   const data = {
     ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+    ...(input.chatSendEnabled !== undefined ? { chatSendEnabled: input.chatSendEnabled } : {}),
+    ...(input.autoSendEnabled !== undefined ? { autoSendEnabled: input.autoSendEnabled } : {}),
+    ...(input.approvalQueueEnabled !== undefined ? { approvalQueueEnabled: input.approvalQueueEnabled } : {}),
     ...(input.topicModes ? { topicModes: cleanTopicModes(input.topicModes, current?.topicModes) } : {}),
     ...(input.autoLabel !== undefined ? { autoLabel: input.autoLabel } : {}),
     ...(input.handoverText !== undefined ? { handoverText: input.handoverText } : {}),
     ...(input.eveningReservePct !== undefined ? { eveningReservePct: input.eveningReservePct } : {}),
   };
-  const row = await prisma.aiSettings.upsert({ where: { id: ID }, create: { id: ID, ...data }, update: data });
+  const row = await prisma.$transaction(async (tx) => {
+    const saved = await tx.aiSettings.upsert({
+      where: { id: ID },
+      create: { id: ID, ...data },
+      update: data,
+    });
+    if (actor) {
+      await recordAudit(
+        {
+          actor,
+          action: "ai_settings.updated",
+          entity: "AiSettings",
+          entityId: ID,
+          before: current ? toSettingsView(current) : null,
+          after: toSettingsView(saved),
+        },
+        tx
+      );
+    }
+    return saved;
+  });
   return toSettingsView(row);
 }
 
-export async function setAiEnabled(enabled: boolean): Promise<AiSettingsView> {
-  return updateAiSettings({ enabled });
+export async function setAiEnabled(
+  enabled: boolean,
+  actor?: AuditActor
+): Promise<AiSettingsView> {
+  return updateAiSettings({ enabled }, actor);
 }
 
 export interface ShopAnswerView {

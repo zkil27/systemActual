@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse, after } from "next/server";
-import { buildTelegramReply, sendTelegramMessage } from "@/lib/telegram";
+import { parseApprovalCallbackData } from "@/lib/approvals/rules";
+import { approveActionRequest, rejectActionRequest } from "@/lib/approvals/service";
+import {
+  answerTelegramCallback,
+  buildTelegramReply,
+  editTelegramMessageText,
+  sendTelegramMessage,
+} from "@/lib/telegram";
 import { isAuthorizedTelegramChat, parseTelegramStartCode, verifyTelegramSecret } from "@/lib/telegram-auth";
 import { prisma } from "@/lib/prisma";
 import { runTick } from "@/lib/worker/tick";
@@ -16,6 +23,49 @@ export async function POST(req: NextRequest) {
     }
 
     const update = await req.json();
+    const callback = update?.callback_query;
+    if (callback?.id) {
+      const cbChatId = callback?.message?.chat?.id ? String(callback.message.chat.id) : "";
+      const cbMsgId = typeof callback?.message?.message_id === "number" ? callback.message.message_id : 0;
+      const settings = await prisma.appSettings.findUnique({ where: { id: "default" } });
+      if (!isAuthorizedTelegramChat(cbChatId, settings?.telegramChatId)) {
+        await answerTelegramCallback(String(callback.id), "Not authorized.");
+        return NextResponse.json({ ok: true });
+      }
+      const parsed = parseApprovalCallbackData(typeof callback.data === "string" ? callback.data : "");
+      if (!parsed) {
+        await answerTelegramCallback(String(callback.id), "Unknown button.");
+        return NextResponse.json({ ok: true });
+      }
+      const actor = { type: "OWNER" as const, id: null, name: "Owner (Telegram)" };
+      const outcome =
+        parsed.action === "approve"
+          ? await approveActionRequest(parsed.id, { actor })
+          : await rejectActionRequest(parsed.id, { actor });
+
+      const toastText = outcome.ok
+        ? parsed.action === "approve"
+          ? "Sent to buyer!"
+          : "Rejected."
+        : outcome.error;
+      await answerTelegramCallback(String(callback.id), toastText);
+
+      const originalText = typeof callback?.message?.text === "string" ? callback.message.text : "";
+      const statusLine = outcome.ok
+        ? parsed.action === "approve"
+          ? "STATUS: APPROVED & SENT"
+          : "STATUS: REJECTED"
+        : `STATUS: ${outcome.error}`;
+      if (cbChatId && cbMsgId) {
+        await editTelegramMessageText(
+          cbChatId,
+          cbMsgId,
+          originalText ? `${originalText}\n\n${statusLine}` : statusLine
+        );
+      }
+      return NextResponse.json({ ok: true });
+    }
+
     const message = update?.message;
     const chatId = message?.chat?.id ? String(message.chat.id) : "";
     const text = typeof message?.text === "string" ? message.text : "";

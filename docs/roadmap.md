@@ -13,7 +13,7 @@ Last updated: 2026-11-26.
 | 1 | Return truth, item by item, plus foundations | Done on `dev` (not on `main` yet) |
 | 2 | Profit per order | Done on `dev` (not on `main` yet) |
 | 3 | Restock and suppliers | Done on dev (not on main yet) |
-| 4 | Chats on both shops, safe auto-replies | Planned |
+| 4 | Chats on both shops, safe auto-replies | Done on dev (Shopee chats coming soon) |
 | 5 | Listings and prices in one place | Planned |
 | Ongoing | Maintainability | Backlog below |
 
@@ -125,32 +125,22 @@ Data & retention:
 - `Supplier`, `PurchaseOrder`, `PurchaseOrderLine`, and nullable `StockMovement.purchaseOrderLineId`.
 - Orders are small, so keep them permanently or for 2 years.
 
-## Phase 4: chats on both shops, safe auto-replies (planned)
+## Phase 4: chats on both shops, safe auto-replies (done on dev — Shopee coming soon)
 
 Problem:
-- Only TikTok chats are connected (`src/lib/chats/*`). The Shopee tab shows "Coming soon" (`chatsComingSoon` in `src/lib/chats/format.ts`) while the Shopee Open Platform profile is under review. The sample data (demo shops, sample chats and returns) was removed on 2026-11-26.
-- When Shopee approves: set the Shopee keys, make `chatsComingSoon` return false for connected Shopee shops, and drop the "Coming soon" on Upload (`src/app/imports/page.tsx`). Settings, Items and Today switch back by themselves once a real Shopee shop is connected.
-- The assistant's "Auto" mode does nothing: `canAutoSend` and `withAutoLabel` in `src/lib/ai/settings.ts` are never called.
-- Sending replies to real buyers depends on the `CHAT_SEND_TIKTOK` environment variable, which has no switch in the app.
+- Only TikTok chats are connected (`src/lib/chats/*`). The Shopee tab stays "Coming soon" (`chatsComingSoon` in `src/lib/chats/format.ts`) while the Shopee Open Platform live review is pending (test API only). The sample data (demo shops, sample chats and returns) was removed on 2026-11-26.
 
-Scope:
-- **Shopee chats** through the Open Platform seller chat API, in the same Chats tab. Check the endpoints against open.shopee.com before building.
-- **A Settings switch** to replace `CHAT_SEND_TIKTOK` and `AI_AUTOSEND_TIKTOK`.
-- **Auto-send only for topics the owner turns on** (`AiSettings.topicModes`). Returns, refunds and complaints stay person-only, as they are now. Every auto reply carries `autoLabel` and is logged (`AiEvent`, plus `AuditLog` with a system actor).
-- **An approval queue** for anything in between: approve, edit or reject in the app, or on Telegram with one tap. Phase 5 reuses it.
+What exists:
+- **Settings switches replacing env-only gates (`AiSettings.chatSendEnabled`, `autoSendEnabled`, `approvalQueueEnabled`):** in Settings → Chats assistant (`src/app/settings/assistant/page.tsx`, `src/lib/ai/settings.ts`, `src/lib/chats/source.ts`), with env allowlists (`CHAT_SEND_TIKTOK`, `AI_AUTOSEND_TIKTOK`) preserved for safe single-buyer testing while global switches stay off. All changes log to `AuditLog`.
+- **Safe background auto-reply (`src/lib/ai/auto-reply.ts`, hooked into `src/lib/worker/tick.ts`):** only auto-sends TikTok topics set to `Auto` that pass safety rules (`withAutoLabel`), skipping Shopee (`Coming soon`), returns/refunds/complaints, media-only turns, `needsCheck`, `handoff`, `needsOwner`, and 2h human-reply cooldowns; logs to `AiEvent` and `AuditLog` (`systemActor("chat-assistant")`).
+- **General Approval Queue (`ActionRequest` + `src/lib/approvals/*`, `src/app/approvals/page.tsx`, `/api/approvals`):** draft or uncertain AI replies queue into `ActionRequest`, send Telegram 1-tap `Approve & send` / `Reject` inline buttons (`src/app/api/telegram/webhook/route.ts`), support `/approvals` on Telegram, and prune non-pending rows after 60 days (`src/lib/worker/prune.ts`).
 
-Data:
-- `ActionRequest`: kind, payload, proposed by (system job or person), status (Pending, Approved, Rejected, Expired, Done), decided by and when, and the result.
-- Keep it general; price changes and listings use it in Phase 5.
+Open:
+- Apply `prisma/migrations/20261126050000_phase4_chat_controls_and_approvals/migration.sql` (and Phase 3's migration) to Supabase Postgres.
+- When Shopee approves live access: implement Shopee Open Platform seller chat sync/send, make `chatsComingSoon` return false for connected live Shopee shops, and drop "Coming soon" on Upload (`src/app/imports/page.tsx`).
 
-Files to start from:
-- `src/lib/ai/*`: the providers, the reply checks (`output-check.ts`, `fact-check.ts`) and the eval set (`npm run ai:eval`). Run the evals before and after.
-- `src/lib/chats/*` and `src/app/chats/*`.
-
-Risks:
-- Buyers can see auto replies, so a bad reply costs the shop.
-- The free AI tiers have daily limits (`AiUsage`, `eveningReservePct`).
-- Never auto-send a promise about money, stock or delivery dates; the existing checks block these.
+Data & retention:
+- `AiSettings` controls + `ActionRequest` (`PENDING` expires in 24h; decided/expired rows pruned after 60 days).
 
 ## Phase 5: listings and prices in one place (planned)
 
