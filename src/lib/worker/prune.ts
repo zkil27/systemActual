@@ -7,6 +7,9 @@ import { getManilaDateString } from "@/lib/time";
 import { AUDIT_RETENTION_DAYS } from "@/lib/audit";
 import { pruneIntegrationEvents } from "@/lib/integrations/inbox";
 import { pruneOrderFinance } from "@/lib/finance/report";
+import { pruneAppErrors } from "@/lib/dev/errors";
+import { pruneDevTables } from "@/lib/dev/tick-recorder";
+import { isMissingTableError } from "@/lib/dev/db-errors";
 
 const DAILY_PRUNE_LOCK_ID = "daily-prune";
 const PRINT_JOB_RETENTION_DAYS = 30;
@@ -240,6 +243,17 @@ export async function pruneDailyData(
       ]);
     } catch (err) {
       console.error("[prune] ai/import tables", err);
+    }
+  } else {
+    partial = true;
+  }
+
+  if (!partial && !outOfTime()) {
+    try {
+      // Developer screen: error log 30 days, tick timings 3 days, API call stats 30 days.
+      await Promise.all([pruneAppErrors(now), pruneDevTables(now)]);
+    } catch (err) {
+      if (!isMissingTableError(err)) console.error("[prune] developer tables", err);
     }
   } else {
     partial = true;

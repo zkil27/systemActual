@@ -25,6 +25,9 @@ import { syncOrderFinance } from "@/lib/finance/sync";
 import { maybeRollUpFinance } from "@/lib/finance/report";
 import { handleMarketplaceEvent } from "@/lib/integrations/handle-event";
 import { prismaLockStore, runLocked } from "./lock";
+import { TickRecorder, withTickRecorder } from "@/lib/dev/tick-context";
+import { flushTickRecorder, tickError } from "@/lib/dev/tick-recorder";
+import { isMissingTableError } from "@/lib/dev/db-errors";
 
 /**
  * One worker tick. Triggered by the warehouse PC agent (adaptively while the
@@ -118,14 +121,14 @@ async function tickShop(shopId: string, deadline: number): Promise<ShopTickResul
     } catch (err) {
       // Money problems must not hide return updates; report and continue.
       result.error = `Money sync: ${err instanceof Error ? err.message : String(err)}`;
-      console.error(`[tick] ${shop.shopName} money`, err);
+      tickError(`${shop.shopName} money`, err);
     }
     try {
       // Read-only: fees and payout of completed orders, for Profit.
       result.financeSaved = (await syncOrderFinance(fresh, token, sliceDeadline(deadline, 0.4))).saved;
     } catch (err) {
       result.error = `Profit sync: ${err instanceof Error ? err.message : String(err)}`;
-      console.error(`[tick] ${shop.shopName} finance`, err);
+      tickError(`${shop.shopName} finance`, err);
     }
     let stockImportFinished = true;
     try {
@@ -140,13 +143,13 @@ async function tickShop(shopId: string, deadline: number): Promise<ShopTickResul
       }
     } catch (err) {
       result.error = `Stock import: ${err instanceof Error ? err.message : String(err)}`;
-      console.error(`[tick] ${shop.shopName} stock import`, err);
+      tickError(`${shop.shopName} stock import`, err);
     }
     result.caughtUp = orders.caughtUp && returns.caughtUp && stockImportFinished;
     await prisma.shopConnection.update({ where: { id: shop.id }, data: { lastSyncedAt: new Date() } });
   } catch (err) {
     result.error = err instanceof Error ? err.message : String(err);
-    console.error(`[tick] ${shop.shopName}`, err);
+    tickError(`${shop.shopName}`, err);
   }
   return result;
 }
@@ -190,7 +193,7 @@ async function tickOnce(
       );
     }
   } catch (err) {
-    console.error("[tick] webhook inbox", err);
+    tickError("webhook inbox", err);
   }
 
   // Run shops in parallel so Shopee and TikTok never block each other.
@@ -221,21 +224,21 @@ async function tickOnce(
     }
   } catch (err) {
     stock.error = err instanceof Error ? err.message : String(err);
-    console.error("[tick] stock", err);
+    tickError("stock", err);
   }
 
   // Requeue stale claimed print jobs here instead of on every idle agent poll.
   try {
     await requeueStalePrintJobs();
   } catch (err) {
-    console.error("[tick] requeue print jobs", err);
+    tickError("requeue print jobs", err);
   }
 
   // Waves: arrange shipment, tracking numbers, labels. Only for shops whose write switch is on.
   try {
     await maybeStartScheduledWave();
   } catch (err) {
-    console.error("[tick] scheduled wave", err);
+    tickError("scheduled wave", err);
   }
 
   try {
@@ -248,7 +251,7 @@ async function tickOnce(
       await finishDoneWaves();
     });
   } catch (err) {
-    console.error("[tick] waves", err);
+    tickError("waves", err);
   }
 
   // Owner-facing messages come before the optional steps, so a long tick
@@ -256,13 +259,13 @@ async function tickOnce(
   try {
     await sendDailyBriefIfDue();
   } catch (err) {
-    console.error("[tick] daily brief", err);
+    tickError("daily brief", err);
   }
 
   try {
     await withSpan("worker.tick.alerts", () => runProactiveAlerts());
   } catch (err) {
-    console.error("[tick] proactive alerts", err);
+    tickError("proactive alerts", err);
   }
 
   // Keep the ledger's to-ship list matching Seller Center (at most every 5 min).
@@ -271,20 +274,20 @@ async function tickOnce(
       await withSpan("worker.tick.readyReconcile", () => reconcileReadyOrders(sliceDeadline(deadline, 0.6)));
     }
   } catch (err) {
-    console.error("[tick] ready reconcile", err);
+    tickError("ready reconcile", err);
   }
 
   try {
     // Monthly profit totals (kept for good), at most every 30 minutes.
     if (hasTime(deadline, 15_000)) await withSpan("worker.tick.financeRollup", () => maybeRollUpFinance());
   } catch (err) {
-    console.error("[tick] finance rollup", err);
+    tickError("finance rollup", err);
   }
 
   try {
     if (hasTime(deadline, 10_000)) await maybeAutoBumpShopee();
   } catch (err) {
-    console.error("[tick] shopee bump", err);
+    tickError("shopee bump", err);
   }
 
   try {
@@ -293,7 +296,7 @@ async function tickOnce(
       await withSpan("worker.tick.chats", () => syncAllTikTokChats(sliceDeadline(deadline, 0.3)));
     }
   } catch (err) {
-    console.error("[tick] chats", err);
+    tickError("chats", err);
   }
 
   try {
@@ -303,14 +306,14 @@ async function tickOnce(
       );
     }
   } catch (err) {
-    console.error("[tick] chat auto-reply", err);
+    tickError("chat auto-reply", err);
   }
 
   try {
     // Sends any grouped "new buyer messages" alert held back by the 2-minute limit.
     if (hasTime(deadline, 5_000)) await notifyNewBuyerMessage({ count: 0 });
   } catch (err) {
-    console.error("[tick] chat alerts", err);
+    tickError("chat alerts", err);
   }
 
   // The daily prune marks itself done only after it runs, so skipping it here
@@ -326,11 +329,61 @@ async function tickOnce(
   return { shops: results, pruned: pruneRes.orders, stock, nextTickMs };
 }
 
+/** Developer kill switch (AppSettings.workerPaused). False until the migration adding it is applied. */
+async function isWorkerPaused(): Promise<boolean> {
+  try {
+    const row = await prisma.appSettings.findUnique({ where: { id: "default" }, select: { workerPaused: true } });
+    return Boolean(row?.workerPaused);
+  } catch (err) {
+    // A switch we can't read must never stop syncing.
+    if (!isMissingTableError(err)) console.error("[tick] could not read worker pause switch", err);
+    return false;
+  }
+}
+
 export async function runTick(
   reason: TickReason,
   opts?: { platform?: Platform }
 ): Promise<TickResult> {
   const started = Date.now();
+  if (await isWorkerPaused()) {
+    return {
+      ran: false,
+      reason,
+      shops: [],
+      stock: { shipped: 0, pushed: 0, failed: 0 },
+      pruned: 0,
+      nextTickMs: 180_000,
+      ms: Date.now() - started,
+    };
+  }
+  const recorder = new TickRecorder();
+  let failure: string | undefined;
+  let result: TickResult | undefined;
+  try {
+    result = await withTickRecorder(recorder, () => runTickInner(reason, started, opts));
+    return result;
+  } catch (err) {
+    failure = err instanceof Error ? err.message : String(err);
+    tickError("run", err);
+    throw err;
+  } finally {
+    await flushTickRecorder(recorder, {
+      trigger: reason,
+      startedAt: new Date(started),
+      durationMs: Date.now() - started,
+      ran: result?.ran ?? false,
+      shopsTicked: result?.shops.length ?? 0,
+      error: failure,
+    });
+  }
+}
+
+async function runTickInner(
+  reason: TickReason,
+  started: number,
+  opts?: { platform?: Platform }
+): Promise<TickResult> {
   const deadline = started + TICK_BUDGET_MS;
   // Only the first pass honours the platform filter. A rerun was asked for by
   // some other webhook/agent call, which may be for the other shop, so later

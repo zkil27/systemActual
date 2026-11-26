@@ -35,6 +35,13 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/api/version-admin")).toBe(false);
   });
 
+  it("lets staff screens report browser errors, but keeps the Developer section private", () => {
+    expect(isPublicPath("/api/client-errors")).toBe(true);
+    expect(isPublicPath("/api/client-errors/x")).toBe(false);
+    expect(isPublicPath("/dev")).toBe(false);
+    expect(isPublicPath("/api/dev/overview")).toBe(false);
+  });
+
   it("keeps the owner's printer controls private", () => {
     expect(isPublicPath("/api/printer")).toBe(false);
   });

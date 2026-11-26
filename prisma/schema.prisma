@@ -450,6 +450,12 @@ model AppSettings {
   lastWaveSlot              String?
   /// Print our own one-sticker waybill (shop's courier section + our item list) instead of the shop's label as-is.
   customWaybillEnabled      Boolean   @default(false)
+  /// Developer kill switch: the background worker skips every tick while on. Shown in Settings › Health.
+  workerPaused              Boolean   @default(false)
+  /// Banner text shown on every screen while set (maintenance notice). Null = off.
+  maintenanceMessage        String?
+  /// Banner hides itself after this time. Null = until turned off.
+  maintenanceUntil          DateTime?
   updatedAt                 DateTime  @updatedAt
 }
 
@@ -1188,4 +1194,62 @@ model PurchaseOrderLine {
 
   @@unique([purchaseOrderId, garmentVariantId])
   @@index([garmentVariantId])
+}
+
+/// Developer error log: one row per distinct error (grouped by fingerprint), repeats bump `count`.
+/// Vercel Hobby keeps runtime logs 1 hour, so this is the only lasting record. Kept 30 days after lastAt.
+model AppError {
+  id            String   @id @default(cuid())
+  fingerprint   String   @unique
+  /// "server" | "client" | "worker"
+  source        String
+  route         String?
+  message       String
+  stack         String?
+  buildId       String?
+  count         Int      @default(1)
+  /// "OWNER" | "STAFF" | null when unknown.
+  actorType     String?
+  lastUserAgent String?
+  firstAt       DateTime @default(now())
+  lastAt        DateTime @default(now())
+
+  @@index([lastAt])
+}
+
+/// One worker tick: how long each step took. Developer screen only. Kept 3 days.
+model WorkerRun {
+  id          String   @id @default(cuid())
+  /// TickReason: agent | webhook | schedule | manual
+  trigger     String
+  startedAt   DateTime @default(now())
+  durationMs  Int
+  /// False when the tick was skipped (lock held / paused) or a step threw.
+  ran         Boolean  @default(true)
+  ok          Boolean  @default(true)
+  error       String?
+  /// [{ name, ms, error? }] in the order the steps finished.
+  steps       Json
+  shopsTicked Int      @default(0)
+
+  @@index([startedAt])
+}
+
+/// Marketplace API calls per hour, per platform, shop and path. Flushed once per tick. Kept 30 days.
+model ApiCallStat {
+  id        String   @id @default(cuid())
+  platform  String
+  /// Shopee shop_id or TikTok shop_cipher from the URL; "-" when the call isn't shop-scoped.
+  shopKey   String
+  pathKey   String
+  /// Start of the UTC hour.
+  hour      DateTime
+  calls     Int      @default(0)
+  errors    Int      @default(0)
+  throttled Int      @default(0)
+  totalMs   Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([platform, shopKey, pathKey, hour])
+  @@index([hour])
 }

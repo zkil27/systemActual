@@ -26,6 +26,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon\\.ico$|manifest\\.webmanifest$|icon$|apple-icon$|icons/|uploads/|login(?:/|$)|scan(?:/|$)|stock-in(?:/|$)|api/auth/|api/scan/|api/stock-in(?:/|$)|api/handover(?:/|$)|api/proofs/|api/webhooks/|api/telegram/|api/oauth/|api/worker/|api/agent/|api/version$).*)",
+    "/((?!_next/static|_next/image|favicon\\.ico$|manifest\\.webmanifest$|icon$|apple-icon$|icons/|uploads/|login(?:/|$)|scan(?:/|$)|stock-in(?:/|$)|api/auth/|api/scan/|api/stock-in(?:/|$)|api/handover(?:/|$)|api/proofs/|api/webhooks/|api/telegram/|api/oauth/|api/worker/|api/agent/|api/version$|api/client-errors$).*)",
   ],
 };

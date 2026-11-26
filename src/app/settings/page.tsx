@@ -340,6 +340,38 @@ function HealthPanel() {
   );
 }
 
+/** Only shown to owner accounts on the DEVELOPER_EMAILS allowlist. */
+function DeveloperRow() {
+  const [developer, setDeveloper] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/dev/access", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b: { developer?: boolean } | null) => {
+        if (alive) setDeveloper(Boolean(b?.developer));
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+  if (!developer) return null;
+  return (
+    <section>
+      <GroupLabel>Developer</GroupLabel>
+      <Group>
+        <Link href="/dev" className={rowLinkClass}>
+          <span className="flex min-w-0 flex-col">
+            <span className="text-[17px] text-ink">Developer tools</span>
+            <span className="truncate text-[13px] text-ink-3">Database, errors, jobs and controls</span>
+          </span>
+          <ChevronRight className="chevron-nudge h-5 w-5 shrink-0 text-ink-3" />
+        </Link>
+      </Group>
+    </section>
+  );
+}
+
 /** "Nov 18", or "Nov 18, 2025" when the date isn't in this year. */
 function sinceLabel(ymd: string): string {
   const label = manilaDayLabel(ymd);
@@ -1017,6 +1049,8 @@ export default function SettingsPage() {
               <GroupLabel>Health</GroupLabel>
               <HealthPanel />
             </section>
+
+            <DeveloperRow />
           </div>
 
           <div className="space-y-5">

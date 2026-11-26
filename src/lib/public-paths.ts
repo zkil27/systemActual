@@ -31,6 +31,8 @@ const PUBLIC_EXACT = new Set([
   "/api/version",
   // Warehouse handover manifest: checked against getScannerSession() in-route.
   "/api/handover",
+  // Browser error reports from owner and staff screens: the route checks for either session.
+  "/api/client-errors",
 ]);
 
 export function isPublicPath(pathname: string): boolean {

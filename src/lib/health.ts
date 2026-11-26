@@ -1,6 +1,7 @@
 import { PrintJobStatus, WaveStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { isOnline } from "@/lib/print/device";
+import { getOpsSwitches } from "@/lib/maintenance";
 
 export type HealthLevel = "ok" | "warn" | "bad";
 
@@ -40,6 +41,10 @@ export interface HealthInput {
   queuedJobs: number;
   failedJobs24h: number;
   runningWave: boolean;
+  /** Developer kill switch: background sync is stopped on purpose. */
+  workerPaused?: boolean;
+  /** Maintenance banner text while it's showing. */
+  maintenanceMessage?: string | null;
 }
 
 const MIN = 60_000;
@@ -82,12 +87,21 @@ export function assessHealth(i: HealthInput): HealthSummary {
   }
 
   const workerAge = i.workerRunning ? 0 : age(i.workerLockedUntil);
-  checks.push({
-    id: "worker",
-    label: "Background sync",
-    level: workerAge > 30 * MIN ? "bad" : workerAge > 10 * MIN ? "warn" : "ok",
-    detail: i.workerRunning ? "Running now" : `Last ran ${ago(i.workerLockedUntil, now)}`,
-  });
+  if (i.workerPaused) {
+    checks.push({
+      id: "worker",
+      label: "Background sync",
+      level: "bad",
+      detail: "Paused by the developer. Orders, returns and stock aren't syncing.",
+    });
+  } else {
+    checks.push({
+      id: "worker",
+      label: "Background sync",
+      level: workerAge > 30 * MIN ? "bad" : workerAge > 10 * MIN ? "warn" : "ok",
+      detail: i.workerRunning ? "Running now" : `Last ran ${ago(i.workerLockedUntil, now)}`,
+    });
+  }
 
   if (!i.printer) {
     checks.push({ id: "printer", label: "Printer PC", level: "warn", detail: "Not set up" });
@@ -122,6 +136,10 @@ export function assessHealth(i: HealthInput): HealthSummary {
     });
   }
 
+  if (i.maintenanceMessage) {
+    checks.push({ id: "maintenance", label: "Maintenance", level: "warn", detail: i.maintenanceMessage });
+  }
+
   checks.push({
     id: "print-jobs",
     label: "Print jobs",
@@ -139,7 +157,7 @@ export function assessHealth(i: HealthInput): HealthSummary {
 
 export async function getHealthSummary(now: Date = new Date()): Promise<HealthSummary> {
   const dayAgo = new Date(now.getTime() - 24 * 3600_000);
-  const [shops, lock, printer, queuedJobs, failedJobs24h, runningWave] = await Promise.all([
+  const [shops, lock, printer, queuedJobs, failedJobs24h, runningWave, switches] = await Promise.all([
     prisma.shopConnection.findMany({
       where: { isDemo: false },
       select: { platform: true, shopName: true, accessToken: true, lastSyncedAt: true, tokenError: true, tokenErrorAt: true },
@@ -150,6 +168,7 @@ export async function getHealthSummary(now: Date = new Date()): Promise<HealthSu
     prisma.printJob.count({ where: { status: { in: [PrintJobStatus.QUEUED, PrintJobStatus.PRINTING] } } }),
     prisma.printJob.count({ where: { status: PrintJobStatus.FAILED, createdAt: { gte: dayAgo } } }),
     prisma.wave.count({ where: { status: WaveStatus.RUNNING } }),
+    getOpsSwitches(now),
   ]);
   return assessHealth({
     now,
@@ -175,5 +194,7 @@ export async function getHealthSummary(now: Date = new Date()): Promise<HealthSu
     queuedJobs,
     failedJobs24h,
     runningWave: runningWave > 0,
+    workerPaused: switches.workerPaused,
+    maintenanceMessage: switches.maintenance?.message ?? null,
   });
 }

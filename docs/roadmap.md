@@ -4,7 +4,7 @@ Shared plan for every agent and developer working in this repo. Read it before
 planning or building a feature. When you finish part of a phase, update the
 status table and that phase's "Open" list in the same change.
 
-Last updated: 2026-11-26.
+Last updated: 2026-11-27.
 
 ## Status
 
@@ -15,6 +15,7 @@ Last updated: 2026-11-26.
 | 3 | Restock and suppliers | Done on dev (not on main yet) |
 | 4 | Chats on both shops, safe auto-replies | Done on dev (Shopee chats coming soon) |
 | 5 | Listings and prices in one place | Done on dev (not on main yet) |
+| Dev tools | Developer section (`/dev`), developer only | Done on dev (not on main yet) |
 | Ongoing | Maintainability | Backlog below |
 
 Suggested order: 3, 4, 5. Phase 5 is last because it writes to the live listings.
@@ -156,6 +157,48 @@ Open:
 - Apply `prisma/migrations/20261126060000_phase5_listings_and_prices/migration.sql` (alongside Phases 3–4 migrations) to Supabase Postgres.
 - Optional future enhancement: searchable Shopee/TikTok category & attribute pickers instead of entering a destination category ID manually.
 
+## Developer tools: `/dev` (done on dev)
+
+Problem: Vercel Hobby keeps runtime logs for 1 hour and Supabase Free for 1 day, nothing measured the database against the 500 MB quota, and there was no way to see slow worker steps, failed webhooks or throttling without reading code.
+
+Who sees it: only owner accounts whose email is in `DEVELOPER_EMAILS` (`src/lib/dev/access.ts`, re-checked against the database on every request). Everyone else gets a 404, and the Settings row ("Developer tools") is hidden. Don't list the shop owner's account.
+
+What exists:
+- **Overview:** traffic-light cards (`src/lib/dev/overview.ts`) for database size, new error kinds, last tick, webhook inbox, backup age, pending migrations, shop tokens, 429s and maintenance.
+- **Database** (`src/lib/dev/db-health.ts`, fixed read-only SQL only):
+  - Database size against 500 MB, and data + WAL against the 2 GB disk.
+  - Per-table size, rows, dead rows, autovacuum and retention rule. The rules live in `src/lib/dev/retention-map.ts`, and a test fails when a model isn't listed.
+  - Cache hit ratios, unused indexes, foreign keys without an index, and connections.
+  - Long-running queries, plus the top `pg_stat_statements` with a reset.
+  - A check for tables Supabase's Data API (anon/authenticated) can read with RLS off.
+- **Errors:** an `AppError` table, grouped by fingerprint (`src/lib/dev/errors.ts`). It's fed by:
+  - Next's `onRequestError` (`src/instrumentation.ts`).
+  - Worker step failures (`tickError` in `src/lib/dev/tick-recorder.ts`).
+  - Browser errors (`<ClientErrorReporter />`, `src/app/error.tsx`, `src/app/global-error.tsx` → `POST /api/client-errors`).
+- **Jobs:**
+  - A `WorkerRun` per tick, with step timings from `withSpan`.
+  - `ApiCallStat` counts per hour, platform, shop and endpoint from `fetchWithRetry`. They're collected in memory (`src/lib/dev/tick-context.ts`) and written once per tick.
+  - Failed or stuck webhook events with Retry, shop token expiry with "Refresh token", failed print jobs, and AI usage against daily caps.
+- **Controls** (all audited as `dev.*`):
+  - Run a tick, the worker pause switch (`AppSettings.workerPaused`), and the maintenance banner (`maintenanceMessage`/`maintenanceUntil`, served on `/api/version`).
+  - Test errors, build info, and migrations in this build vs `_prisma_migrations` (`EXPECTED_MIGRATIONS` in `next.config.ts`).
+  - Env var names set or missing, and backup details.
+- **Owner stays in control:** a paused worker shows as "Paused by the developer" and maintenance shows as a warning in Settings › Health.
+- **Retention:** `AppError` is kept 30 days after it was last seen, `WorkerRun` 3 days and `ApiCallStat` 30 days, all in `pruneDailyData()`.
+
+Open:
+- Apply `prisma/migrations/20261127010000_developer_tools/migration.sql` to Supabase (with the Phase 3–5 migrations), and set `DEVELOPER_EMAILS` on Vercel. Until then, `/dev` 404s, and the tabs show "Migration not applied yet" where tables are missing.
+- Errors that a route catches itself and returns as a 500 aren't recorded. Only uncaught ones are. Call `recordError()` in catch blocks that matter.
+- API call counts only cover worker ticks, not owner button presses.
+- Later (all $0):
+  - `index_advisor` suggestions next to slow queries.
+  - A GitHub Actions `pg_dump` off-site backup, since today's backup needs the warehouse PC on.
+  - Web vitals (75th percentile per route) from staff phones.
+  - A staging project on the second free Supabase slot, with seed data.
+  - A read-only "view as staff" preview.
+  - Vercel usage numbers via its API.
+- Check: `vercel.json` schedules `/api/worker/tick` every 15 minutes, but Hobby only allows daily cron. Confirm which is actually running.
+
 ## Ongoing: maintainability backlog
 
 Ranked by how much each one helps future phases.
@@ -189,4 +232,4 @@ Ranked by how much each one helps future phases.
 
 - **Vercel Pro** (about $20 a month): commercial use is allowed, functions can run longer, and scheduled jobs can run every minute.
 - **A paid Postgres plan** with point-in-time restore. Today the PC's nightly `pg_dump` is the only backup.
-- **An error tracker** (Sentry's free tier first). There's no error tracking now; logs are `console.*` only.
+- **An error tracker** (Sentry's free tier first). Developer › Errors (`AppError`) now keeps grouped errors for 30 days for free; Sentry would add alerts, source maps and breadcrumbs.

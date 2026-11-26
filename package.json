@@ -18,6 +18,7 @@
     "ai:health": "tsx --env-file=.env scripts/ai-health.ts",
     "ai:eval": "tsx --env-file=.env scripts/ai-eval.ts",
     "db:seed": "tsx prisma/seed.ts",
+    "owner:add": "tsx --env-file=.env scripts/add-owner.ts",
     "db:local": "prisma dev"
   },
   "dependencies": {

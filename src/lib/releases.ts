@@ -20,6 +20,16 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    id: 12,
+    date: "2026-11-27",
+    title: "Clearer problem screens",
+    changes: [
+      "If a screen breaks, you now see a Try again button instead of a blank page.",
+      "A notice bar appears at the top of every screen when the app is being updated.",
+      "Settings › Health now says when background syncing has been paused.",
+    ],
+  },
+  {
     id: 11,
     date: "2026-11-26",
     title: "Easier one-handed phone layout",

@@ -3,6 +3,8 @@ import { Public_Sans } from "next/font/google";
 import { AmbientField } from "@/components/AmbientField";
 import { ThemeSync } from "@/components/ThemeSync";
 import { UpdatePrompt } from "@/components/UpdatePrompt";
+import { ClientErrorReporter } from "@/components/ClientErrorReporter";
+import { MaintenanceBanner } from "@/components/MaintenanceBanner";
 import { THEME_INIT_SCRIPT } from "@/lib/ui/theme";
 import "./globals.css";
 
@@ -51,7 +53,9 @@ export default function RootLayout({
       </head>
       <body className="antialiased">
         <ThemeSync />
+        <ClientErrorReporter />
         <AmbientField />
+        <MaintenanceBanner />
         {children}
         <UpdatePrompt />
       </body>

@@ -1,3 +1,5 @@
+import { noteApiCall } from "@/lib/dev/tick-context";
+
 export class MarketplaceHttpError extends Error {
   readonly status: number;
   readonly retryAfterMs: number | null;
@@ -96,9 +98,11 @@ export async function fetchWithRetry(
 
   for (let attempt = 0; ; attempt++) {
     let res: Response;
+    const callStarted = Date.now();
     try {
       res = await fetchFn(url, init);
     } catch (err) {
+      noteApiCall(url, null, Date.now() - callStarted);
       if (attempt < maxRetries && method === "GET" && isRetryableNetworkError(err)) {
         await sleep(Math.min(4_000, baseDelayMs * 2 ** attempt));
         continue;
@@ -107,6 +111,8 @@ export async function fetchWithRetry(
     }
 
     const status = typeof res.status === "number" ? res.status : res.ok ? 200 : 500;
+    // Counted per attempt (inside worker ticks only) for the Developer screen's API stats.
+    noteApiCall(url, status, Date.now() - callStarted);
     if (attempt < maxRetries) {
       if (status === 429) {
         const retryAfterMs = parseRetryAfterMs(res.headers?.get?.("retry-after"));

@@ -15,6 +15,7 @@ import {
   unseenReleases,
   type UpdateKind,
 } from "@/lib/update-check";
+import { VERSION_EVENT } from "@/lib/ops-notice";
 
 const CLIENT = {
   buildId: process.env.NEXT_PUBLIC_BUILD_ID || DEV_BUILD_ID,
@@ -102,7 +103,10 @@ export function UpdatePrompt() {
       try {
         const res = await fetch("/api/version", { cache: "no-store" });
         if (!res.ok) return;
-        const server = parseVersionResponse(await res.json());
+        const body: unknown = await res.json();
+        // Shares the poll with <MaintenanceBanner /> so it needs no timer of its own.
+        window.dispatchEvent(new CustomEvent(VERSION_EVENT, { detail: body }));
+        const server = parseVersionResponse(body);
         if (!server) return;
         const next = decideUpdate(CLIENT, server);
         if (next === "none") return;
