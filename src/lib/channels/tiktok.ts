@@ -79,4 +79,67 @@ export const tiktokConnector: ChannelConnector = {
     }
     return result;
   },
+
+  async pushListingPrices(shop, token, rows) {
+    const result: StockPushResult = { ok: [], failed: [] };
+    if (!shop.shopCipher) {
+      for (const r of rows) {
+        result.failed.push({ id: r.listingVariantId, error: "Reconnect TikTok (missing shop cipher)." });
+      }
+      return result;
+    }
+    try {
+      await tiktokRequest({
+        method: "POST",
+        path: `/product/202309/products/${encodeURIComponent(rows[0].listingId)}/prices/update`,
+        accessToken: token,
+        shopCipher: shop.shopCipher,
+        body: {
+          skus: rows.map((r) => ({
+            id: r.variationId,
+            price: {
+              amount: r.pricePhp.toFixed(2),
+              currency: r.currency ?? "PHP",
+            },
+          })),
+        },
+      });
+      result.ok.push(...rows.map((r) => r.listingVariantId));
+    } catch (err) {
+      for (const r of rows) {
+        result.failed.push({ id: r.listingVariantId, error: (err as Error).message });
+      }
+    }
+    return result;
+  },
+
+  async createDraftListing(shop, token, draft) {
+    if (!shop.shopCipher) {
+      throw new Error("Reconnect TikTok (missing shop cipher).");
+    }
+    if (!draft.categoryId.trim()) {
+      throw new Error("Enter a TikTok category ID before creating a draft listing.");
+    }
+    const data = await tiktokRequest({
+      method: "POST",
+      path: "/product/202309/products",
+      accessToken: token,
+      shopCipher: shop.shopCipher,
+      body: {
+        save_mode: "AS_DRAFT",
+        title: draft.title.slice(0, 255),
+        description: draft.description || draft.title,
+        category_id: draft.categoryId.trim(),
+        skus: draft.variants.map((v) => ({
+          seller_sku: v.label.slice(0, 50),
+          price: { amount: v.pricePhp.toFixed(2), currency: "PHP" },
+          inventory: [{ quantity: Math.max(0, Math.round(v.stock)) }],
+        })),
+      },
+    });
+    return {
+      externalListingId: String(data?.product_id ?? ""),
+      status: "DRAFT",
+    };
+  },
 };

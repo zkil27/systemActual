@@ -123,6 +123,7 @@ model ShopConnection {
   lastSyncedAt       DateTime?
   orders             Order[]
   listings           ListingVariant[]
+  channelProducts    ChannelProduct[]
   isDemo             Boolean             @default(false)
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
@@ -561,9 +562,17 @@ model ListingVariant {
   pushedAt         DateTime?
   pushError        String?
   pushFailures     Int             @default(0)
+  /// Phase 5: parent ChannelProduct and price push tracking.
+  channelProductId String?
+  channelProduct   ChannelProduct? @relation(fields: [channelProductId], references: [id], onDelete: SetNull)
+  pricePhp         Decimal?        @db.Decimal(10, 2)
+  pricePushedPhp   Decimal?        @db.Decimal(10, 2)
+  pricePushedAt    DateTime?
+  pricePushError   String?
 
   @@unique([shopConnectionId, listingId, variationId])
   @@index([garmentVariantId])
+  @@index([channelProductId])
 }
 
 /// One real item across both shops, e.g. "Ribbed Top".
@@ -572,6 +581,7 @@ model Garment {
   name              String
   imageUrl          String?
   variants          GarmentVariant[]
+  priceChanges      PriceChange[]
   /// Hidden from the Items list and stock alerts (discontinued). Stock keeps syncing.
   archivedAt        DateTime?
   /// Optional overrides; null = use the shop-wide default from Settings.
@@ -600,6 +610,7 @@ model GarmentVariant {
   onShelfCount       Int                 @default(0)
   movements          StockMovement[]
   purchaseOrderLines PurchaseOrderLine[]
+  priceChanges       PriceChange[]
   createdAt          DateTime            @default(now())
 
   @@index([garmentId])
@@ -970,6 +981,7 @@ model ActionRequest {
   decidedAt      DateTime?
   resultJson     Json?
   error          String?
+  priceChanges   PriceChange[]
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
@@ -977,6 +989,64 @@ model ActionRequest {
   @@index([kind, status])
   @@index([conversationId, status])
   @@index([expiresAt])
+}
+
+enum PriceChangeStatus {
+  PENDING
+  PUSHED
+  PARTIAL
+  FAILED
+  REJECTED
+}
+
+/// Parent shop listing metadata (title, description, category, images, price range).
+model ChannelProduct {
+  id               String           @id @default(cuid())
+  shopConnectionId String
+  shopConnection   ShopConnection   @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
+  platform         Platform
+  listingId        String
+  title            String
+  description      String?          @db.Text
+  categoryId       String?
+  categoryName     String?
+  status           String?
+  imageUrls        Json             @default("[]")
+  attributesJson   Json?
+  currency         String           @default("PHP")
+  minPricePhp      Decimal?         @db.Decimal(10, 2)
+  maxPricePhp      Decimal?         @db.Decimal(10, 2)
+  syncedAt         DateTime?
+  variants         ListingVariant[]
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@unique([shopConnectionId, listingId])
+  @@index([platform, updatedAt])
+}
+
+/// Audit and per-shop execution log of owner-approved price updates.
+model PriceChange {
+  id               String            @id @default(cuid())
+  garmentId        String
+  garment          Garment           @relation(fields: [garmentId], references: [id], onDelete: Cascade)
+  garmentVariantId String?
+  garmentVariant   GarmentVariant?   @relation(fields: [garmentVariantId], references: [id], onDelete: SetNull)
+  actionRequestId  String?
+  actionRequest    ActionRequest?    @relation(fields: [actionRequestId], references: [id], onDelete: SetNull)
+  oldPricePhp      Decimal?          @db.Decimal(10, 2)
+  newPricePhp      Decimal           @db.Decimal(10, 2)
+  status           PriceChangeStatus @default(PENDING)
+  resultsJson      Json              @default("[]")
+  createdBy        String
+  decidedBy        String?
+  pushedAt         DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([garmentId, createdAt])
+  @@index([actionRequestId])
+  @@index([status, createdAt])
 }
 
 /// Shop rules the assistant may quote (COD, shipping times, returns, sizes...).

@@ -1,4 +1,5 @@
 import type { EventHandler } from "./inbox";
+import { processPendingChatReplies } from "@/lib/ai/auto-reply";
 import { syncSingleOrder } from "@/lib/ledger/sync";
 import { notifyCancelledPrintedOrder } from "@/lib/shipping/outbound";
 import { syncAllTikTokChats } from "@/lib/chats/tiktok-sync";
@@ -11,6 +12,9 @@ import { syncAllTikTokChats } from "@/lib/chats/tiktok-sync";
 export const handleMarketplaceEvent: EventHandler = async (platform, f) => {
   if (f.isChat) {
     await syncAllTikTokChats(Date.now() + 50_000, 5_000);
+    await processPendingChatReplies(Date.now() + 40_000).catch((err) =>
+      console.error("[inbox] chat auto-reply", err)
+    );
     return;
   }
   if (f.isCancel && f.orderSn) {

@@ -79,4 +79,56 @@ export const shopeeConnector: ChannelConnector = {
     }
     return result;
   },
+
+  async pushListingPrices(shop, token, rows) {
+    const result: StockPushResult = { ok: [], failed: [] };
+    for (let i = 0; i < rows.length; i += SHOPEE_MAX_MODELS) {
+      const chunk = rows.slice(i, i + SHOPEE_MAX_MODELS);
+      try {
+        const resp = await shopeePost("/api/v2/product/update_price", shop.shopId, token, {
+          item_id: Number(chunk[0].listingId),
+          price_list: chunk.map((r) => ({
+            model_id: Number(r.variationId),
+            original_price: r.pricePhp,
+          })),
+        });
+        const failures = new Map<string, string>(
+          ((resp?.failure_list ?? []) as Array<{ model_id?: number; failed_reason?: string }>).map((f) => [
+            String(f.model_id ?? 0),
+            String(f.failed_reason ?? "Rejected by Shopee"),
+          ])
+        );
+        for (const r of chunk) {
+          const reason = failures.get(r.variationId);
+          if (reason) result.failed.push({ id: r.listingVariantId, error: reason });
+          else result.ok.push(r.listingVariantId);
+        }
+      } catch (err) {
+        for (const r of chunk) {
+          result.failed.push({ id: r.listingVariantId, error: (err as Error).message });
+        }
+      }
+    }
+    return result;
+  },
+
+  async createDraftListing(shop, token, draft) {
+    const catId = Number(draft.categoryId);
+    if (!draft.categoryId || !Number.isFinite(catId) || catId <= 0) {
+      throw new Error("Enter a numeric Shopee category ID before creating a draft listing.");
+    }
+    const resp = await shopeePost("/api/v2/product/add_item", shop.shopId, token, {
+      item_name: draft.title.slice(0, 120),
+      description: (draft.description || draft.title).slice(0, 3000),
+      category_id: catId,
+      original_price: draft.pricePhp,
+      normal_stock: Math.max(0, Math.round(draft.stock)),
+      item_status: "UNLIST",
+      weight: 0.3,
+    });
+    return {
+      externalListingId: String(resp?.item_id ?? ""),
+      status: "UNLIST",
+    };
+  },
 };

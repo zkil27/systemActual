@@ -1,9 +1,16 @@
-import { Platform, type ShopConnection } from "@prisma/client";
+import { Platform, Prisma, type ShopConnection } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { shopeeGet } from "@/lib/connectors/shopee";
 import { tiktokRequest } from "@/lib/connectors/tiktok";
 import { autoLinkAndInitCatalog, ensureGarmentFor } from "./garments";
-import { mapShopeeItem, mapTikTokProduct, type ImportedListing } from "./import-map";
+import {
+  mapShopeeChannelProduct,
+  mapShopeeItem,
+  mapTikTokChannelProduct,
+  mapTikTokProduct,
+  type ImportedChannelProduct,
+  type ImportedListing,
+} from "./import-map";
 
 /**
  * Read-only starting-stock import. Lists every active listing on the shop and
@@ -15,9 +22,58 @@ export const IMPORT_RUNNING = "RUNNING";
 export const IMPORT_DONE = "DONE";
 export const CATALOG_REFRESH_MS = 6 * 3600_000;
 
-async function saveImported(conn: ShopConnection, rows: ImportedListing[]) {
+async function saveImported(
+  conn: ShopConnection,
+  rows: ImportedListing[],
+  productMeta?: ImportedChannelProduct
+) {
   const now = new Date();
+  let channelProductId: string | null = null;
+  if (productMeta) {
+    const prices = Object.values(productMeta.priceByVariation).filter((n) => n > 0);
+    const minPrice = prices.length ? Math.min(...prices) : null;
+    const maxPrice = prices.length ? Math.max(...prices) : null;
+    const cp = await prisma.channelProduct.upsert({
+      where: {
+        shopConnectionId_listingId: {
+          shopConnectionId: conn.id,
+          listingId: productMeta.listingId,
+        },
+      },
+      create: {
+        shopConnectionId: conn.id,
+        platform: conn.platform,
+        listingId: productMeta.listingId,
+        title: productMeta.title,
+        description: productMeta.description,
+        categoryId: productMeta.categoryId,
+        categoryName: productMeta.categoryName,
+        status: productMeta.status,
+        imageUrls: productMeta.imageUrls as Prisma.InputJsonValue,
+        currency: productMeta.currency,
+        minPricePhp: minPrice !== null ? new Prisma.Decimal(minPrice.toFixed(2)) : null,
+        maxPricePhp: maxPrice !== null ? new Prisma.Decimal(maxPrice.toFixed(2)) : null,
+        syncedAt: now,
+      },
+      update: {
+        title: productMeta.title,
+        description: productMeta.description,
+        categoryId: productMeta.categoryId,
+        categoryName: productMeta.categoryName,
+        status: productMeta.status,
+        imageUrls: productMeta.imageUrls as Prisma.InputJsonValue,
+        currency: productMeta.currency,
+        minPricePhp: minPrice !== null ? new Prisma.Decimal(minPrice.toFixed(2)) : null,
+        maxPricePhp: maxPrice !== null ? new Prisma.Decimal(maxPrice.toFixed(2)) : null,
+        syncedAt: now,
+      },
+      select: { id: true },
+    });
+    channelProductId = cp.id;
+  }
+
   for (const r of rows) {
+    const unitPrice = productMeta?.priceByVariation[r.variationId];
     const data = {
       name: r.name,
       variationName: r.variationName,
@@ -26,6 +82,8 @@ async function saveImported(conn: ShopConnection, rows: ImportedListing[]) {
       stockCheckedAt: now,
       lastSeenAt: now,
       ...(r.warehouseId ? { warehouseId: r.warehouseId } : {}),
+      ...(channelProductId ? { channelProductId } : {}),
+      ...(unitPrice !== undefined ? { pricePhp: new Prisma.Decimal(unitPrice.toFixed(2)) } : {}),
     };
     const lv = await prisma.listingVariant.upsert({
       where: {
@@ -58,7 +116,7 @@ async function shopeePage(conn: ShopConnection, token: string, offset: number, d
       const models = item.has_model
         ? await shopeeGet("/api/v2/product/get_model_list", conn.shopId, token, { item_id: String(item.item_id) })
         : null;
-      await saveImported(conn, mapShopeeItem(item, models));
+      await saveImported(conn, mapShopeeItem(item, models), mapShopeeChannelProduct(item, models));
     }
   }
   const done = !list?.has_next_page;
@@ -95,7 +153,7 @@ async function tiktokPage(conn: ShopConnection, token: string, pageToken: string
     });
     const warehouses = new Map(known.map((k) => [k.variationId, k.warehouseId!]));
     for (const product of details) {
-      await saveImported(conn, mapTikTokProduct(product, warehouses));
+      await saveImported(conn, mapTikTokProduct(product, warehouses), mapTikTokChannelProduct(product));
     }
   }
   const next = data?.next_page_token ? String(data.next_page_token) : null;

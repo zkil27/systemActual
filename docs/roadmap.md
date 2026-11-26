@@ -14,7 +14,7 @@ Last updated: 2026-11-26.
 | 2 | Profit per order | Done on `dev` (not on `main` yet) |
 | 3 | Restock and suppliers | Done on dev (not on main yet) |
 | 4 | Chats on both shops, safe auto-replies | Done on dev (Shopee chats coming soon) |
-| 5 | Listings and prices in one place | Planned |
+| 5 | Listings and prices in one place | Done on dev (not on main yet) |
 | Ongoing | Maintainability | Backlog below |
 
 Suggested order: 3, 4, 5. Phase 5 is last because it writes to the live listings.
@@ -142,28 +142,19 @@ Open:
 Data & retention:
 - `AiSettings` controls + `ActionRequest` (`PENDING` expires in 24h; decided/expired rows pruned after 60 days).
 
-## Phase 5: listings and prices in one place (planned)
+## Phase 5: listings and prices in one place (done on dev)
 
-Problem: prices and listings are still edited in each Seller Center separately. Product data is read-only in the app, apart from stock and Shopee Auto-Bump.
+Problem: prices and listings were only edited in each Seller Center separately. Product data was read-only in the app, apart from stock and Shopee Auto-Bump.
 
-Scope:
-- **One item, both shops:** change the price (and stock) of a `Garment` once, and the app proposes the update to each linked listing. Each change goes through the `ActionRequest` approval queue, then is pushed with per-shop results and a retry.
-- **Copy a listing:** copy a Shopee listing to TikTok, or the other way, as a draft. The owner reviews the title, photos, category and variants before it's created. Category and attribute mapping is the hard part.
-- **Price history:** who changed what, when, and what each shop accepted.
+What exists:
+- **Database schema & migration (`prisma/schema.prisma`, `prisma/migrations/20261126060000_phase5_listings_and_prices/migration.sql`):** added `ChannelProduct` (parent title, description, category, images, price range per shop listing), `PriceChange` & `PriceChangeStatus`, and `ListingVariant` price push tracking (`channelProductId`, `pricePhp`, `pricePushedPhp`, `pricePushedAt`, `pricePushError`).
+- **Read-only catalog import enhancement (`src/lib/catalog/import.ts`, `import-map.ts`):** populates `ChannelProduct` metadata and per-variation prices during normal shop imports without modifying existing stock sync contracts.
+- **Channel connector write actions (`src/lib/channels/shopee.ts`, `tiktok.ts`):** `pushListingPrices` and `createDraftListing` (`UNLIST` on Shopee, `AS_DRAFT` on TikTok).
+- **Listings & prices screen & Approval Queue execution (`src/app/listings/page.tsx`, `src/app/api/listings/route.ts`, `src/lib/listings/*`, `src/lib/approvals/service.ts`):** owner compares Shopee/TikTok prices side by side, proposes a price update or cross-shop draft copy through the `ActionRequest` Approval Queue (in `/approvals` or 1-tap Telegram), pushes strictly when `ShopConnection.writesEnabled` is enabled, logs `PriceChange` + `AuditLog` history, and supports retrying failed/skipped pushes.
 
-Data:
-- `ChannelProduct`: the parent listing per shop. `ListingVariant` gets a foreign key to it, so the listing name is no longer repeated per variant.
-- `PriceChange`: the variant or product, old and new price, the request, and the push result per shop.
-
-Files to start from:
-- `src/lib/connectors/shopee.ts` and `tiktok.ts`.
-- `src/lib/catalog/import.ts` (it already reads listings).
-- `src/lib/stock/push.ts` (the pattern for pushing to both shops with per-listing status).
-
-Risks:
-- This writes to the live shops: respect `ShopConnection.writesEnabled`, and preview before anything is sent.
-- TikTok product edits can trigger a new review.
-- Promotions and vouchers are out of scope.
+Open:
+- Apply `prisma/migrations/20261126060000_phase5_listings_and_prices/migration.sql` (alongside Phases 3–4 migrations) to Supabase Postgres.
+- Optional future enhancement: searchable Shopee/TikTok category & attribute pickers instead of entering a destination category ID manually.
 
 ## Ongoing: maintainability backlog
 

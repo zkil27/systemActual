@@ -9,8 +9,39 @@ export interface StockPushResult {
   failed: Array<{ id: string; error: string }>;
 }
 
+export interface PricePushCandidate {
+  listingVariantId: string;
+  platform: Platform;
+  shopConnectionId: string;
+  listingId: string;
+  variationId: string;
+  pricePhp: number;
+  currency?: string;
+}
+
+export type PricePushResult = StockPushResult;
+
+export interface ListingDraftInput {
+  title: string;
+  description: string;
+  categoryId: string;
+  pricePhp: number;
+  stock: number;
+  imageUrls: string[];
+  variants: Array<{
+    label: string;
+    pricePhp: number;
+    stock: number;
+  }>;
+}
+
+export interface ListingDraftResult {
+  externalListingId: string;
+  status: string;
+}
+
 /**
- * Unified marketplace channel boundary (orders, finance, stock push, tokens).
+ * Unified marketplace channel boundary (orders, finance, stock push, tokens, Phase 5 listings/prices).
  * Adding a future channel (e.g. Lazada or Shopify) implements this contract and
  * registers it in `src/lib/channels/registry.ts`.
  */
@@ -22,4 +53,6 @@ export interface ChannelConnector {
   fetchSingleOrder(shop: ShopConnection, token: string, orderSn: string): Promise<NormalizedOrder | null>;
   fetchOrderFinance(shop: ShopConnection, token: string, orderSn: string): Promise<FinanceFigures | null>;
   pushListingStock(shop: ShopConnection, token: string, rows: PushCandidate[]): Promise<StockPushResult>;
+  pushListingPrices(shop: ShopConnection, token: string, rows: PricePushCandidate[]): Promise<PricePushResult>;
+  createDraftListing(shop: ShopConnection, token: string, draft: ListingDraftInput): Promise<ListingDraftResult>;
 }

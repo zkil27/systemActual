@@ -14,6 +14,7 @@ import {
   Search,
   Settings2,
   Shirt,
+  Tag,
   TrendingUp,
   Truck,
   type LucideIcon,
@@ -82,6 +83,7 @@ const CHAT_UNREAD_POLL_MS = 30_000;
 const SIDEBAR_OPS: Tab[] = [
   { href: "/profit", label: "Profit", icon: TrendingUp, match: (p) => p.startsWith("/profit") },
   { href: "/items", label: "Items & stock", icon: Shirt, match: (p) => p.startsWith("/items") },
+  { href: "/listings", label: "Listings & prices", icon: Tag, match: (p) => p.startsWith("/listings") },
   { href: "/restock", label: "Restock & suppliers", icon: Truck, match: (p) => p.startsWith("/restock") },
   { href: "/approvals", label: "Approvals", icon: CheckCircle2, match: (p) => p.startsWith("/approvals") },
   { href: "/waves", label: "Waves & pick lists", icon: Printer, match: (p) => p.startsWith("/waves") },

@@ -220,6 +220,66 @@ export async function approveActionRequest(
   }
 
   const req = await prisma.actionRequest.findUniqueOrThrow({ where: { id } });
+
+  if (req.kind === "listing.price_update") {
+    try {
+      const { executeApprovedPriceChange } = await import("@/lib/listings/service");
+      const payload = asObj(req.payloadJson) as unknown as Parameters<
+        typeof executeApprovedPriceChange
+      >[1];
+      const exec = await executeApprovedPriceChange(id, payload, opts.actor);
+      const done = await prisma.actionRequest.update({
+        where: { id },
+        data: {
+          status:
+            exec.status === "FAILED"
+              ? ActionRequestStatus.FAILED
+              : ActionRequestStatus.DONE,
+          resultJson: exec as unknown as Prisma.InputJsonValue,
+          error:
+            exec.status === "FAILED"
+              ? "All shop price pushes failed or were skipped."
+              : null,
+        },
+      });
+      return exec.status === "FAILED"
+        ? { ok: false, error: done.error ?? "Price push failed." }
+        : { ok: true, request: toDto(done) };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Price update failed.";
+      await prisma.actionRequest.update({
+        where: { id },
+        data: { status: ActionRequestStatus.FAILED, error: message.slice(0, 300) },
+      });
+      return { ok: false, error: message };
+    }
+  }
+
+  if (req.kind === "listing.copy") {
+    try {
+      const { executeApprovedCopyListing } = await import("@/lib/listings/service");
+      const payload = asObj(req.payloadJson) as unknown as Parameters<
+        typeof executeApprovedCopyListing
+      >[1];
+      const exec = await executeApprovedCopyListing(id, payload, opts.actor);
+      const done = await prisma.actionRequest.update({
+        where: { id },
+        data: {
+          status: ActionRequestStatus.DONE,
+          resultJson: exec as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return { ok: true, request: toDto(done) };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Draft copy failed.";
+      await prisma.actionRequest.update({
+        where: { id },
+        data: { status: ActionRequestStatus.FAILED, error: message.slice(0, 300) },
+      });
+      return { ok: false, error: message };
+    }
+  }
+
   if (req.kind !== "chat.reply") {
     const failed = await prisma.actionRequest.update({
       where: { id },
@@ -250,9 +310,12 @@ export async function approveActionRequest(
   }
 
   try {
-    const sent = await sendChatMessage(payload.conversationId, `ar_${id}`, {
-      text: checked.text,
-    });
+    const sent = await sendChatMessage(
+      payload.conversationId,
+      `ar_${id}`,
+      { text: checked.text },
+      { pauseAi: false }
+    );
     if (sent.status !== "SENT") {
       throw new Error("TikTok couldn't deliver the reply right now.");
     }
@@ -338,6 +401,14 @@ export async function rejectActionRequest(
       .updateMany({
         where: { id: payload.draftId, status: ChatDraftStatus.PENDING },
         data: { status: ChatDraftStatus.DISMISSED },
+      })
+      .catch(() => {});
+  }
+  if (row.kind === "listing.price_update") {
+    await prisma.priceChange
+      .updateMany({
+        where: { actionRequestId: id },
+        data: { status: "REJECTED", decidedBy: opts.actor.name },
       })
       .catch(() => {});
   }

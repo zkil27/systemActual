@@ -354,7 +354,7 @@ export async function sendChatMessage(
   id: string,
   clientKey: string,
   content: ReplyContent,
-  opts: { isAutoReply?: boolean } = {}
+  opts: { isAutoReply?: boolean; pauseAi?: boolean } = {}
 ): Promise<ChatMessageView> {
   const [conv, ai] = await Promise.all([loadSourceConversation(id), getAiSettings()]);
   if (!conv) throw new ChatNotFoundError("Chat not found.");
@@ -374,10 +374,12 @@ export async function sendChatMessage(
   if (!opts.isAutoReply && stored.status === "SENT") {
     const pauseUntil = new Date(Date.now() + HUMAN_REPLY_AI_PAUSE_MS);
     await Promise.all([
-      prisma.chatConversation.update({
-        where: { id },
-        data: { aiPausedUntil: pauseUntil },
-      }),
+      opts.pauseAi === false
+        ? Promise.resolve()
+        : prisma.chatConversation.update({
+            where: { id },
+            data: { aiPausedUntil: pauseUntil },
+          }),
       prisma.actionRequest.updateMany({
         where: {
           conversationId: id,

@@ -64,7 +64,11 @@ export function ApprovalsPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           action === "approve"
-            ? { action: "approve", id: r.id, editedText: getReplyText(r) }
+            ? {
+                action: "approve",
+                id: r.id,
+                ...(r.kind === "chat.reply" ? { editedText: getReplyText(r) } : {}),
+              }
             : { action: "reject", id: r.id }
         ),
       });
@@ -74,7 +78,15 @@ export function ApprovalsPanel({
         await onChanged();
         return;
       }
-      toast(action === "approve" ? "Sent to buyer" : "Rejected");
+      toast(
+        action === "approve"
+          ? r.kind === "chat.reply"
+            ? "Sent to buyer"
+            : r.kind === "listing.price_update"
+              ? "Price updated"
+              : "Draft listing created"
+          : "Rejected"
+      );
       await onChanged();
     } catch {
       toast("No connection. Try again.", "error");
@@ -159,35 +171,41 @@ export function ApprovalsPanel({
 
                 <div className="rounded-[var(--radius-control)] bg-surface-subtle px-3 py-2.5 text-[13px] text-ink-2">
                   <span className="block text-[11px] font-semibold uppercase tracking-[0.03em] text-ink-3">
-                    Buyer wrote
+                    {r.kind === "chat.reply"
+                      ? "Buyer wrote"
+                      : r.kind === "listing.price_update"
+                        ? "Price update preview"
+                        : "Draft copy preview"}
                   </span>
                   <span className="mt-0.5 block text-ink [overflow-wrap:anywhere]">
                     {r.summary}
                   </span>
                 </div>
 
-                {isPending ? (
-                  <label className="block space-y-1">
-                    <span className="block text-[12px] font-semibold text-ink-2">
-                      Reply to send (editable)
-                    </span>
-                    <textarea
-                      rows={3}
-                      maxLength={1000}
-                      value={getReplyText(r)}
-                      onChange={(e) =>
-                        setDrafts((prev) => ({ ...prev, [r.id]: e.target.value }))
-                      }
-                      className="w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 py-2 text-[14px] leading-snug text-ink outline-none focus:border-brand"
-                    />
-                  </label>
-                ) : (
-                  (sentText || typeof r.payload.text === "string") && (
-                    <div className="rounded-[var(--radius-control)] bg-surface-muted px-3 py-2 text-[13px] text-ink-2 [overflow-wrap:anywhere]">
-                      {sentText ?? (r.payload.text as string)}
-                    </div>
+                {r.kind === "chat.reply" ? (
+                  isPending ? (
+                    <label className="block space-y-1">
+                      <span className="block text-[12px] font-semibold text-ink-2">
+                        Reply to send (editable)
+                      </span>
+                      <textarea
+                        rows={3}
+                        maxLength={1000}
+                        value={getReplyText(r)}
+                        onChange={(e) =>
+                          setDrafts((prev) => ({ ...prev, [r.id]: e.target.value }))
+                        }
+                        className="w-full rounded-[var(--radius-control)] border border-ink/12 bg-surface px-3 py-2 text-[14px] leading-snug text-ink outline-none focus:border-brand"
+                      />
+                    </label>
+                  ) : (
+                    (sentText || typeof r.payload.text === "string") && (
+                      <div className="rounded-[var(--radius-control)] bg-surface-muted px-3 py-2 text-[13px] text-ink-2 [overflow-wrap:anywhere]">
+                        {sentText ?? (r.payload.text as string)}
+                      </div>
+                    )
                   )
-                )}
+                ) : null}
 
                 {r.error && (
                   <p className="text-[13px] font-semibold text-missing-ink">
@@ -216,12 +234,21 @@ export function ApprovalsPanel({
                     <Button
                       variant="primary"
                       size="md"
-                      disabled={busyId === r.id || !getReplyText(r).trim()}
+                      disabled={
+                        busyId === r.id ||
+                        (r.kind === "chat.reply" && !getReplyText(r).trim())
+                      }
                       onClick={() => decide(r, "approve")}
                       className="!h-10 !px-4 !text-[13px]"
                     >
                       <Check className="h-4 w-4" />
-                      {busyId === r.id ? "Sending..." : "Approve & send"}
+                      {busyId === r.id
+                        ? "Working..."
+                        : r.kind === "chat.reply"
+                          ? "Approve & send"
+                          : r.kind === "listing.price_update"
+                            ? "Approve & push price"
+                            : "Approve & create draft"}
                     </Button>
                   </div>
                 )}
