@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft, Minus, PackageX, Plus, RotateCcw, Search } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ChevronRight, Minus, PackageX, Plus, RotateCcw, Search, Truck } from "lucide-react";
+import { ReceivePoPanel } from "@/components/stock-in/ReceivePoPanel";
 import { Button, Group } from "@/components/ui/Button";
 import { ItemThumb } from "@/components/ui/ItemThumb";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { Toaster, toast } from "@/components/ui/Toast";
+import type { StaffPurchaseOrderView } from "@/lib/restock/rules";
 import { pulseAmbient } from "@/lib/ui/ambient";
 import { haptic } from "@/lib/ui/motion";
 
@@ -68,6 +70,8 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
   const [saving, setSaving] = useState(false);
   const [searched, setSearched] = useState(false);
   const [today, setToday] = useState<TodayEntry[]>([]);
+  const [openPos, setOpenPos] = useState<StaffPurchaseOrderView[]>([]);
+  const [pickedPo, setPickedPo] = useState<StaffPurchaseOrderView | null>(null);
   const [undoing, setUndoing] = useState<string | null>(null);
   const [backHref, setBackHref] = useState("/scan");
   const keyRef = useRef(newKey());
@@ -81,9 +85,21 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
     }
   }, []);
 
+  const loadOpenPos = useCallback(async () => {
+    try {
+      const res = await fetch("/api/stock-in?openPos=1", { cache: "no-store" });
+      if (res.ok) setOpenPos((await res.json()).purchaseOrders ?? []);
+    } catch {
+      // Offline: keep last known POs.
+    }
+  }, []);
+
   useEffect(() => {
-    if (unlocked) void loadToday();
-  }, [unlocked, loadToday]);
+    if (unlocked) {
+      void loadToday();
+      void loadOpenPos();
+    }
+  }, [unlocked, loadToday, loadOpenPos]);
 
   async function undo(entry: TodayEntry) {
     setUndoing(entry.id);
@@ -209,6 +225,7 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
           value={mode}
           onChange={(next) => {
             setMode(next);
+            setPickedPo(null);
             keyRef.current = newKey();
           }}
           label="Stock action"
@@ -224,7 +241,19 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
         </Group>
       )}
 
-      {unlocked && !picked && (
+      {unlocked && mode === "SUPPLIER_IN" && pickedPo && (
+        <ReceivePoPanel
+          po={pickedPo}
+          apiMode="staff"
+          onCancel={() => setPickedPo(null)}
+          onReceived={async () => {
+            setPickedPo(null);
+            await Promise.all([loadToday(), loadOpenPos()]);
+          }}
+        />
+      )}
+
+      {unlocked && !picked && !(mode === "SUPPLIER_IN" && pickedPo) && (
         <>
           <label className="relative block">
             <span className="sr-only">Search item</span>
@@ -269,6 +298,49 @@ export function StockInClient({ initialUnlocked }: { initialUnlocked: boolean })
                 ))}
               </ul>
             </Group>
+          )}
+          {mode === "SUPPLIER_IN" && openPos.length > 0 && query.trim().length < 2 && (
+            <section className="space-y-2">
+              <h2 className="px-1 text-[15px] font-semibold text-ink-3">
+                Expected supplier deliveries ({openPos.length})
+              </h2>
+              <Group>
+                <ul className="divide-y divide-hairline">
+                  {openPos.map((po) => {
+                    const remaining = po.lines.reduce((s, l) => s + l.remainingQty, 0);
+                    return (
+                      <li key={po.id}>
+                        <button
+                          type="button"
+                          onClick={() => setPickedPo(po)}
+                          className="pressable-row flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-subtle active:bg-surface-muted"
+                        >
+                          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[10px] bg-brand-soft text-brand">
+                            <Truck className="h-5 w-5" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[16px] font-bold text-ink">
+                              {po.poNumber} · {po.supplierName}
+                            </span>
+                            <span className="block truncate text-[13px] text-ink-2 tabular-nums">
+                              {po.lines.length} item{po.lines.length === 1 ? "" : "s"} · {remaining} pcs remaining
+                              {po.expectedAt
+                                ? ` · ETA ${new Date(po.expectedAt).toLocaleDateString("en-PH", {
+                                    month: "short",
+                                    day: "numeric",
+                                    timeZone: "Asia/Manila",
+                                  })}`
+                                : ""}
+                            </span>
+                          </span>
+                          <ChevronRight className="h-5 w-5 shrink-0 text-ink-3" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </Group>
+            </section>
           )}
           {mode === "SUPPLIER_IN" && today.length > 0 && query.trim().length < 2 && (
             <section className="space-y-2">

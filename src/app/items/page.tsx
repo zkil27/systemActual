@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronRight, Link2, PackagePlus, RotateCw, Search, Sparkles, Star } from "lucide-react";
+import { ChevronRight, Link2, PackagePlus, RotateCw, Search, Sparkles, Star, Truck } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Button, Group } from "@/components/ui/Button";
 import { ComingSoonPill } from "@/components/ui/ComingSoon";
@@ -628,14 +628,24 @@ export default function ItemsPage() {
       title="Items & stock"
       onRefresh={load}
       headerRight={
-        <Link
-          href="/stock-in"
-          aria-label="Add a delivery"
-          title="Add a delivery"
-          className="pressable flex h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05]"
-        >
-          <PackagePlus className="h-[22px] w-[22px]" />
-        </Link>
+        <div className="flex items-center gap-1">
+          <Link
+            href="/restock"
+            aria-label="Restock and suppliers"
+            title="Restock & suppliers"
+            className="pressable flex h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05]"
+          >
+            <Truck className="h-[22px] w-[22px]" />
+          </Link>
+          <Link
+            href="/stock-in"
+            aria-label="Add a delivery"
+            title="Add a delivery"
+            className="pressable flex h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05]"
+          >
+            <PackagePlus className="h-[22px] w-[22px]" />
+          </Link>
+        </div>
       }
     >
       <div className="space-y-6">

@@ -2,6 +2,7 @@ import { PrintJobStatus, WaveItemStatus, WaveStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCatalog } from "@/lib/catalog/garments";
 import { isOnline } from "@/lib/print/device";
+import { getOverduePurchaseOrders } from "@/lib/restock/service";
 import { urgentDeadlineWhere } from "@/lib/returns/rules";
 import { unpickedPrintedWhere } from "@/lib/shipping/outbound";
 import { getRealShopWhere } from "@/lib/shops";
@@ -200,11 +201,31 @@ async function collectSpecs(now: Date): Promise<{ specs: AlertSpec[]; batches: A
     });
   }
 
+  const overduePos = await getOverduePurchaseOrders(now);
+  const overdueLabels = overduePos.map(
+    (po) =>
+      `${po.poNumber} (${po.supplierName}) — ${po.daysOverdue}d overdue (${po.remainingPieces} pcs pending)`
+  );
+  overduePos.forEach((po, idx) => {
+    specs.push({
+      key: `po:overdue:${po.id}`,
+      active: true,
+      message: overdueLabels[idx],
+      repeatAfterMs: 24 * HOUR,
+    });
+  });
+  batches.push({
+    title: "OVERDUE SUPPLIER ORDERS",
+    keys: overduePos.map((po) => `po:overdue:${po.id}`),
+    labels: overdueLabels,
+    footer: "Open Restock & suppliers or mark them received in Stock-in.",
+  });
+
   return { specs, batches };
 }
 
 /** Prefixes for per-item keys: an item that drops out of the list ends its episode. */
-const ITEM_PREFIXES = ["stock:out:", "stock:low:", "dispute:due:", "listing:unlinked:", "wave:stalled:"];
+const ITEM_PREFIXES = ["stock:out:", "stock:low:", "dispute:due:", "listing:unlinked:", "wave:stalled:", "po:overdue:"];
 
 /**
  * Proactive Telegram alerts, deduped through AlertLog. Called from the worker

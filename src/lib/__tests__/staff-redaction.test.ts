@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { redactOutboundPackageForStaff, redactParcelForStaff } from "@/lib/auth";
+import { redactPurchaseOrderForStaff } from "@/lib/restock/rules";
 
 describe("Warehouse staff financial data redaction", () => {
   it("never exposes orderTotalPhp or estimatedUnitCostPhp to staff scanner endpoints", () => {
@@ -149,5 +150,63 @@ describe("Warehouse staff financial data redaction", () => {
       quantity: 2,
     });
     expect("unitPricePhp" in lines[0]).toBe(false);
+  });
+
+  it("never exposes unitCostPhp, totalCostPhp, costUpdatePending, or supplier contact/notes on open POs", () => {
+    const safe = redactPurchaseOrderForStaff({
+      id: "po-1",
+      poNumber: "PO-20261126-001",
+      status: "ORDERED",
+      expectedAt: new Date("2026-11-30T04:00:00.000Z"),
+      note: "Boxes marked Rush",
+      totalCostPhp: 12450,
+      supplier: {
+        id: "sup-1",
+        name: "Taytay Tahian",
+        contact: "09171234567",
+        notes: "₱125 cash discount",
+      },
+      lines: [
+        {
+          id: "line-1",
+          garmentVariantId: "var-1",
+          orderedQty: 100,
+          receivedQty: 20,
+          damagedQty: 5,
+          unitCostPhp: 125,
+          costUpdatePending: true,
+          note: "Check collar",
+          garmentVariant: {
+            id: "var-1",
+            label: "White, S",
+            garment: {
+              id: "g-1",
+              name: "Ribbed Top",
+              imageUrl: null,
+              binLocation: "B2",
+              unitCostPhp: 120,
+            },
+          },
+        },
+      ],
+    }) as unknown as Record<string, unknown>;
+
+    expect("totalCostPhp" in safe).toBe(false);
+    expect("supplierContact" in safe).toBe(false);
+    expect("supplierNotes" in safe).toBe(false);
+    const json = JSON.stringify(safe);
+    expect(json).not.toMatch(/CostPhp|costUpdatePending|09171234567|12450|125/);
+    const lines = safe.lines as Array<Record<string, unknown>>;
+    expect(lines[0]).toMatchObject({
+      id: "line-1",
+      garmentName: "Ribbed Top",
+      variantLabel: "White, S",
+      orderedQty: 100,
+      receivedQty: 20,
+      damagedQty: 5,
+      remainingQty: 75,
+    });
+    expect("unitCostPhp" in lines[0]).toBe(false);
+    expect("costUpdatePending" in lines[0]).toBe(false);
   });
 });

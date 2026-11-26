@@ -12,7 +12,7 @@ Last updated: 2026-11-26.
 |---|---|---|
 | 1 | Return truth, item by item, plus foundations | Done on `dev` (not on `main` yet) |
 | 2 | Profit per order | Done on `dev` (not on `main` yet) |
-| 3 | Restock and suppliers | Planned |
+| 3 | Restock and suppliers | Done on dev (not on main yet) |
 | 4 | Chats on both shops, safe auto-replies | Planned |
 | 5 | Listings and prices in one place | Planned |
 | Ongoing | Maintainability | Backlog below |
@@ -106,35 +106,24 @@ Open:
 - [ ] Not in per-order profit yet: refunds taken back after a payout, and the courier fee on failed deliveries. Both are in Money adjustments. A later step could link them to the order.
 - [ ] Confirm whether the shops' data carries the 1% withholding tax (`withholding_tax*` fields). If not, the screen shows an estimate labelled as such.
 
-## Phase 3: restock and suppliers (planned)
+## Phase 3: restock and suppliers (done on dev)
 
 Problem: "Add a delivery" at Stock-in is a free-text note (`StockReason.SUPPLIER_IN`). Nothing records what was ordered, from whom, what's still due, or when to reorder.
 
-Scope:
-- **Supplier list:** name, contact, usual lead time, notes.
-- **Purchase orders:** a supplier, lines of `GarmentVariant` with quantity and cost per piece, an expected date, and a status (Draft, Ordered, Partly received, Received, Cancelled).
-- **Receiving at Stock-in:** staff pick the open order and tap what arrived. Use the Phase 1 pattern: every line starts as "all arrived", and staff mark only what's short or damaged. This creates `StockMovement` rows (reason `SUPPLIER_IN`) linked to the order line.
-- **"Reorder soon":** sales speed per variant over 14 and 30 days, from shipped stock movements. It shows days of stock left (on shelf ÷ daily sales) against the supplier's lead time. It's a suggestion list only; the owner creates the order.
-- **Cost updates:** receiving at a new cost per piece updates `Garment.unitCostPhp` only with the owner's OK, because Phase 2 profit uses it.
-- **Telegram:** a short "reorder soon" line in the 8 PM brief, plus an alert when an order is overdue.
+What exists:
+- **Database schema and migration:** `Supplier`, `PurchaseOrder`, `PurchaseOrderLine`, `PurchaseOrderStatus`, and `StockMovement.purchaseOrderLineId` (`prisma/schema.prisma`, `prisma/migrations/20261126040000_suppliers_and_restock/migration.sql`).
+- **Owner Restock & suppliers screen (`src/app/restock/page.tsx`, `src/app/api/restock/route.ts`):** supplier list with lead times, purchase order creation and status tracking (`DRAFT`, `ORDERED`, `PARTIAL`, `RECEIVED`, `CANCELLED`), owner receiving, cost-change confirmation prompts before updating `Garment.unitCostPhp`, and lead-time-aware "Reorder soon" suggestions subtracting open PO quantities.
+- **Light staff receiving (`src/app/stock-in/StockInClient.tsx`, `src/components/stock-in/ReceivePoPanel.tsx`, `src/app/api/stock-in/route.ts`):** staff pick open supplier deliveries (with all peso costs stripped via `redactPurchaseOrderForStaff`) and tap only short or damaged exceptions, writing idempotent `SUPPLIER_IN` movements and triggering immediate shop stock pushes.
+- **Telegram:** 8 PM daily brief includes a "Reorder soon" / overdue PO line (`src/lib/reports/brief.ts`, `daily-brief.ts`), and `src/lib/reports/alerts.ts` sends `OVERDUE SUPPLIER ORDERS` alerts keyed `po:overdue:<id>`.
 
-Data:
-- `Supplier`.
-- `PurchaseOrder` (FK to `Supplier`).
-- `PurchaseOrderLine` (FK to `PurchaseOrder` and `GarmentVariant`; ordered, received and damaged quantities; cost per piece).
-- `StockMovement.purchaseOrderLineId` (nullable FK).
+Open:
+- Apply `prisma/migrations/20261126040000_suppliers_and_restock/migration.sql` to Supabase Postgres when merging/deploying `dev`.
+- End-to-end verification in the UI with a real database once deployed/running locally.
+- Variants still need linking across shops (`ListingVariant` → `GarmentVariant`) so unlinked listings combine into one reorder line.
 
-Retention: orders are small, so keep them permanently or for 2 years.
-
-Files to start from:
-- `src/app/stock-in/StockInClient.tsx` and `src/app/api/stock-in/*`.
-- `src/lib/stock/ledger.ts` (`recordSupplierDelivery`).
-- `src/app/items/page.tsx` (963 lines: add new UI as components, don't grow the page).
-- `src/lib/catalog/*`.
-
-Risks:
-- Variants still need linking across shops (`ListingVariant` → `GarmentVariant`). Unlinked listings can't be reordered by item.
-- The staff Stock-in screen must stay as light as the scan screen.
+Data & retention:
+- `Supplier`, `PurchaseOrder`, `PurchaseOrderLine`, and nullable `StockMovement.purchaseOrderLineId`.
+- Orders are small, so keep them permanently or for 2 years.
 
 ## Phase 4: chats on both shops, safe auto-replies (planned)
 

@@ -1,5 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { getDailyTruthReport } from "@/lib/analytics/daily-returns";
+import {
+  getOverduePurchaseOrders,
+  getReorderSuggestions,
+} from "@/lib/restock/service";
 import { getManilaDateString } from "@/lib/time";
 import { formatTelegramDailyBrief } from "./brief";
 import { sendTelegramMessage } from "@/lib/telegram";
@@ -33,6 +37,19 @@ export async function sendDailyBriefIfDue(now: Date = new Date()): Promise<boole
   });
   if (claimed.count !== 1) return false;
 
-  const report = await getDailyTruthReport({ range: "today" });
-  return sendTelegramMessage(settings.telegramChatId, formatTelegramDailyBrief(report));
+  const [report, suggestions, overdue] = await Promise.all([
+    getDailyTruthReport({ range: "today" }),
+    getReorderSuggestions(now),
+    getOverduePurchaseOrders(now),
+  ]);
+  return sendTelegramMessage(
+    settings.telegramChatId,
+    formatTelegramDailyBrief(report, {
+      reorderSoonCount: suggestions.length,
+      topLabels: suggestions
+        .slice(0, 3)
+        .map((s) => `${s.garmentName} (${s.variantLabel})`),
+      overduePoCount: overdue.length,
+    })
+  );
 }

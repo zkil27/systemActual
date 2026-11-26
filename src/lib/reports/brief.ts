@@ -1,7 +1,16 @@
 import { DailyTruthReport } from "@/lib/analytics/daily-returns";
 import { returnCheckLine } from "@/lib/analytics/return-check";
 
-export function formatTelegramDailyBrief(report: DailyTruthReport): string {
+export interface DailyBriefRestockSummary {
+  reorderSoonCount: number;
+  topLabels?: string[];
+  overduePoCount?: number;
+}
+
+export function formatTelegramDailyBrief(
+  report: DailyTruthReport,
+  restock?: DailyBriefRestockSummary
+): string {
   const fd = report.failedDelivery;
   const rr = report.returnRefund;
   const c = report.combined;
@@ -11,6 +20,20 @@ export function formatTelegramDailyBrief(report: DailyTruthReport): string {
   const signed = (n: number) => (Math.round(n) < 0 ? `-${peso(-n)}` : peso(n));
 
   const ops = report.operations;
+  const restockParts: string[] = [];
+  if (restock && restock.reorderSoonCount > 0) {
+    const names = restock.topLabels?.length
+      ? ` (${restock.topLabels.slice(0, 3).join(", ")})`
+      : "";
+    restockParts.push(
+      `Reorder soon: ${restock.reorderSoonCount} item${restock.reorderSoonCount === 1 ? "" : "s"}${names}`
+    );
+  }
+  if (restock?.overduePoCount) {
+    restockParts.push(
+      `Overdue supplier order${restock.overduePoCount === 1 ? "" : "s"}: ${restock.overduePoCount}`
+    );
+  }
 
   const lines: string[] = [
     `KYNA OPS — DAILY SUMMARY`,
@@ -27,6 +50,7 @@ export function formatTelegramDailyBrief(report: DailyTruthReport): string {
     `• Ready to ship: ${ops.readyToShipCount} (Shopee ${ops.readyShopeeCount} | TikTok ${ops.readyTikTokCount})`,
     `• Printed today: ${ops.printedTodayCount}${ops.waveNeedAttentionCount ? ` | Need attention: ${ops.waveNeedAttentionCount}` : ""}`,
     `• Stock: ${ops.outOfStockCount} out, ${ops.lowStockCount} low${ops.shopeeBumpEnabled ? ` | Auto-bump: ${ops.shopeeBoostedCount}/5` : ""}`,
+    ...(restockParts.length ? [`• ${restockParts.join(" | ")}`] : []),
     ``,
     `FAILED DELIVERY (Undelivered / COD)`,
     `• Driver Tagged Today: ${fd.taggedCount} (${fd.taggedPieces} pcs)`,

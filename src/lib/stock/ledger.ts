@@ -90,7 +90,7 @@ export async function resetStock(variantIds: string[]) {
 
 export class StockNotStartedError extends Error {}
 
-async function ensureVariantStartingStock(variant: {
+export async function ensureVariantStartingStock(variant: {
   id: string;
   startingStockSetAt: Date | null;
   listings: Array<{

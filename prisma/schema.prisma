@@ -26,6 +26,14 @@ enum OrderState {
   UNKNOWN
 }
 
+enum PurchaseOrderStatus {
+  DRAFT
+  ORDERED
+  PARTIAL
+  RECEIVED
+  CANCELLED
+}
+
 enum ReturnCategory {
   FAILED_DELIVERY
   RETURN_REFUND
@@ -588,9 +596,10 @@ model GarmentVariant {
   startingStock      Int?
   startingStockSetAt DateTime?
   /// Cached sum of StockMovement.delta, maintained automatically by a Postgres trigger.
-  onShelfCount       Int              @default(0)
+  onShelfCount       Int                 @default(0)
   movements          StockMovement[]
-  createdAt          DateTime         @default(now())
+  purchaseOrderLines PurchaseOrderLine[]
+  createdAt          DateTime            @default(now())
 
   @@index([garmentId])
 }
@@ -764,12 +773,15 @@ model StockMovement {
   delta            Int
   reason           StockReason
   sourceKey        String         @unique
-  note             String?
-  staffMemberId    String?
-  createdAt        DateTime       @default(now())
+  note                String?
+  staffMemberId       String?
+  purchaseOrderLineId String?
+  purchaseOrderLine   PurchaseOrderLine? @relation(fields: [purchaseOrderLineId], references: [id], onDelete: SetNull)
+  createdAt           DateTime           @default(now())
 
   @@index([garmentVariantId, createdAt])
   @@index([createdAt])
+  @@index([purchaseOrderLineId])
 }
 
 enum PrintJobKind {
@@ -1006,4 +1018,62 @@ model ChatDraft {
 
   @@index([conversationId, status])
   @@index([createdAt])
+}
+
+/// A garment supplier or tahian the owner orders stock from.
+model Supplier {
+  id             String          @id @default(cuid())
+  name           String
+  contact        String?
+  leadTimeDays   Int             @default(7)
+  notes          String?
+  archivedAt     DateTime?
+  purchaseOrders PurchaseOrder[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([archivedAt, name])
+}
+
+/// One restock order placed with a supplier.
+model PurchaseOrder {
+  id           String              @id @default(cuid())
+  supplierId   String
+  supplier     Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  poNumber     String              @unique
+  status       PurchaseOrderStatus @default(DRAFT)
+  orderedAt    DateTime?
+  expectedAt   DateTime?
+  receivedAt   DateTime?
+  note         String?
+  totalCostPhp Decimal?            @db.Decimal(12, 2)
+  createdById  String?
+  lines        PurchaseOrderLine[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  @@index([status, expectedAt])
+  @@index([supplierId, createdAt])
+}
+
+/// One colour/size line on a PurchaseOrder.
+model PurchaseOrderLine {
+  id                String          @id @default(cuid())
+  purchaseOrderId   String
+  purchaseOrder     PurchaseOrder   @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  garmentVariantId  String
+  garmentVariant    GarmentVariant  @relation(fields: [garmentVariantId], references: [id], onDelete: Cascade)
+  orderedQty        Int
+  receivedQty       Int             @default(0)
+  damagedQty        Int             @default(0)
+  unitCostPhp       Decimal?        @db.Decimal(10, 2)
+  /// True when received with a unitCostPhp differing from the garment's current unitCostPhp; cleared when owner decides.
+  costUpdatePending Boolean         @default(false)
+  note              String?
+  movements         StockMovement[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@unique([purchaseOrderId, garmentVariantId])
+  @@index([garmentVariantId])
 }

@@ -1,7 +1,12 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { actorFromSession } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { getScannerSession } from "@/lib/auth";
+import {
+  listOpenPurchaseOrdersForStaff,
+  receivePurchaseOrder,
+} from "@/lib/restock/service";
 import { resolveActorStaffMemberId } from "@/lib/shipping/outbound";
 import {
   onShelfByVariant,
@@ -26,6 +31,11 @@ export async function GET(req: NextRequest) {
 
   const variantId = (req.nextUrl.searchParams.get("variantId") || "").trim();
   const q = (req.nextUrl.searchParams.get("q") || "").trim();
+
+  if (req.nextUrl.searchParams.get("openPos") === "1") {
+    const purchaseOrders = await listOpenPurchaseOrdersForStaff();
+    return NextResponse.json({ purchaseOrders });
+  }
 
   // Today's deliveries by this person (owner sees everyone's), newest first, for the Undo list.
   if (req.nextUrl.searchParams.get("today") === "1") {
@@ -83,7 +93,7 @@ export async function GET(req: NextRequest) {
   });
 }
 
-const bodySchema = z.object({
+const legacyBodySchema = z.object({
   variantId: z.string().min(1),
   mode: z.enum(["SUPPLIER_IN", "EMPTY_SHELF", "DEFECTIVE"]).default("SUPPLIER_IN"),
   quantity: z.number().int().min(0).max(10_000).default(1),
@@ -91,6 +101,25 @@ const bodySchema = z.object({
   /** Generated on the phone per entry, so a double tap or retry is counted once. */
   clientKey: z.string().min(8).max(64),
 });
+
+const receivePoBodySchema = z.object({
+  mode: z.literal("RECEIVE_PO"),
+  purchaseOrderId: z.string().min(1),
+  clientKey: z.string().min(8).max(64),
+  items: z
+    .array(
+      z.object({
+        lineId: z.string().min(1),
+        receivedQty: z.number().int().min(0).max(10_000),
+        damagedQty: z.number().int().min(0).max(10_000).default(0),
+        note: z.string().max(160).nullish(),
+      })
+    )
+    .min(1)
+    .max(100),
+});
+
+const bodySchema = z.union([receivePoBodySchema, legacyBodySchema]);
 
 export async function POST(req: NextRequest) {
   const session = await getScannerSession();
@@ -104,6 +133,18 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    if (parsed.data.mode === "RECEIVE_PO") {
+      const res = await receivePurchaseOrder({
+        purchaseOrderId: parsed.data.purchaseOrderId,
+        clientKey: parsed.data.clientKey,
+        actor: actorFromSession(session),
+        staffMemberId,
+        items: parsed.data.items,
+      });
+      if (!res.duplicate && res.totalGoodAdded > 0) pushSoon();
+      return NextResponse.json({ ok: true, ...res });
+    }
+
     if (parsed.data.mode === "SUPPLIER_IN") {
       if (parsed.data.quantity < 1) {
         return NextResponse.json({ error: "Enter at least 1 piece." }, { status: 400 });
