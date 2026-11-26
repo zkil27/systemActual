@@ -1,11 +1,15 @@
 import { Platform, type ShopConnection } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { getChannelConnector } from "@/lib/channels/registry";
+import { SHOPEE_DETAIL_FIELDS } from "@/lib/channels/shopee";
 import { shopeeGet } from "@/lib/connectors/shopee";
 import { tiktokRequest } from "@/lib/connectors/tiktok";
 import { ensureFreshToken } from "@/lib/connectors/tokens";
 import { mapShopeeOrder, mapTikTokOrder, type NormalizedOrder } from "./normalize";
 import { saveOrder, saveOrderBatch } from "./store";
 import { adaptWindowMs, INITIAL_LOOKBACK_MS, MAX_WINDOW_MS, nextSyncWindow, type SyncWindow } from "./window";
+
+export { SHOPEE_DETAIL_FIELDS };
 
 /** Per-shop Shopee window size, kept in a WorkerLock row (holder = milliseconds). */
 const windowKey = (shopId: string) => `order-window:${shopId}`;
@@ -29,18 +33,6 @@ export interface OrderSyncResult {
   windows: number;
   caughtUp: boolean;
 }
-
-export const SHOPEE_DETAIL_FIELDS = [
-  "item_list",
-  "package_list",
-  "total_amount",
-  "payment_method",
-  "shipping_carrier",
-  "cancel_by",
-  "cancel_reason",
-  "buyer_cancel_reason",
-  "pickup_done_time",
-].join(",");
 
 const sec = (d: Date) => Math.floor(d.getTime() / 1000);
 
@@ -232,26 +224,9 @@ export async function syncSingleOrder(
   if (!shop || (platform === Platform.TIKTOK && !shop.shopCipher)) return false;
 
   const token = await ensureFreshToken(shop);
-  const raw: Record<string, unknown> | undefined =
-    platform === Platform.SHOPEE
-      ? (
-          await shopeeGet("/api/v2/order/get_order_detail", shop.shopId, token, {
-            order_sn_list: orderSn,
-            response_optional_fields: SHOPEE_DETAIL_FIELDS,
-          })
-        )?.order_list?.[0]
-      : (
-          await tiktokRequest({
-            method: "GET",
-            path: "/order/202309/orders",
-            accessToken: token,
-            shopCipher: shop.shopCipher,
-            query: { ids: orderSn },
-          })
-        )?.orders?.[0];
-  if (!raw) return false;
+  const normalized = await getChannelConnector(platform).fetchSingleOrder(shop, token, orderSn);
+  if (!normalized) return false;
 
-  const normalized = platform === Platform.SHOPEE ? mapShopeeOrder(raw) : mapTikTokOrder(raw);
   await saveOrder(shop.id, platform, normalized, new Date());
   await prisma.shopConnection.update({
     where: { id: shop.id },

@@ -13,6 +13,19 @@ enum Platform {
   TIKTOK
 }
 
+/// Normalized order lifecycle across channels (raw platform string stays in Order.status).
+enum OrderState {
+  UNPAID
+  READY_TO_SHIP
+  ARRANGED
+  IN_CANCEL
+  SHIPPED
+  DELIVERED
+  COMPLETED
+  CANCELLED
+  UNKNOWN
+}
+
 enum ReturnCategory {
   FAILED_DELIVERY
   RETURN_REFUND
@@ -440,6 +453,8 @@ model Order {
   orderSn                 String
   /// Raw platform status, e.g. READY_TO_SHIP (Shopee) or AWAITING_SHIPMENT (TikTok).
   status                  String
+  /// Normalized cross-channel lifecycle state (null only on rows not yet backfilled).
+  state                   OrderState?
   isCod                   Boolean        @default(false)
   totalPhp                Decimal        @db.Decimal(12, 2)
   platformCreatedAt       DateTime
@@ -464,6 +479,7 @@ model Order {
 
   @@unique([platform, orderSn])
   @@index([shopConnectionId, status])
+  @@index([shopConnectionId, state])
   @@index([status, platformUpdatedAt])
   @@index([platformCreatedAt])
   @@index([shippedAt])
@@ -571,6 +587,8 @@ model GarmentVariant {
   /// Owner-confirmed starting count (Task 7). The stock ledger starts from it.
   startingStock      Int?
   startingStockSetAt DateTime?
+  /// Cached sum of StockMovement.delta, maintained automatically by a Postgres trigger.
+  onShelfCount       Int              @default(0)
   movements          StockMovement[]
   createdAt          DateTime         @default(now())
 

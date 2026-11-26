@@ -1,12 +1,11 @@
 import { Platform, Prisma, type ShopConnection } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { getChannelConnector } from "@/lib/channels/registry";
 import { MarketplaceHttpError } from "@/lib/connectors/http";
-import { shopeeGet } from "@/lib/connectors/shopee";
-import { tiktokRequest } from "@/lib/connectors/tiktok";
 import { expectedLinesFromItems, lineKeyOf } from "@/lib/returns/item-check";
 import { RESTOCK_CONDITIONS } from "@/lib/stock/rules";
 import { getManilaDateString } from "@/lib/time";
-import { buildFinanceRecord, mapShopeeEscrow, mapTikTokOrderStatements, type FinanceFigures, type FinanceLineInput } from "./map";
+import { buildFinanceRecord, type FinanceFigures, type FinanceLineInput } from "./map";
 
 /** A completed order without payout data is asked again after this long. */
 export const FINANCE_RECHECK_MS = 6 * 3600_000;
@@ -35,17 +34,7 @@ export function financeCandidateWhere(shopConnectionId: string, now: Date): Pris
 }
 
 async function fetchFigures(conn: ShopConnection, token: string, orderSn: string): Promise<FinanceFigures | null> {
-  if (conn.platform === Platform.SHOPEE) {
-    return mapShopeeEscrow(await shopeeGet("/api/v2/payment/get_escrow_detail", conn.shopId, token, { order_sn: orderSn }));
-  }
-  return mapTikTokOrderStatements(
-    await tiktokRequest({
-      method: "GET",
-      path: `/finance/202309/orders/${encodeURIComponent(orderSn)}/statement_transactions`,
-      accessToken: token,
-      shopCipher: conn.shopCipher,
-    })
-  );
+  return getChannelConnector(conn.platform).fetchOrderFinance(conn, token, orderSn);
 }
 
 /**

@@ -1,71 +1,11 @@
 import { Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { shopeePost } from "@/lib/connectors/shopee";
-import { tiktokRequest } from "@/lib/connectors/tiktok";
+import { getChannelConnector } from "@/lib/channels/registry";
 import { ensureFreshToken } from "@/lib/connectors/tokens";
 import { notifyOwnerTelegram } from "@/lib/telegram";
 import { effectiveBuffer } from "@/lib/catalog/garments";
 import { committedByVariant, onShelfByVariant } from "./ledger";
 import { availableToSell, planPushes, PUSH_ALERT_AFTER, type PushCandidate } from "./rules";
-
-/** Shopee update_stock takes up to 50 models of one item per call. */
-const SHOPEE_MAX_MODELS = 50;
-
-interface PushResult {
-  ok: string[];
-  failed: Array<{ id: string; error: string }>;
-}
-
-async function pushShopeeItem(shopId: string, token: string, rows: PushCandidate[]): Promise<PushResult> {
-  const result: PushResult = { ok: [], failed: [] };
-  for (let i = 0; i < rows.length; i += SHOPEE_MAX_MODELS) {
-    const chunk = rows.slice(i, i + SHOPEE_MAX_MODELS);
-    try {
-      const resp = await shopeePost("/api/v2/product/update_stock", shopId, token, {
-        item_id: Number(chunk[0].listingId),
-        stock_list: chunk.map((r) => ({ model_id: Number(r.variationId), seller_stock: [{ stock: r.target }] })),
-      });
-      const failures = new Map<string, string>(
-        ((resp?.failure_list ?? []) as Array<{ model_id?: number; failed_reason?: string }>).map((f) => [
-          String(f.model_id ?? 0),
-          String(f.failed_reason ?? "Rejected by Shopee"),
-        ])
-      );
-      for (const r of chunk) {
-        const reason = failures.get(r.variationId);
-        if (reason) result.failed.push({ id: r.listingVariantId, error: reason });
-        else result.ok.push(r.listingVariantId);
-      }
-    } catch (err) {
-      for (const r of chunk) result.failed.push({ id: r.listingVariantId, error: (err as Error).message });
-    }
-  }
-  return result;
-}
-
-async function pushTikTokProduct(shopCipher: string, token: string, rows: PushCandidate[]): Promise<PushResult> {
-  const result: PushResult = { ok: [], failed: [] };
-  const ready = rows.filter((r) => r.warehouseId);
-  for (const r of rows) {
-    if (!r.warehouseId) result.failed.push({ id: r.listingVariantId, error: "Read stock from TikTok first (warehouse unknown)." });
-  }
-  if (!ready.length) return result;
-  try {
-    await tiktokRequest({
-      method: "POST",
-      path: `/product/202309/products/${encodeURIComponent(ready[0].listingId)}/inventory/update`,
-      accessToken: token,
-      shopCipher,
-      body: {
-        skus: ready.map((r) => ({ id: r.variationId, inventory: [{ warehouse_id: r.warehouseId, quantity: r.target }] })),
-      },
-    });
-    result.ok.push(...ready.map((r) => r.listingVariantId));
-  } catch (err) {
-    for (const r of ready) result.failed.push({ id: r.listingVariantId, error: (err as Error).message });
-  }
-  return result;
-}
 
 /** Stock target per listing variation of one shop (only variants with a starting count). */
 async function candidatesFor(
@@ -128,12 +68,10 @@ export async function pushStock(deadline: number) {
       else byListing.set(c.listingId, [c]);
     }
 
+    const connector = getChannelConnector(shop.platform);
     for (const rows of byListing.values()) {
       if (Date.now() >= shopDeadline || Date.now() >= deadline) break;
-      const res =
-        shop.platform === Platform.SHOPEE
-          ? await pushShopeeItem(shop.shopId, token, rows)
-          : await pushTikTokProduct(shop.shopCipher!, token, rows);
+      const res = await connector.pushListingStock(shop, token, rows);
       const targets = new Map(rows.map((r) => [r.listingVariantId, r.target]));
       const now = new Date();
 

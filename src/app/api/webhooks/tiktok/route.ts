@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse, after } from "next/server";
-import { Platform } from "@prisma/client";
+import { OrderState, Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { verifyTikTokWebhookSignature } from "@/lib/connectors/tiktok";
 import { eventFields, processEvent, storeEvent } from "@/lib/integrations/inbox";
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
         where: { platform: Platform.TIKTOK, orderSn: fields.orderSn },
         data: {
           cancelRequested: true,
-          ...(fields.cancelStatus === "CANCELLED" ? { status: "CANCELLED" } : {}),
+          ...(fields.cancelStatus === "CANCELLED" ? { status: "CANCELLED", state: OrderState.CANCELLED } : {}),
         },
       })
       .catch((err) => console.error("[TikTok fast-cancel]", err));

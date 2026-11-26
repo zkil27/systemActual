@@ -5,14 +5,15 @@ import { committedUnitsByListing } from "@/lib/catalog/garments";
 import { COMMITTED_ORDER_STATUSES, computeStartingStock } from "@/lib/catalog/variants";
 import { hasLeftWarehouse, RESTOCK_CONDITIONS, shipMovements } from "./rules";
 
-/** Pieces on the shelf per garment variant (only variants with a starting count). */
+/** Pieces on the shelf per garment variant (maintained automatically via Postgres trigger). */
 export async function onShelfByVariant(variantIds?: string[]): Promise<Map<string, number>> {
-  const rows = await prisma.stockMovement.groupBy({
-    by: ["garmentVariantId"],
-    where: variantIds ? { garmentVariantId: { in: variantIds } } : undefined,
-    _sum: { delta: true },
+  const rows = await prisma.garmentVariant.findMany({
+    where: variantIds
+      ? { id: { in: variantIds } }
+      : { OR: [{ startingStockSetAt: { not: null } }, { onShelfCount: { not: 0 } }] },
+    select: { id: true, onShelfCount: true },
   });
-  return new Map(rows.map((r) => [r.garmentVariantId, r._sum.delta ?? 0]));
+  return new Map(rows.map((r) => [r.id, r.onShelfCount]));
 }
 
 /** Pieces on unshipped orders per garment variant, across both shops. */

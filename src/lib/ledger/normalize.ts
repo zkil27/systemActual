@@ -2,6 +2,8 @@
  * Maps raw Shopee / TikTok order payloads into one shape for the order ledger.
  * Pure functions: same input, same output, so re-syncing an order is a no-op.
  */
+import { OrderState, Platform } from "@prisma/client";
+import { normalizeOrderState } from "./state";
 
 export interface NormalizedLine {
   listingId: string;
@@ -24,6 +26,7 @@ export interface NormalizedPackage {
 export interface NormalizedOrder {
   orderSn: string;
   status: string;
+  state?: OrderState;
   isCod: boolean;
   totalPhp: number;
   createdAt: Date;
@@ -95,9 +98,11 @@ export function mapShopeeOrder(o: Raw): NormalizedOrder {
       channelId: str(p.logistics_channel_id),
       status: str(p.logistics_status),
     }));
+  const status = String(o.order_status ?? "UNKNOWN");
   return {
     orderSn: String(o.order_sn),
-    status: String(o.order_status ?? "UNKNOWN"),
+    status,
+    state: normalizeOrderState(Platform.SHOPEE, status),
     isCod: o.cod === true || /cod|cash on delivery/i.test(paymentMethod),
     totalPhp: num(o.total_amount),
     createdAt,
@@ -166,7 +171,8 @@ export function mapTikTokOrder(o: Raw): NormalizedOrder {
 
   return {
     orderSn: String(o.id),
-    status: String(o.status ?? "UNKNOWN"),
+    status,
+    state: normalizeOrderState(Platform.TIKTOK, status),
     isCod: o.is_cod === true,
     totalPhp: num((o.payment as Raw | undefined)?.total_amount),
     createdAt,

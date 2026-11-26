@@ -7,6 +7,7 @@ import {
   type NormalizedOrder,
   type OrderComparisonSnapshot,
 } from "./normalize";
+import { normalizeOrderState } from "./state";
 import { ensureGarmentFor } from "@/lib/catalog/garments";
 
 export const ORDER_RETENTION_DAYS = 90;
@@ -190,6 +191,7 @@ export async function saveOrder(
 
   const orderData = {
     status: n.status,
+    state: n.state ?? normalizeOrderState(platform, n.status),
     isCod: n.isCod,
     totalPhp: new Prisma.Decimal(n.totalPhp.toFixed(2)),
     platformCreatedAt: n.createdAt,

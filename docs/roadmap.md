@@ -190,14 +190,13 @@ Risks:
 
 Ranked by how much each one helps future phases.
 
-1. **A connector interface.** There are about 128 `Platform.SHOPEE` / `Platform.TIKTOK` branches across about 42 files. The paired files `shopee.ts` / `tiktok.ts`, `shopee-engine` / `tiktok-engine` and `shopee-rules` / `tiktok-rules` have no shared interface. Define a `ChannelConnector` (orders, returns, money, finance, stock push, labels, chats) so adding a channel touches one folder.
-2. **One set of order statuses.** `Order.status` is the raw platform string, and status lists are spread over `variants.ts`, `normalize.ts`, `orders/lookup.ts`, `stock/rules.ts` and `returns/classify.ts`. Add `Order.state` (an enum) and keep the raw status beside it.
+1. **Finish migrating onto `ChannelConnector`.** A `ChannelConnector` interface and registry now live in `src/lib/channels/` and power single-order sync, finance sync, stock pushes, and token refresh. Remaining paired files (`sync.ts` batch windows, `returns/sync.ts`, `shipping/shopee-engine.ts` / `tiktok-engine.ts`, `chats/*`) should move onto it before Phase 4 (Shopee chats) and Phase 5.
+2. **Use `Order.state` across queries.** `Order.state` (`OrderState` enum + `src/lib/ledger/state.ts`) is now added, backfilled, and populated on every write alongside raw `Order.status`. Gradually migrate remaining raw status lists (`variants.ts`, `orders/lookup.ts`, `stock/rules.ts`, `returns/classify.ts`) onto `Order.state`.
 3. **More than one shop per platform.**
-   - `committedUnitsByListing` keys on `platform:listing:variation` without the shop (`src/lib/catalog/garments.ts`).
-   - `Order` is unique on `[platform, orderSn]`.
-   - `health.ts` assumes one shop per platform.
-4. **Backing off when a shop throttles.** The connectors have no 429 handling; only finance stops on throttling.
-5. **Splitting big screens.** These are the largest: `src/app/scan/ScanClient.tsx` (about 2,050 lines), `src/app/waves/page.tsx`, `src/app/settings/page.tsx` and `src/app/items/page.tsx` (about 1,000 each), `src/app/page.tsx`. Move new UI into components.
+   - `startWave()` now scopes `writesEnabled` by `shopConnectionId`.
+   - `committedUnitsByListing` still keys on `platform:listing:variation` without `shopConnectionId` (`src/lib/catalog/garments.ts`), `Order` is unique on `[platform, orderSn]`, and `health.ts` assumes one shop per platform.
+4. **Backing off when a shop throttles.** Done in `src/lib/connectors/http.ts` (429 `Retry-After` + GET 5xx retry + safe JSON errors).
+5. **Splitting big screens.** These are the largest: `src/app/scan/ScanClient.tsx` (about 2,078 lines), `src/app/waves/page.tsx`, `src/app/settings/page.tsx` and `src/app/items/page.tsx` (about 1,000 each), `src/app/page.tsx`. Move new UI into components.
 6. **Foreign keys missing (bare string ids):**
    - `OrderLine` → `ListingVariant`.
    - `ReturnParcel.orderSn`.
@@ -205,15 +204,15 @@ Ranked by how much each one helps future phases.
    - `PrintJob.packageId` and `PrintJob.waveId`.
    - `WaveItem.orderId`.
    - `StockMovement.staffMemberId`.
-7. **Tests:** there are no route or integration tests. Database paths were checked by hand against a local Prisma Postgres.
+7. **Tests:** `.github/workflows/ci.yml` now runs `prisma migrate deploy` + `src/lib/__tests__/db.integration.test.ts` against Postgres 16. Route-handler integration tests are still open.
 
 ## Known gaps, not yet fixed
 
-- **Revoking owner sessions:** they last 30 days and can't be revoked (`src/middleware.ts`, `src/lib/session-edge.ts`). `session-edge.ts` also duplicates `auth.ts`.
+- **Revoking owner sessions:** they last 30 days and can't be revoked (`src/middleware.ts`, `src/lib/session-edge.ts`). `session-edge.ts` also duplicates `auth.ts`. (All owner API routes now also check `getOwnerSession()` directly in-route.)
 - **Telegram `/pause`, `/aioff` and `/sync`** act straight away, with no confirmation and no undo message.
 - **The dispute message template** (`src/lib/reports/dispute-template.ts`) removes its own blank lines: `.filter(Boolean)` also drops `""`.
 - **`WorkerLock` doubles as a key-value store** (sync window, stock push time, finance rollup time, Auto-Bump state). Fine for now; move the settings-like values into settings if more appear.
-- **Data that's never pruned:** `AiEvent` and `AiUsage` grow without limit.
+- **`AiEvent`, `AiUsage`, and `ImportJob` pruning** is now handled in `pruneDailyData()` (30d / 90d / 180d), along with `OrderFinance.breakdown` (14d) and orphaned `Order`s (180d). `ReturnParcel` rows still have no retention rule yet.
 - **Hosting terms:** Vercel Hobby's terms are for non-commercial use (see below).
 
 ## Paid upgrades to propose to the client later

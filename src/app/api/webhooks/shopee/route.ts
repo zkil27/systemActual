@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { shopeeWebhookUrl, verifyShopeeWebhookSignature } from "@/lib/connectors/shopee";
 import { eventFields, processEvent, storeEvent } from "@/lib/integrations/inbox";
 import { handleMarketplaceEvent } from "@/lib/integrations/handle-event";
+import { normalizeOrderState } from "@/lib/ledger/state";
 import { triggerWebhookTick } from "@/lib/worker/tick";
 
 export const maxDuration = 120;
@@ -48,10 +49,15 @@ export async function POST(req: NextRequest) {
   // Fast-track urgent cancellations before any in-flight wave ships the order.
   const fields = eventFields(Platform.SHOPEE, payload);
   if (fields.isCancel && fields.orderSn) {
+    const cancelStatus = fields.cancelStatus ?? "IN_CANCEL";
     await prisma.order
       .updateMany({
         where: { platform: Platform.SHOPEE, orderSn: fields.orderSn },
-        data: { cancelRequested: true, status: fields.cancelStatus ?? "IN_CANCEL" },
+        data: {
+          cancelRequested: true,
+          status: cancelStatus,
+          state: normalizeOrderState(Platform.SHOPEE, cancelStatus),
+        },
       })
       .catch((err) => console.error("[Shopee fast-cancel]", err));
   }
