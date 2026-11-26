@@ -1,4 +1,13 @@
-import { ActionRequestStatus, DigitalStatus, Prisma, PrintJobStatus, StockReason, WaveStatus } from "@prisma/client";
+import {
+  ActionRequestStatus,
+  DigitalStatus,
+  DisputeStatus,
+  Prisma,
+  PrintJobStatus,
+  PurchaseOrderStatus,
+  StockReason,
+  WaveStatus,
+} from "@prisma/client";
 import { del } from "@vercel/blob";
 import { prisma } from "@/lib/prisma";
 import { pruneOldOrders } from "@/lib/ledger/store";
@@ -24,6 +33,9 @@ const ALERT_LOG_RETENTION_DAYS = 30;
 const AI_EVENT_RETENTION_DAYS = 30;
 const AI_USAGE_RETENTION_DAYS = 90;
 const IMPORT_JOB_RETENTION_DAYS = 180;
+const RETURN_PARCEL_RETENTION_DAYS = 365;
+const PRICE_CHANGE_RETENTION_DAYS = 365;
+const PURCHASE_ORDER_RETENTION_DAYS = 730;
 
 export interface DailyPruneResult {
   skipped: boolean;
@@ -35,6 +47,7 @@ export interface DailyPruneResult {
   blobsDeleted: number;
   walletDeleted: number;
   movementsRolledUp: number;
+  returnParcelsDeleted?: number;
 }
 
 /**
@@ -179,6 +192,7 @@ export async function pruneDailyData(
   let partial = false;
   let movementsRolledUp = 0;
   let blobsDeleted = 0;
+  let returnParcelsDeleted = 0;
 
   if (!outOfTime()) {
     try {
@@ -226,7 +240,10 @@ export async function pruneDailyData(
   if (!partial && !outOfTime()) {
     try {
       const actionCutoff = new Date(now.getTime() - 60 * 24 * 3600_000);
-      await Promise.all([
+      const returnCutoff = new Date(now.getTime() - RETURN_PARCEL_RETENTION_DAYS * 24 * 3600_000);
+      const priceChangeCutoff = new Date(now.getTime() - PRICE_CHANGE_RETENTION_DAYS * 24 * 3600_000);
+      const poCutoff = new Date(now.getTime() - PURCHASE_ORDER_RETENTION_DAYS * 24 * 3600_000);
+      const [, , , , , returnPruned] = await Promise.all([
         prisma.aiEvent.deleteMany({ where: { createdAt: { lt: aiEventCutoff } } }),
         prisma.aiUsage.deleteMany({ where: { updatedAt: { lt: aiUsageCutoff } } }),
         prisma.importJob.deleteMany({ where: { createdAt: { lt: importJobCutoff } } }),
@@ -240,9 +257,27 @@ export async function pruneDailyData(
             createdAt: { lt: actionCutoff },
           },
         }),
+        prisma.returnParcel.deleteMany({
+          where: {
+            updatedAt: { lt: returnCutoff },
+            disputeStatus: { not: DisputeStatus.FILED },
+            OR: [
+              { physicallyReceivedAt: { not: null } },
+              { digitalStatus: { in: [DigitalStatus.RESOLVED_REFUNDED, DigitalStatus.CANCELLED_RETURN] } },
+            ],
+          },
+        }),
+        prisma.priceChange.deleteMany({ where: { createdAt: { lt: priceChangeCutoff } } }),
+        prisma.purchaseOrder.deleteMany({
+          where: {
+            status: { in: [PurchaseOrderStatus.RECEIVED, PurchaseOrderStatus.CANCELLED] },
+            updatedAt: { lt: poCutoff },
+          },
+        }),
       ]);
+      returnParcelsDeleted = returnPruned.count;
     } catch (err) {
-      console.error("[prune] ai/import tables", err);
+      console.error("[prune] ai/import/retention tables", err);
     }
   } else {
     partial = true;
@@ -323,5 +358,16 @@ export async function pruneDailyData(
     });
   }
 
-  return { skipped: false, partial, orders, printJobs, waves, eventsCleared, blobsDeleted, walletDeleted, movementsRolledUp };
+  return {
+    skipped: false,
+    partial,
+    orders,
+    printJobs,
+    waves,
+    eventsCleared,
+    blobsDeleted,
+    walletDeleted,
+    movementsRolledUp,
+    returnParcelsDeleted,
+  };
 }

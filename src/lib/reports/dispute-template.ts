@@ -87,7 +87,7 @@ export function buildDisputeAppealDraft(parcel: DisputeParcelContext): string {
       `Thank you,`,
       `Kyna Clothing Shop`,
     ]
-      .filter(Boolean)
+      .filter((line): line is string => line !== null)
       .join("\n");
   }
 
@@ -127,6 +127,6 @@ export function buildDisputeAppealDraft(parcel: DisputeParcelContext): string {
     `Thank you,`,
     `Kyna Clothing Shop`,
   ]
-    .filter(Boolean)
+    .filter((line): line is string => line !== null)
     .join("\n");
 }

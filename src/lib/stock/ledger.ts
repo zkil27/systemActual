@@ -1,8 +1,9 @@
 import crypto from "crypto";
 import { Prisma, StockReason } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { committedUnitsByListing } from "@/lib/catalog/garments";
-import { COMMITTED_ORDER_STATUSES, computeStartingStock } from "@/lib/catalog/variants";
+import { committedUnitsByListing, listingUnitKey } from "@/lib/catalog/garments";
+import { computeStartingStock } from "@/lib/catalog/variants";
+import { COMMITTED_ORDER_STATES } from "@/lib/ledger/state";
 import { hasLeftWarehouse, RESTOCK_CONDITIONS, shipMovements } from "./rules";
 
 /** Pieces on the shelf per garment variant (maintained automatically via Postgres trigger). */
@@ -16,18 +17,18 @@ export async function onShelfByVariant(variantIds?: string[]): Promise<Map<strin
   return new Map(rows.map((r) => [r.id, r.onShelfCount]));
 }
 
-/** Pieces on unshipped orders per garment variant, across both shops. */
+/** Pieces on unshipped orders per garment variant, across all connected shops. */
 export async function committedByVariant(): Promise<Map<string, number>> {
   const [byListing, listings] = await Promise.all([
     committedUnitsByListing(),
     prisma.listingVariant.findMany({
       where: { garmentVariantId: { not: null } },
-      select: { platform: true, listingId: true, variationId: true, garmentVariantId: true },
+      select: { shopConnectionId: true, listingId: true, variationId: true, garmentVariantId: true },
     }),
   ]);
   const map = new Map<string, number>();
   for (const l of listings) {
-    const units = byListing.get(`${l.platform}:${l.listingId}:${l.variationId}`) ?? 0;
+    const units = byListing.get(listingUnitKey(l.shopConnectionId, l.listingId, l.variationId)) ?? 0;
     if (units) map.set(l.garmentVariantId!, (map.get(l.garmentVariantId!) ?? 0) + units);
   }
   return map;
@@ -94,6 +95,7 @@ export async function ensureVariantStartingStock(variant: {
   id: string;
   startingStockSetAt: Date | null;
   listings: Array<{
+    shopConnectionId?: string;
     platform: import("@prisma/client").Platform;
     listingId: string;
     variationId: string;
@@ -104,27 +106,39 @@ export async function ensureVariantStartingStock(variant: {
   let units = 0;
   if (variant.listings.length > 0) {
     const listingIds = [...new Set(variant.listings.map((l) => l.listingId))];
+    const shopIds = [...new Set(variant.listings.map((l) => l.shopConnectionId).filter((id): id is string => Boolean(id)))];
     const platforms = [...new Set(variant.listings.map((l) => l.platform))];
-    const groups = await Promise.all(
-      platforms.map((platform) =>
-        prisma.orderLine.groupBy({
-          by: ["listingId", "variationId"],
-          where: {
-            listingId: { in: listingIds },
-            order: { platform, status: { in: COMMITTED_ORDER_STATUSES[platform] } },
-          },
-          _sum: { quantity: true },
-        })
-      )
-    );
-    const committed = new Map<string, number>();
-    platforms.forEach((platform, idx) => {
-      for (const r of groups[idx]) {
-        committed.set(`${platform}:${r.listingId}:${r.variationId}`, r._sum.quantity ?? 0);
-      }
+    const rows = await prisma.orderLine.findMany({
+      where: {
+        listingId: { in: listingIds },
+        order: {
+          state: { in: [...COMMITTED_ORDER_STATES] },
+          ...(shopIds.length === variant.listings.length
+            ? { shopConnectionId: { in: shopIds } }
+            : { platform: { in: platforms } }),
+        },
+      },
+      select: {
+        listingId: true,
+        variationId: true,
+        quantity: true,
+        order: { select: { shopConnectionId: true, platform: true } },
+      },
     });
+    const committedByShop = new Map<string, number>();
+    const committedByPlatform = new Map<string, number>();
+    for (const r of rows) {
+      const sk = listingUnitKey(r.order.shopConnectionId, r.listingId, r.variationId);
+      committedByShop.set(sk, (committedByShop.get(sk) ?? 0) + r.quantity);
+      const pk = `${r.order.platform}:${r.listingId}:${r.variationId}`;
+      committedByPlatform.set(pk, (committedByPlatform.get(pk) ?? 0) + r.quantity);
+    }
     units = variant.listings.reduce(
-      (n, l) => n + (committed.get(`${l.platform}:${l.listingId}:${l.variationId}`) ?? 0),
+      (n, l) =>
+        n +
+        (l.shopConnectionId
+          ? (committedByShop.get(listingUnitKey(l.shopConnectionId, l.listingId, l.variationId)) ?? 0)
+          : (committedByPlatform.get(`${l.platform}:${l.listingId}:${l.variationId}`) ?? 0)),
       0
     );
   }
@@ -444,16 +458,18 @@ export async function syncReturnRestock(parcelId: string, staffMemberId?: string
  * Each order is processed once; cancellations before pickup only clear it.
  */
 export async function recordShipments(deadline: number, batch = 200) {
-  const COMMITTED = [...new Set(Object.values(COMMITTED_ORDER_STATUSES).flat())];
   const orders = await prisma.order.findMany({
-    where: { stockRecordedAt: null, status: { notIn: COMMITTED } },
+    where: {
+      stockRecordedAt: null,
+      OR: [{ state: { notIn: [...COMMITTED_ORDER_STATES] } }, { state: null }],
+    },
     include: { lines: true, packages: { select: { status: true } } },
     orderBy: { platformUpdatedAt: "asc" },
     take: batch,
   });
   if (!orders.length) return { orders: 0, movements: 0 };
 
-  const shippedOrders = orders.filter((o) => hasLeftWarehouse(o.platform, o.status, o.shippedAt, o.packages));
+  const shippedOrders = orders.filter((o) => hasLeftWarehouse(o.platform, o.status, o.shippedAt, o.packages, o.state));
   const byKey = new Map<string, { id: string; startingStockSetAt: Date | null } | null>();
   if (shippedOrders.length > 0) {
     const shopIds = [...new Set(shippedOrders.map((o) => o.shopConnectionId))];

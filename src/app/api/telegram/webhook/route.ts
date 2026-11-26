@@ -10,7 +10,14 @@ import {
 import { isAuthorizedTelegramChat, parseTelegramStartCode, verifyTelegramSecret } from "@/lib/telegram-auth";
 import { prisma } from "@/lib/prisma";
 import { runTick } from "@/lib/worker/tick";
-import { HELP_TEXT, parseCommand } from "@/lib/telegram-commands";
+import {
+  buildOpsConfirmPrompt,
+  executeOpsCallback,
+  HELP_TEXT,
+  isConfirmableOpsCommand,
+  parseCommand,
+  parseOpsCallbackData,
+} from "@/lib/telegram-commands";
 
 const STALE_SYNC_MS = 3 * 60_000;
 const TELEGRAM_PAIR_LOCK_ID = "telegram-pair";
@@ -32,7 +39,26 @@ export async function POST(req: NextRequest) {
         await answerTelegramCallback(String(callback.id), "Not authorized.");
         return NextResponse.json({ ok: true });
       }
-      const parsed = parseApprovalCallbackData(typeof callback.data === "string" ? callback.data : "");
+      const rawCbData = typeof callback.data === "string" ? callback.data : "";
+      const opsCb = parseOpsCallbackData(rawCbData);
+      if (opsCb) {
+        const outcome = await executeOpsCallback(opsCb.action, opsCb.cmd);
+        if (outcome.triggerManualSync) {
+          after(() => runTick("manual").catch((err) => console.error("[telegram sync]", err)));
+        }
+        await answerTelegramCallback(String(callback.id), outcome.toast);
+        if (cbChatId && cbMsgId) {
+          await editTelegramMessageText(
+            cbChatId,
+            cbMsgId,
+            outcome.text,
+            outcome.replyMarkup ?? { inline_keyboard: [] }
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+
+      const parsed = parseApprovalCallbackData(rawCbData);
       if (!parsed) {
         await answerTelegramCallback(String(callback.id), "Unknown button.");
         return NextResponse.json({ ok: true });
@@ -144,10 +170,10 @@ export async function POST(req: NextRequest) {
       after(() => runTick("webhook").catch((err) => console.error("[telegram bg tick]", err)));
     }
 
-    if (parseCommand(text)?.cmd === "sync") {
-      // Runs after the reply so Telegram doesn't wait (and retry) on a 90s tick.
-      after(() => runTick("manual").catch((err) => console.error("[telegram sync]", err)));
-      await sendTelegramMessage(chatId, "Syncing both shops now. Send /today in a minute for fresh numbers.");
+    const parsedCmd = parseCommand(text);
+    if (parsedCmd && isConfirmableOpsCommand(parsedCmd.cmd)) {
+      const prompt = buildOpsConfirmPrompt(parsedCmd.cmd);
+      await sendTelegramMessage(chatId, prompt.text, prompt.replyMarkup);
       return NextResponse.json({ ok: true });
     }
 

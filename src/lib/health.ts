@@ -21,6 +21,7 @@ export interface HealthSummary {
 export interface HealthInput {
   now: Date;
   shops: Array<{
+    id?: string;
     platform: string;
     shopName: string;
     connected: boolean;
@@ -67,22 +68,30 @@ export function assessHealth(i: HealthInput): HealthSummary {
   const now = i.now;
   const age = (d: Date | null) => (d ? now.getTime() - d.getTime() : Infinity);
 
-  for (const s of i.shops) {
-    const name = s.platform === "SHOPEE" ? "Shopee" : "TikTok";
-    if (!s.connected) continue;
+  const connectedShops = i.shops.filter((s) => s.connected);
+  const countByPlatform = new Map<string, number>();
+  for (const s of connectedShops) {
+    countByPlatform.set(s.platform, (countByPlatform.get(s.platform) ?? 0) + 1);
+  }
+
+  for (const s of connectedShops) {
+    const platformName = s.platform === "SHOPEE" ? "Shopee" : "TikTok";
+    const multiOnPlatform = (countByPlatform.get(s.platform) ?? 0) > 1;
+    const label = multiOnPlatform && s.shopName ? `${platformName} (${s.shopName}) sync` : `${platformName} sync`;
+    const id = `shop:${s.id ?? s.platform}`;
     if (s.tokenError) {
-      checks.push({ id: `shop:${s.platform}`, label: `${name} sync`, level: "bad", detail: `Reconnect needed: ${s.tokenError}` });
+      checks.push({ id, label, level: "bad", detail: `Reconnect needed: ${s.tokenError}` });
       continue;
     }
     const lag = age(s.lastSyncedAt);
     checks.push({
-      id: `shop:${s.platform}`,
-      label: `${name} sync`,
+      id,
+      label,
       level: lag > 60 * MIN ? "bad" : lag > 15 * MIN ? "warn" : "ok",
       detail: `Last synced ${ago(s.lastSyncedAt, now)}`,
     });
   }
-  if (!i.shops.some((s) => s.connected)) {
+  if (!connectedShops.length) {
     checks.push({ id: "shops", label: "Shops", level: "warn", detail: "No shop connected yet" });
   }
 
@@ -160,8 +169,8 @@ export async function getHealthSummary(now: Date = new Date()): Promise<HealthSu
   const [shops, lock, printer, queuedJobs, failedJobs24h, runningWave, switches] = await Promise.all([
     prisma.shopConnection.findMany({
       where: { isDemo: false },
-      select: { platform: true, shopName: true, accessToken: true, lastSyncedAt: true, tokenError: true, tokenErrorAt: true },
-      orderBy: { platform: "asc" },
+      select: { id: true, platform: true, shopName: true, accessToken: true, lastSyncedAt: true, tokenError: true, tokenErrorAt: true },
+      orderBy: [{ platform: "asc" }, { shopName: "asc" }],
     }),
     prisma.workerLock.findUnique({ where: { id: "tick" } }),
     prisma.printDevice.findFirst({ orderBy: { createdAt: "desc" } }),
@@ -173,6 +182,7 @@ export async function getHealthSummary(now: Date = new Date()): Promise<HealthSu
   return assessHealth({
     now,
     shops: shops.map((s) => ({
+      id: s.id,
       platform: s.platform,
       shopName: s.shopName,
       connected: Boolean(s.accessToken),

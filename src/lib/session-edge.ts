@@ -9,12 +9,14 @@ export interface OwnerSessionPayload {
   userId: string;
   email: string;
   name: string;
+  tv?: number;
 }
 
 export interface StaffSessionPayload {
   role: "staff";
   staffId: string;
   name: string;
+  tv?: number;
 }
 
 export async function createOwnerToken(payload: OwnerSessionPayload): Promise<string> {
@@ -40,11 +42,13 @@ export async function verifyOwnerToken(
   try {
     const { payload } = await jwtVerify(token, getSecretKey());
     if (payload.role !== "owner" || typeof payload.userId !== "string") return null;
+    const tv = typeof payload.tv === "number" ? payload.tv : undefined;
     return {
       role: "owner",
       userId: payload.userId,
       email: String(payload.email ?? ""),
       name: String(payload.name ?? ""),
+      ...(tv !== undefined ? { tv } : {}),
     };
   } catch {
     return null;
@@ -58,10 +62,12 @@ export async function verifyStaffToken(
   try {
     const { payload } = await jwtVerify(token, getSecretKey());
     if (payload.role !== "staff" || typeof payload.staffId !== "string") return null;
+    const tv = typeof payload.tv === "number" ? payload.tv : undefined;
     return {
       role: "staff",
       staffId: payload.staffId,
       name: String(payload.name ?? ""),
+      ...(tv !== undefined ? { tv } : {}),
     };
   } catch {
     return null;

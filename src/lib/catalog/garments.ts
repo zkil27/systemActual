@@ -1,7 +1,7 @@
 import { Platform, Prisma, type ListingVariant } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { COMMITTED_ORDER_STATES } from "@/lib/ledger/state";
 import {
-  COMMITTED_ORDER_STATUSES,
   computeStartingStock,
   findCrossShopTitleMatches,
   pairVariations,
@@ -313,24 +313,26 @@ export async function setStartingStock(variantId: string, count: number) {
 
 // ---------------------------------------------------------------- the owner's catalog view
 
-/** Units on unshipped orders per listing variation, keyed "platform:listingId:variationId". */
+/** Stable per-shop listing variation key so multiple shops on one platform never collide. */
+export function listingUnitKey(shopConnectionId: string, listingId: string, variationId: string): string {
+  return `${shopConnectionId}:${listingId}:${variationId}`;
+}
+
+/** Units on unshipped orders per shop listing variation, keyed "shopConnectionId:listingId:variationId". */
 export async function committedUnitsByListing(): Promise<Map<string, number>> {
-  const platforms = [Platform.SHOPEE, Platform.TIKTOK] as const;
-  const results = await Promise.all(
-    platforms.map((platform) =>
-      prisma.orderLine.groupBy({
-        by: ["listingId", "variationId"],
-        where: { order: { platform, status: { in: COMMITTED_ORDER_STATUSES[platform] } } },
-        _sum: { quantity: true },
-      })
-    )
-  );
+  const rows = await prisma.$queryRaw<
+    Array<{ shopConnectionId: string; listingId: string; variationId: string; qty: number }>
+  >(Prisma.sql`
+    SELECT o."shopConnectionId", ol."listingId", ol."variationId", COALESCE(SUM(ol."quantity"), 0)::int AS qty
+    FROM "OrderLine" ol
+    INNER JOIN "Order" o ON o."id" = ol."orderId"
+    WHERE o."state"::text IN (${Prisma.join(COMMITTED_ORDER_STATES)})
+    GROUP BY o."shopConnectionId", ol."listingId", ol."variationId"
+  `);
   const map = new Map<string, number>();
-  platforms.forEach((platform, idx) => {
-    for (const r of results[idx]) {
-      map.set(`${platform}:${r.listingId}:${r.variationId}`, r._sum.quantity ?? 0);
-    }
-  });
+  for (const r of rows) {
+    map.set(listingUnitKey(r.shopConnectionId, r.listingId, r.variationId), Number(r.qty) || 0);
+  }
   return map;
 }
 
@@ -354,6 +356,7 @@ export async function getStockOperationsSummary(
         garment: { select: { lowStockThreshold: true, safetyBuffer: true } },
         listings: {
           select: {
+            shopConnectionId: true,
             platform: true,
             listingId: true,
             variationId: true,
@@ -382,7 +385,7 @@ export async function getStockOperationsSummary(
     let hasPushError = false;
     for (const l of v.listings) {
       garmentPlatforms.add(l.platform);
-      units += committed.get(`${l.platform}:${l.listingId}:${l.variationId}`) ?? 0;
+      units += committed.get(listingUnitKey(l.shopConnectionId, l.listingId, l.variationId)) ?? 0;
       if (l.pushError) hasPushError = true;
     }
 
@@ -496,7 +499,10 @@ export async function getCatalog(opts: { includeArchived?: boolean } = {}): Prom
         entry.variations++;
         listingMap.set(key, entry);
       }
-      const units = ls.reduce((n, l) => n + (committed.get(`${l.platform}:${l.listingId}:${l.variationId}`) ?? 0), 0);
+      const units = v.listings.reduce(
+        (n, l) => n + (committed.get(listingUnitKey(l.shopConnectionId, l.listingId, l.variationId)) ?? 0),
+        0
+      );
       return {
         id: v.id,
         label: v.label,

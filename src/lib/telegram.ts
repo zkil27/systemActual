@@ -75,7 +75,8 @@ export async function answerTelegramCallback(
 export async function editTelegramMessageText(
   chatId: string,
   messageId: number,
-  text: string
+  text: string,
+  replyMarkup: Record<string, unknown> = { inline_keyboard: [] }
 ): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token || !chatId || !messageId) return false;
@@ -88,7 +89,7 @@ export async function editTelegramMessageText(
         message_id: messageId,
         text,
         disable_web_page_preview: true,
-        reply_markup: { inline_keyboard: [] },
+        reply_markup: replyMarkup,
       }),
     });
     return res.ok;

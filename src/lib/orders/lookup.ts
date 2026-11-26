@@ -1,5 +1,6 @@
-import { MoneyKind, Platform, PrintJobKind, PrintJobStatus, Prisma } from "@prisma/client";
+import { MoneyKind, OrderState, Platform, PrintJobKind, PrintJobStatus, Prisma } from "@prisma/client";
 import { normalizeCourierName } from "@/lib/connectors/normalizer";
+import { isCancelledOrderState, isDeliveredOrderState, normalizeOrderState } from "@/lib/ledger/state";
 import { prisma } from "@/lib/prisma";
 import { hasRealConnectedShop } from "@/lib/shops";
 
@@ -24,11 +25,9 @@ export interface OrderStage {
   detail?: string | null;
 }
 
-const DELIVERED_STATUSES = new Set(["COMPLETED", "DELIVERED", "TO_CONFIRM_RECEIVE"]);
-const CANCELLED_STATUSES = new Set(["CANCELLED", "IN_CANCEL"]);
-
 export interface TimelineInput {
   status: string;
+  state?: OrderState | null;
   cancelRequested: boolean;
   platformCreatedAt: Date;
   platformUpdatedAt: Date;
@@ -46,13 +45,19 @@ export interface TimelineInput {
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 
+function resolveOrderState(status: string, state?: OrderState | null): OrderState {
+  return state ?? normalizeOrderState(Platform.SHOPEE, status);
+}
+
 /**
  * One row per step. "Delivered" is inferred from the order status (shops
  * don't give a delivery time on the order), so it carries the last update time.
  * A returned order replaces "Delivered" with "Returned".
  */
 export function buildOrderTimeline(o: TimelineInput): OrderStage[] {
-  const cancelled = CANCELLED_STATUSES.has(o.status) || o.cancelRequested;
+  const st = resolveOrderState(o.status, o.state);
+  const statusCancelled = isCancelledOrderState(st);
+  const cancelled = statusCancelled || o.cancelRequested;
   const stages: OrderStage[] = [
     { id: "ordered", label: "Ordered", at: iso(o.platformCreatedAt) },
     { id: "waved", label: "Put in a wave", at: iso(o.wavedAt) },
@@ -72,7 +77,7 @@ export function buildOrderTimeline(o: TimelineInput): OrderStage[] {
     stages.push({
       id: "delivered",
       label: "Delivered",
-      at: DELIVERED_STATUSES.has(o.status) ? iso(o.platformUpdatedAt) : null,
+      at: isDeliveredOrderState(st) ? iso(o.platformUpdatedAt) : null,
     });
   }
   stages.push({
@@ -84,7 +89,7 @@ export function buildOrderTimeline(o: TimelineInput): OrderStage[] {
   if (cancelled) {
     stages.splice(1, 0, {
       id: "cancelled",
-      label: o.cancelRequested && !CANCELLED_STATUSES.has(o.status) ? "Buyer asked to cancel" : "Cancelled",
+      label: o.cancelRequested && !statusCancelled ? "Buyer asked to cancel" : "Cancelled",
       at: iso(o.platformUpdatedAt),
       alert: true,
     });
@@ -93,8 +98,8 @@ export function buildOrderTimeline(o: TimelineInput): OrderStage[] {
 }
 
 /** Status in a few words for the result row. */
-export function orderHeadline(stages: OrderStage[], status: string): string {
-  if (CANCELLED_STATUSES.has(status)) return "Cancelled";
+export function orderHeadline(stages: OrderStage[], status: string, state?: OrderState | null): string {
+  if (isCancelledOrderState(resolveOrderState(status, state))) return "Cancelled";
   const ret = stages.find((s) => s.id === "returned");
   if (ret) return ret.label;
   const done = stages.filter((s) => s.at && !s.alert);
@@ -280,6 +285,7 @@ export async function lookupOrders(
       : null;
     const stages = buildOrderTimeline({
       status: o.status,
+      state: o.state,
       cancelRequested: o.cancelRequested,
       platformCreatedAt: o.platformCreatedAt,
       platformUpdatedAt: o.platformUpdatedAt,
@@ -302,7 +308,7 @@ export async function lookupOrders(
       platform: o.platform,
       orderSn: o.orderSn,
       status: o.status,
-      headline: orderHeadline(stages, o.status),
+      headline: orderHeadline(stages, o.status, o.state),
       totalPhp: Number(o.totalPhp),
       isCod: o.isCod,
       shopName: o.shopConnection.shopName,
@@ -312,7 +318,7 @@ export async function lookupOrders(
       stages,
       returnParcelIds: ret.map((r) => r.id),
       // Only labels that exist can be reprinted, and never for a cancelled order.
-      canReprint: trackingNumbers.length > 0 && !CANCELLED_STATUSES.has(o.status) && !o.cancelRequested,
+      canReprint: trackingNumbers.length > 0 && !isCancelledOrderState(resolveOrderState(o.status, o.state)) && !o.cancelRequested,
     };
   });
 

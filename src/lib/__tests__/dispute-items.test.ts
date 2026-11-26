@@ -43,5 +43,32 @@ describe("buildDisputeAppealDraft with an item check", () => {
     });
     expect(draft).toContain("INCOMPLETE / MISSING piece(s)");
     expect(draft).toContain("Ribbed Top (Black, M): expected 2 — 1 good, 1 missing");
+    // Blank paragraph separators are preserved instead of stripped by filter(Boolean).
+    expect(draft).toContain("Subject: Seller Dispute Appeal — Order 2611ABC\n\nHello Shopee Dispute Team,\n\n");
+    expect(draft).toContain("\n\nItem-by-item check at our warehouse:\n");
+    expect(draft).toContain("\n\nThank you,\nKyna Clothing Shop");
+  });
+
+  it("preserves paragraph blank lines in missing-parcel drafts", () => {
+    const draft = buildDisputeAppealDraft({
+      platform: Platform.TIKTOK,
+      orderSn: "TT-999",
+      returnSn: null,
+      forwardTrackingNumber: "JT1",
+      rtsTrackingNumber: null,
+      courier: "J&T Express",
+      category: ReturnCategory.FAILED_DELIVERY,
+      returnReason: null,
+      itemSummary: "Skort",
+      variationName: "Black, M",
+      quantity: 1,
+      digitalReturnTaggedAt: new Date("2026-11-20T00:00:00Z"),
+      courierReturnedToSellerAt: new Date("2026-11-24T00:00:00Z"),
+      physicallyReceivedAt: null,
+      physicalCondition: null,
+    });
+    expect(draft).toContain("Subject: Missing Returned Parcel Claim — Order TT-999\n\nHello TikTok Shop Support Team,\n\n");
+    expect(draft).not.toContain("- Return ID:");
+    expect(draft).toContain("\n\nThank you,\nKyna Clothing Shop");
   });
 });

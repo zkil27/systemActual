@@ -84,6 +84,51 @@ describe("mapTikTokOrderStatements", () => {
     expect(mapTikTokOrderStatements({ statement_transactions: [{ fee_amount: "-3" }] })).toBeNull();
     expect(mapTikTokOrderStatements({})).toBeNull();
   });
+
+  it("maps shipping_fee_amount into shippingPhp and avoids double-counting return shipping", () => {
+    const forward = mapTikTokOrderStatements({
+      statement_transactions: [
+        {
+          settlement_amount: "129.46",
+          platform_commission_amount: "-8.07",
+          affiliate_commission_amount: "-20.78",
+          shipping_fee_amount: "-32",
+          shipping_cost_amount: "0",
+        },
+      ],
+    })!;
+    expect(forward).toMatchObject({
+      netPayoutPhp: 129.46,
+      commissionPhp: 8.07,
+      affiliatePhp: 20.78,
+      shippingPhp: 32,
+    });
+
+    const returned = mapTikTokOrderStatements({
+      statement_transactions: [
+        {
+          settlement_amount: "108.27",
+          platform_commission_amount: "-11.97",
+          affiliate_commission_amount: "-18.04",
+          shipping_fee_amount: "0",
+          shipping_cost_amount: "0",
+        },
+        {
+          settlement_amount: "-176",
+          platform_commission_amount: "11.97",
+          shipping_fee_amount: "-32",
+          shipping_cost_amount: "-32",
+          return_shipping_fee_amount: "-32",
+        },
+      ],
+    })!;
+    expect(returned).toMatchObject({
+      netPayoutPhp: -67.73,
+      commissionPhp: 0,
+      affiliatePhp: 18.04,
+      shippingPhp: 32,
+    });
+  });
 });
 
 describe("buildFinanceRecord", () => {

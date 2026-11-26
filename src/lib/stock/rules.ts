@@ -1,5 +1,5 @@
-import { Platform } from "@prisma/client";
-import { COMMITTED_ORDER_STATUSES } from "@/lib/catalog/variants";
+import { OrderState, Platform } from "@prisma/client";
+import { isCommittedOrderState, normalizeOrderState } from "@/lib/ledger/state";
 
 /**
  * Stock model (replaces BigSeller's stock sync):
@@ -28,10 +28,12 @@ export function hasLeftWarehouse(
   platform: Platform,
   status: string,
   shippedAt: Date | null,
-  packages?: Array<{ status: string | null }>
+  packages?: Array<{ status: string | null }>,
+  state?: OrderState | null
 ): boolean {
-  if (COMMITTED_ORDER_STATUSES[platform].includes(status)) return false;
-  if (status === "CANCELLED") {
+  const resolved = state ?? normalizeOrderState(platform, status);
+  if (isCommittedOrderState(resolved)) return false;
+  if (resolved === OrderState.CANCELLED) {
     if (platform === Platform.TIKTOK) {
       return Boolean(
         packages?.some((p) => p.status && TIKTOK_TRANSIT_PACKAGE_STATUSES.has(p.status.trim().toUpperCase()))

@@ -7,9 +7,11 @@ import { tiktokRequest } from "@/lib/connectors/tiktok";
 import { ensureFreshToken } from "@/lib/connectors/tokens";
 import { mapShopeeOrder, mapTikTokOrder, type NormalizedOrder } from "./normalize";
 import { saveOrder, saveOrderBatch } from "./store";
-import { adaptWindowMs, INITIAL_LOOKBACK_MS, MAX_WINDOW_MS, nextSyncWindow, type SyncWindow } from "./window";
+import { adaptWindowMs, INITIAL_LOOKBACK_MS, MAX_WINDOW_MS, nextSyncWindow } from "./window";
 
 export { SHOPEE_DETAIL_FIELDS };
+
+const sec = (d: Date) => Math.floor(d.getTime() / 1000);
 
 /** Per-shop Shopee window size, kept in a WorkerLock row (holder = milliseconds). */
 const windowKey = (shopId: string) => `order-window:${shopId}`;
@@ -34,72 +36,10 @@ export interface OrderSyncResult {
   caughtUp: boolean;
 }
 
-const sec = (d: Date) => Math.floor(d.getTime() / 1000);
-
 class OutOfTime extends Error {}
 
 function checkDeadline(deadline: number) {
   if (Date.now() >= deadline) throw new OutOfTime();
-}
-
-async function* shopeeWindowOrders(
-  conn: ShopConnection,
-  accessToken: string,
-  w: SyncWindow,
-  deadline: number
-): AsyncGenerator<NormalizedOrder[]> {
-  let cursor = "";
-  for (;;) {
-    checkDeadline(deadline);
-    const list = await shopeeGet("/api/v2/order/get_order_list", conn.shopId, accessToken, {
-      time_range_field: "update_time",
-      time_from: sec(w.from),
-      time_to: sec(w.to),
-      page_size: 100,
-      ...(cursor ? { cursor } : {}),
-    });
-    const sns: string[] = (list?.order_list ?? []).map((o: { order_sn: string }) => String(o.order_sn));
-    for (let i = 0; i < sns.length; i += 50) {
-      checkDeadline(deadline);
-      const detail = await shopeeGet("/api/v2/order/get_order_detail", conn.shopId, accessToken, {
-        order_sn_list: sns.slice(i, i + 50).join(","),
-        response_optional_fields: SHOPEE_DETAIL_FIELDS,
-      });
-      yield (detail?.order_list ?? []).map(mapShopeeOrder);
-    }
-    if (!list?.more || !list?.next_cursor) return;
-    cursor = String(list.next_cursor);
-  }
-}
-
-async function* tiktokWindowOrders(
-  conn: ShopConnection,
-  accessToken: string,
-  w: SyncWindow,
-  deadline: number
-): AsyncGenerator<NormalizedOrder[]> {
-  let pageToken = "";
-  for (;;) {
-    checkDeadline(deadline);
-    const data = await tiktokRequest({
-      method: "POST",
-      path: "/order/202309/orders/search",
-      accessToken,
-      shopCipher: conn.shopCipher,
-      query: {
-        // A 100-order page can take ~17s to come back; smaller pages leave
-        // time in the tick to save what was fetched.
-        page_size: "50",
-        sort_field: "update_time",
-        sort_order: "ASC",
-        ...(pageToken ? { page_token: pageToken } : {}),
-      },
-      body: { update_time_ge: sec(w.from), update_time_lt: sec(w.to) },
-    });
-    yield (Array.isArray(data?.orders) ? data.orders : []).map(mapTikTokOrder);
-    if (!data?.next_page_token) return;
-    pageToken = String(data.next_page_token);
-  }
 }
 
 /**
@@ -111,17 +51,14 @@ export async function syncOrders(conn: ShopConnection, deadline: number): Promis
   if (conn.platform === Platform.TIKTOK && !conn.shopCipher) return { saved: 0, windows: 0, caughtUp: true };
 
   const accessToken = await ensureFreshToken(conn);
-  const pages = conn.platform === Platform.SHOPEE ? shopeeWindowOrders : tiktokWindowOrders;
+  const connector = getChannelConnector(conn.platform);
   let cursor = conn.ordersSyncedTo;
   let saved = 0;
   let windows = 0;
-  // TikTok pages come sorted by update_time ascending, so everything up to the
-  // last processed order is done. Keeping that point lets a window too busy for
-  // one tick finish over several ticks instead of restarting from its start.
-  const canResumeMidWindow = conn.platform === Platform.TIKTOK;
+  const canResumeMidWindow = connector.canResumeOrderWindow;
   const seenListings = new Set<string>();
   const progress: { lastProcessedAt: Date | null } = { lastProcessedAt: null };
-  // TikTok resumes inside a window; Shopee needs a window small enough to finish.
+  // Channels that resume inside a window use the max window; others adapt window size.
   const windowMs = canResumeMidWindow ? MAX_WINDOW_MS : await loadWindowMs(conn.id);
   const adapt = async (ranOutOfTime: boolean) => {
     if (canResumeMidWindow) return;
@@ -132,7 +69,7 @@ export async function syncOrders(conn: ShopConnection, deadline: number): Promis
   try {
     for (;;) {
       const w = nextSyncWindow(cursor, new Date(), INITIAL_LOOKBACK_MS, windowMs);
-      for await (const batch of pages(conn, accessToken, w, deadline)) {
+      for await (const batch of connector.fetchOrdersWindow(conn, accessToken, w, () => checkDeadline(deadline))) {
         if (!batch.length) continue;
         const res = await saveOrderBatch(conn.id, conn.platform, batch, {
           seenListings,
@@ -184,11 +121,11 @@ export async function syncOrdersWindow(
   to: Date,
   deadline: number
 ): Promise<{ saved: number }> {
-  const pages = conn.platform === Platform.SHOPEE ? shopeeWindowOrders : tiktokWindowOrders;
+  const connector = getChannelConnector(conn.platform);
   const seenListings = new Set<string>();
   let saved = 0;
   try {
-    for await (const batch of pages(conn, accessToken, { from, to, last: true }, deadline)) {
+    for await (const batch of connector.fetchOrdersWindow(conn, accessToken, { from, to, last: true }, () => checkDeadline(deadline))) {
       if (!batch.length) continue;
       const res = await saveOrderBatch(conn.id, conn.platform, batch, {
         seenListings,

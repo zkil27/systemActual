@@ -10,12 +10,12 @@ Last updated: 2026-11-27.
 
 | Phase | Theme | Status |
 |---|---|---|
-| 1 | Return truth, item by item, plus foundations | Done on `dev` (not on `main` yet) |
-| 2 | Profit per order | Done on `dev` (not on `main` yet) |
-| 3 | Restock and suppliers | Done on dev (not on main yet) |
-| 4 | Chats on both shops, safe auto-replies | Done on dev (Shopee chats coming soon) |
-| 5 | Listings and prices in one place | Done on dev (not on main yet) |
-| Dev tools | Developer section (`/dev`), developer only | Done on dev (not on main yet) |
+| 1 | Return truth, item by item, plus foundations | Live on `main` (migrations deployed) |
+| 2 | Profit per order | Live on `main` (TikTok fee mapping fix on `dev`) |
+| 3 | Restock and suppliers | Live on `main` (migrations deployed) |
+| 4 | Chats on both shops, safe auto-replies | Live on `main` (Shopee chats coming soon) |
+| 5 | Listings and prices in one place | Live on `main` (migrations deployed) |
+| Dev tools | Developer section (`/dev`), developer only | Live on `main` (`DEVELOPER_EMAILS` set) |
 | Ongoing | Maintainability | Backlog below |
 
 Suggested order: 3, 4, 5. Phase 5 is last because it writes to the live listings.
@@ -77,10 +77,10 @@ What exists:
   - CI in `.github/workflows/ci.yml`.
 
 Open:
-- [ ] Apply the migrations to Supabase: `npm run db:deploy`.
-- [ ] Set up the free heartbeat (`docs/cutover.md`, step 1b) and confirm it runs.
-- [ ] Confirm the return item price fields (Shopee `item_price`, TikTok per-line `refund_amount.refund_total`) with `npm run capture:live`. Until then the value is a pro-rata split, labelled "estimate".
-- [ ] Look at the new screens on a phone: `/scan` with a 3-piece return, and the parcel sheet.
+- [x] Apply the migrations to Supabase: `npm run db:deploy` (all 33 migrations applied).
+- [x] Background heartbeat running: Vercel Schedules (`*/15 * * * *`) fixed with `CRON_SECRET` on Production and verified `ok: true` (`trigger: "schedule"`), alongside the warehouse PC agent (`trigger: "agent"`) and webhooks. Optional Supabase `pg_cron` (`docs/cutover.md`, step 1b) is still available if 5-minute ticks are needed while the PC is off.
+- [ ] Confirm the return item price fields with `npm run capture:live`: TikTok `return_line_items[].refund_amount.refund_total` confirmed live; Shopee `item_price` still pending once Shopee switches from sandbox to live.
+- [ ] Look at the new screens on a phone while signed in: `/scan` with a 3-piece return, and the parcel sheet (`/login` and `/scan` PIN screen verified clean on 390×844).
 - [ ] Wrong extra items (something not expected at all) are only captured in the note and photo.
 
 ## Phase 2: profit per order (done)
@@ -102,10 +102,10 @@ What exists:
   - Telegram `/profit` (`src/lib/finance/telegram.ts`).
 
 Open:
-- [ ] Run `npm run capture:live` and check `shopee-escrow.json` and `tiktok-order-statement.json`. If a fee lands in "other", add its field name to the regexes in `map.ts`.
+- [ ] Run `npm run capture:live` and check `shopee-escrow.json` and `tiktok-order-statement.json`: TikTok audited across 5,932 live `OrderFinance` rows (`shipping_fee_amount` and signed refund commission reversals fixed in `src/lib/finance/map.ts`); `shopee-escrow.json` pending once Shopee is live.
 - [ ] Compare 3 payouts per shop with Seller Center (`docs/cutover.md`, first-week checklist).
 - [ ] Not in per-order profit yet: refunds taken back after a payout, and the courier fee on failed deliveries. Both are in Money adjustments. A later step could link them to the order.
-- [ ] Confirm whether the shops' data carries the 1% withholding tax (`withholding_tax*` fields). If not, the screen shows an estimate labelled as such.
+- [ ] Confirm whether the shops' data carries the 1% withholding tax (`withholding_tax*` fields): confirmed absent on TikTok `202309` statements (0 of 5,932 orders; RR 16-2023 estimate shown as intended); Shopee pending live orders.
 
 ## Phase 3: restock and suppliers (done on dev)
 
@@ -118,8 +118,8 @@ What exists:
 - **Telegram:** 8 PM daily brief includes a "Reorder soon" / overdue PO line (`src/lib/reports/brief.ts`, `daily-brief.ts`), and `src/lib/reports/alerts.ts` sends `OVERDUE SUPPLIER ORDERS` alerts keyed `po:overdue:<id>`.
 
 Open:
-- Apply `prisma/migrations/20261126040000_suppliers_and_restock/migration.sql` to Supabase Postgres when merging/deploying `dev`.
-- End-to-end verification in the UI with a real database once deployed/running locally.
+- [x] Apply `prisma/migrations/20261126040000_suppliers_and_restock/migration.sql` to Supabase Postgres (applied).
+- End-to-end verification of Restock & PO receiving in the UI once signed in.
 - Variants still need linking across shops (`ListingVariant` → `GarmentVariant`) so unlinked listings combine into one reorder line.
 
 Data & retention:
@@ -137,7 +137,7 @@ What exists:
 - **General Approval Queue (`ActionRequest` + `src/lib/approvals/*`, `src/app/approvals/page.tsx`, `/api/approvals`):** draft or uncertain AI replies queue into `ActionRequest`, send Telegram 1-tap `Approve & send` / `Reject` inline buttons (`src/app/api/telegram/webhook/route.ts`), support `/approvals` on Telegram, and prune non-pending rows after 60 days (`src/lib/worker/prune.ts`).
 
 Open:
-- Apply `prisma/migrations/20261126050000_phase4_chat_controls_and_approvals/migration.sql` (and Phase 3's migration) to Supabase Postgres.
+- [x] Apply `prisma/migrations/20261126050000_phase4_chat_controls_and_approvals/migration.sql` to Supabase Postgres (applied).
 - When Shopee approves live access: implement Shopee Open Platform seller chat sync/send, make `chatsComingSoon` return false for connected live Shopee shops, and drop "Coming soon" on Upload (`src/app/imports/page.tsx`).
 
 Data & retention:
@@ -154,7 +154,7 @@ What exists:
 - **Listings & prices screen & Approval Queue execution (`src/app/listings/page.tsx`, `src/app/api/listings/route.ts`, `src/lib/listings/*`, `src/lib/approvals/service.ts`):** owner compares Shopee/TikTok prices side by side, proposes a price update or cross-shop draft copy through the `ActionRequest` Approval Queue (in `/approvals` or 1-tap Telegram), pushes strictly when `ShopConnection.writesEnabled` is enabled, logs `PriceChange` + `AuditLog` history, and supports retrying failed/skipped pushes.
 
 Open:
-- Apply `prisma/migrations/20261126060000_phase5_listings_and_prices/migration.sql` (alongside Phases 3–4 migrations) to Supabase Postgres.
+- [x] Apply `prisma/migrations/20261126060000_phase5_listings_and_prices/migration.sql` to Supabase Postgres (applied).
 - Optional future enhancement: searchable Shopee/TikTok category & attribute pickers instead of entering a destination category ID manually.
 
 ## Developer tools: `/dev` (done on dev)
@@ -187,7 +187,7 @@ What exists:
 - **Retention:** `AppError` is kept 30 days after it was last seen, `WorkerRun` 3 days and `ApiCallStat` 30 days, all in `pruneDailyData()`.
 
 Open:
-- Apply `prisma/migrations/20261127010000_developer_tools/migration.sql` to Supabase (with the Phase 3–5 migrations), and set `DEVELOPER_EMAILS` on Vercel. Until then, `/dev` 404s, and the tabs show "Migration not applied yet" where tables are missing.
+- [x] Apply `prisma/migrations/20261127010000_developer_tools/migration.sql` to Supabase and set `DEVELOPER_EMAILS` on Vercel (done; Vercel Blob store `kyna-ops-media` also linked so proof/chat photo uploads work on Vercel).
 - Errors that a route catches itself and returns as a 500 aren't recorded. Only uncaught ones are. Call `recordError()` in catch blocks that matter.
 - API call counts only cover worker ticks, not owner button presses.
 - Later (all $0):
@@ -197,35 +197,31 @@ Open:
   - A staging project on the second free Supabase slot, with seed data.
   - A read-only "view as staff" preview.
   - Vercel usage numbers via its API.
-- Check: `vercel.json` schedules `/api/worker/tick` every 15 minutes, but Hobby only allows daily cron. Confirm which is actually running.
+- [x] Check: `vercel.json` uses Vercel Schedules (`*/15 * * * *`), which IS supported on Hobby (15-min cadence/jitter). Fixed missing `CRON_SECRET` on Vercel Production (previously 426/426 runs failed with 401) and verified `worker-tick` succeeds end-to-end.
 
 ## Ongoing: maintainability backlog
 
 Ranked by how much each one helps future phases.
 
-1. **Finish migrating onto `ChannelConnector`.** A `ChannelConnector` interface and registry now live in `src/lib/channels/` and power single-order sync, finance sync, stock pushes, and token refresh. Remaining paired files (`sync.ts` batch windows, `returns/sync.ts`, `shipping/shopee-engine.ts` / `tiktok-engine.ts`, `chats/*`) should move onto it before Phase 4 (Shopee chats) and Phase 5.
-2. **Use `Order.state` across queries.** `Order.state` (`OrderState` enum + `src/lib/ledger/state.ts`) is now added, backfilled, and populated on every write alongside raw `Order.status`. Gradually migrate remaining raw status lists (`variants.ts`, `orders/lookup.ts`, `stock/rules.ts`, `returns/classify.ts`) onto `Order.state`.
+1. **Finish migrating onto `ChannelConnector`.** `ChannelConnector` (`src/lib/channels/`) now powers single-order sync, batch order window sync (`fetchOrdersWindow` in `src/lib/ledger/sync.ts`), finance sync, stock/price pushes, draft listings, and token refresh. Remaining paired files (`returns/sync.ts`, `shipping/shopee-engine.ts` / `tiktok-engine.ts`, `chats/*`) can move onto it next.
+2. **Use `Order.state` across queries.** Done for `garments.ts`, `stock/ledger.ts`, `stock/rules.ts`, `orders/lookup.ts`, and `returns/classify.ts` (with raw-status fallbacks preserved for pure helpers/tests).
 3. **More than one shop per platform.**
-   - `startWave()` now scopes `writesEnabled` by `shopConnectionId`.
-   - `committedUnitsByListing` still keys on `platform:listing:variation` without `shopConnectionId` (`src/lib/catalog/garments.ts`), `Order` is unique on `[platform, orderSn]`, and `health.ts` assumes one shop per platform.
+   - `startWave()` scopes `writesEnabled` by `shopConnectionId`.
+   - `committedUnitsByListing` (`src/lib/catalog/garments.ts`, plus `stock/ledger.ts` and `restock/service.ts`) now keys by `shopConnectionId:listingId:variationId`, and `health.ts` handles multiple shops per platform with distinct ids and shop labels.
+   - `Order` unique constraint `[platform, orderSn]` can be widened to `[shopConnectionId, orderSn]` only if two shops on the same platform ever collide on order numbers.
 4. **Backing off when a shop throttles.** Done in `src/lib/connectors/http.ts` (429 `Retry-After` + GET 5xx retry + safe JSON errors).
-5. **Splitting big screens.** These are the largest: `src/app/scan/ScanClient.tsx` (about 2,078 lines), `src/app/waves/page.tsx`, `src/app/settings/page.tsx` and `src/app/items/page.tsx` (about 1,000 each), `src/app/page.tsx`. Move new UI into components.
+5. **Splitting big screens.** Extracted `AccountSheet`, `StaffSheet`, `HealthPanel`, and `DeveloperRow` out of `src/app/settings/page.tsx` into `src/components/settings/` (~300 lines removed). Largest remaining screens: `src/app/scan/ScanClient.tsx` (~2,078 lines), `src/app/waves/page.tsx`, `src/app/items/page.tsx` (~1,000 each), `src/app/page.tsx`.
 6. **Foreign keys missing (bare string ids):**
-   - `OrderLine` → `ListingVariant`.
-   - `ReturnParcel.orderSn`.
-   - `WalletTransaction.orderSn`.
-   - `PrintJob.packageId` and `PrintJob.waveId`.
-   - `WaveItem.orderId`.
-   - `StockMovement.staffMemberId`.
-7. **Tests:** `.github/workflows/ci.yml` now runs `prisma migrate deploy` + `src/lib/__tests__/db.integration.test.ts` against Postgres 16. Route-handler integration tests are still open.
+   - `OrderLine` → `ListingVariant`, `PrintJob.packageId` and `PrintJob.waveId`, `WaveItem.orderId`, `StockMovement.staffMemberId` (note: `ReturnParcel.orderSn` and `WalletTransaction.orderSn` are intentionally decoupled because `Order` rows prune after 90 days while returns and wallet history live longer).
+7. **Tests:** `.github/workflows/ci.yml` runs `prisma migrate deploy` + `src/lib/__tests__/db.integration.test.ts` against Postgres 16. Added initial route-handler integration tests in `src/app/api/__tests__/route-handlers.test.ts` (logout, Telegram webhook confirm/undo/cancel, owner token versioning); more endpoints can be added incrementally.
 
 ## Known gaps, not yet fixed
 
-- **Revoking owner sessions:** they last 30 days and can't be revoked (`src/middleware.ts`, `src/lib/session-edge.ts`). `session-edge.ts` also duplicates `auth.ts`. (All owner API routes now also check `getOwnerSession()` directly in-route.)
-- **Telegram `/pause`, `/aioff` and `/sync`** act straight away, with no confirmation and no undo message.
-- **The dispute message template** (`src/lib/reports/dispute-template.ts`) removes its own blank lines: `.filter(Boolean)` also drops `""`.
+- **Revoking owner sessions:** Fixed on `dev` — `OwnerUser.tokenVersion` (additive migration `20261127020000_owner_token_version`, already applied to Supabase) is checked in `getOwnerSession()`, password changes rotate tokens to sign out other devices, **Sign out all devices** was added in Settings › Your account, and `auth.ts` now re-exports JWT helpers from `session-edge.ts` (no duplication).
+- **Telegram `/pause`, `/aioff` and `/sync`:** Fixed on `dev` — now show Confirm/Cancel inline buttons before acting, with a 1-tap Undo button for `/pause` and `/aioff`.
+- **The dispute message template** (`src/lib/reports/dispute-template.ts`): Fixed on `dev` — preserves intentional blank paragraph lines (`line !== null`).
 - **`WorkerLock` doubles as a key-value store** (sync window, stock push time, finance rollup time, Auto-Bump state). Fine for now; move the settings-like values into settings if more appear.
-- **`AiEvent`, `AiUsage`, and `ImportJob` pruning** is now handled in `pruneDailyData()` (30d / 90d / 180d), along with `OrderFinance.breakdown` (14d) and orphaned `Order`s (180d). `ReturnParcel` rows still have no retention rule yet.
+- **Retention rules:** Fixed on `dev` — `ReturnParcel` (closed/received non-disputed 365d), `PriceChange` (365d), and `PurchaseOrder` (received/cancelled 730d) now prune in `pruneDailyData()`, leaving zero tables with `kind: "none"` in `retention-map.ts`.
 - **Hosting terms:** Vercel Hobby's terms are for non-commercial use (see below).
 
 ## Paid upgrades to propose to the client later

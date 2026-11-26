@@ -235,6 +235,25 @@ export function UpdatePrompt() {
         open={sheetOpen}
         onClose={whatsNew ? gotIt : later}
         title={whatsNew ? "What's new" : "New update available"}
+        footer={
+          <div className="flex flex-col gap-2">
+            {whatsNew ? (
+              <Button full onClick={gotIt}>
+                Got it
+              </Button>
+            ) : (
+              <>
+                <Button full onClick={refreshFromSheet}>
+                  <RefreshCw className="h-[18px] w-[18px]" strokeWidth={2.4} />
+                  Refresh now
+                </Button>
+                <Button full variant="plain" onClick={later}>
+                  Later
+                </Button>
+              </>
+            )}
+          </div>
+        }
       >
         <p className="text-[15px] leading-relaxed text-ink-2">
           {whatsNew
@@ -259,24 +278,6 @@ export function UpdatePrompt() {
             ))}
           </div>
         )}
-
-        <div className="mt-6 flex flex-col gap-2">
-          {whatsNew ? (
-            <Button full onClick={gotIt}>
-              Got it
-            </Button>
-          ) : (
-            <>
-              <Button full onClick={refreshFromSheet}>
-                <RefreshCw className="h-[18px] w-[18px]" strokeWidth={2.4} />
-                Refresh now
-              </Button>
-              <Button full variant="plain" onClick={later}>
-                Later
-              </Button>
-            </>
-          )}
-        </div>
       </Sheet>
 
       {showBanner && (

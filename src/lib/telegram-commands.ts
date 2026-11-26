@@ -134,21 +134,136 @@ async function staffReply(): Promise<string> {
   ].join("\n");
 }
 
-async function setPrintPaused(paused: boolean): Promise<string> {
-  const res = await prisma.printDevice.updateMany({ data: { paused } });
-  if (!res.count) return `No printer PC is set up yet.`;
-  return paused
-    ? `PRINTING PAUSED. Labels stay in the queue. Send /resume to start again.`
-    : `PRINTING RESUMED. The PC picks up queued labels within a minute.`;
+export type OpsConfirmCmd = "pause" | "aioff" | "sync";
+export type OpsCallbackAction = "confirm" | "cancel" | "undo";
+
+export function isConfirmableOpsCommand(cmd: string): cmd is OpsConfirmCmd {
+  return cmd === "pause" || cmd === "aioff" || cmd === "sync";
 }
 
-async function setAssistant(on: boolean): Promise<string> {
+export function parseOpsCallbackData(
+  raw: string
+): { action: OpsCallbackAction; cmd: OpsConfirmCmd } | null {
+  const m = /^ops:(confirm|cancel|undo):(pause|aioff|sync)$/.exec(raw.trim());
+  if (!m) return null;
+  return { action: m[1] as OpsCallbackAction, cmd: m[2] as OpsConfirmCmd };
+}
+
+export function buildOpsConfirmPrompt(cmd: OpsConfirmCmd): {
+  text: string;
+  replyMarkup: Record<string, unknown>;
+} {
+  const copy: Record<OpsConfirmCmd, { text: string; confirmLabel: string }> = {
+    pause: {
+      text: "Pause label printing on the warehouse PC? Labels will wait in the queue until you resume.",
+      confirmLabel: "Pause printing",
+    },
+    aioff: {
+      text: "Turn off the chats assistant? No drafts or auto-replies will run until you turn it back on.",
+      confirmLabel: "Turn assistant off",
+    },
+    sync: {
+      text: "Run a manual sync for both shops right now?",
+      confirmLabel: "Sync both shops",
+    },
+  };
+  return {
+    text: copy[cmd].text,
+    replyMarkup: {
+      inline_keyboard: [
+        [
+          { text: copy[cmd].confirmLabel, callback_data: `ops:confirm:${cmd}` },
+          { text: "Cancel", callback_data: `ops:cancel:${cmd}` },
+        ],
+      ],
+    },
+  };
+}
+
+async function setPrintPaused(paused: boolean): Promise<{ ok: boolean; text: string }> {
+  const res = await prisma.printDevice.updateMany({ data: { paused } });
+  if (!res.count) return { ok: false, text: `No printer PC is set up yet.` };
+  const { recordAudit, systemActor } = await import("@/lib/audit");
+  await recordAudit({
+    actor: systemActor("telegram"),
+    action: paused ? "printer.pause" : "printer.resume",
+    entity: "PrintDevice",
+    entityId: "all",
+    after: { paused },
+  });
+  return {
+    ok: true,
+    text: paused
+      ? `PRINTING PAUSED. Labels stay in the queue. Tap Undo below or send /resume to start again.`
+      : `PRINTING RESUMED. The PC picks up queued labels within a minute.`,
+  };
+}
+
+async function setAssistant(on: boolean): Promise<{ ok: boolean; text: string }> {
   const { setAiEnabled } = await import("@/lib/ai/settings-store");
   const { systemActor } = await import("@/lib/audit");
   await setAiEnabled(on, systemActor("telegram"));
-  return on
-    ? "Chats assistant is ON. Drafts and any auto-replies you turned on in Settings are active."
-    : "Chats assistant is OFF. No drafts or automatic replies until you send /aion.";
+  return {
+    ok: true,
+    text: on
+      ? "Chats assistant is ON. Drafts and any auto-replies you turned on in Settings are active."
+      : "Chats assistant is OFF. No drafts or automatic replies until you tap Undo below or send /aion.",
+  };
+}
+
+export async function executeOpsCallback(
+  action: OpsCallbackAction,
+  cmd: OpsConfirmCmd
+): Promise<{
+  toast: string;
+  text: string;
+  replyMarkup?: Record<string, unknown>;
+  triggerManualSync?: boolean;
+}> {
+  if (action === "cancel") {
+    return {
+      toast: "Cancelled.",
+      text: "Cancelled — nothing changed.",
+    };
+  }
+  if (cmd === "pause") {
+    if (action === "confirm") {
+      const res = await setPrintPaused(true);
+      return {
+        toast: res.ok ? "Printing paused." : res.text,
+        text: res.text,
+        ...(res.ok
+          ? {
+              replyMarkup: {
+                inline_keyboard: [[{ text: "Undo — Resume printing", callback_data: "ops:undo:pause" }]],
+              },
+            }
+          : {}),
+      };
+    }
+    const res = await setPrintPaused(false);
+    return { toast: res.ok ? "Printing resumed." : res.text, text: `Undone. ${res.text}` };
+  }
+  if (cmd === "aioff") {
+    if (action === "confirm") {
+      const res = await setAssistant(false);
+      return {
+        toast: "Chats assistant turned off.",
+        text: res.text,
+        replyMarkup: {
+          inline_keyboard: [[{ text: "Undo — Turn assistant back on", callback_data: "ops:undo:aioff" }]],
+        },
+      };
+    }
+    const res = await setAssistant(true);
+    return { toast: "Chats assistant turned back on.", text: `Undone. ${res.text}` };
+  }
+  // cmd === "sync"
+  return {
+    toast: "Sync started.",
+    text: "Syncing both shops now. Send /today in a minute for fresh numbers.",
+    triggerManualSync: action === "confirm",
+  };
 }
 
 async function approvalsReply(): Promise<string> {
@@ -196,15 +311,15 @@ export async function buildOpsCommandReply(raw: string): Promise<string | null> 
     case "week":
       return formatTelegramDailyBrief(await getDailyTruthReport({ range: "7days" }));
     case "pause":
-      return setPrintPaused(true);
+      return (await setPrintPaused(true)).text;
     case "resume":
-      return setPrintPaused(false);
+      return (await setPrintPaused(false)).text;
     case "approvals":
       return approvalsReply();
     case "aioff":
-      return setAssistant(false);
+      return (await setAssistant(false)).text;
     case "aion":
-      return setAssistant(true);
+      return (await setAssistant(true)).text;
     default:
       return null;
   }

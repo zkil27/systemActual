@@ -23,6 +23,7 @@ export const SHOPEE_DETAIL_FIELDS = [
 export const shopeeConnector: ChannelConnector = {
   platform: Platform.SHOPEE,
   label: "Shopee",
+  canResumeOrderWindow: false,
 
   isConfigured() {
     return isShopeeConfigured();
@@ -39,6 +40,32 @@ export const shopeeConnector: ChannelConnector = {
     });
     const raw = resp?.order_list?.[0] as Record<string, unknown> | undefined;
     return raw ? mapShopeeOrder(raw) : null;
+  },
+
+  async *fetchOrdersWindow(shop, token, w, checkDeadline) {
+    const sec = (d: Date) => Math.floor(d.getTime() / 1000);
+    let cursor = "";
+    for (;;) {
+      checkDeadline();
+      const list = await shopeeGet("/api/v2/order/get_order_list", shop.shopId, token, {
+        time_range_field: "update_time",
+        time_from: sec(w.from),
+        time_to: sec(w.to),
+        page_size: 100,
+        ...(cursor ? { cursor } : {}),
+      });
+      const sns: string[] = (list?.order_list ?? []).map((o: { order_sn: string }) => String(o.order_sn));
+      for (let i = 0; i < sns.length; i += 50) {
+        checkDeadline();
+        const detail = await shopeeGet("/api/v2/order/get_order_detail", shop.shopId, token, {
+          order_sn_list: sns.slice(i, i + 50).join(","),
+          response_optional_fields: SHOPEE_DETAIL_FIELDS,
+        });
+        yield (detail?.order_list ?? []).map(mapShopeeOrder);
+      }
+      if (!list?.more || !list?.next_cursor) return;
+      cursor = String(list.next_cursor);
+    }
   },
 
   async fetchOrderFinance(shop, token, orderSn) {

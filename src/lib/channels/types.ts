@@ -2,6 +2,7 @@ import type { Platform, ShopConnection } from "@prisma/client";
 import type { TokenSet } from "@/lib/connectors/tokens";
 import type { FinanceFigures } from "@/lib/finance/map";
 import type { NormalizedOrder } from "@/lib/ledger/normalize";
+import type { SyncWindow } from "@/lib/ledger/window";
 import type { PushCandidate } from "@/lib/stock/rules";
 
 export interface StockPushResult {
@@ -48,9 +49,17 @@ export interface ListingDraftResult {
 export interface ChannelConnector {
   readonly platform: Platform;
   readonly label: string;
+  /** True when `fetchOrdersWindow` yields orders sorted by update time ascending and can resume mid-window. */
+  readonly canResumeOrderWindow: boolean;
   isConfigured(): boolean;
   refreshTokens(refreshToken: string, shopId: string, now?: Date): Promise<TokenSet>;
   fetchSingleOrder(shop: ShopConnection, token: string, orderSn: string): Promise<NormalizedOrder | null>;
+  fetchOrdersWindow(
+    shop: ShopConnection,
+    token: string,
+    window: SyncWindow,
+    checkDeadline: () => void
+  ): AsyncGenerator<NormalizedOrder[]>;
   fetchOrderFinance(shop: ShopConnection, token: string, orderSn: string): Promise<FinanceFigures | null>;
   pushListingStock(shop: ShopConnection, token: string, rows: PushCandidate[]): Promise<StockPushResult>;
   pushListingPrices(shop: ShopConnection, token: string, rows: PricePushCandidate[]): Promise<PricePushResult>;

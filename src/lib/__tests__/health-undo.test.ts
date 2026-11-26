@@ -59,6 +59,21 @@ describe("health", () => {
     expect(assessHealth({ ...healthy, workerLockedUntil: minsAgo(45) }).checks.find((c) => c.id === "worker")?.level).toBe("bad");
     expect(assessHealth({ ...healthy, workerLockedUntil: minsAgo(45), workerRunning: true }).level).toBe("ok");
   });
+
+  it("gives distinct ids and shop names when multiple shops share a platform", () => {
+    const h = assessHealth({
+      ...healthy,
+      shops: [
+        { id: "s1", platform: "SHOPEE", shopName: "Kyna Main", connected: true, lastSyncedAt: minsAgo(2), tokenError: null },
+        { id: "s2", platform: "SHOPEE", shopName: "Kyna Outlet", connected: true, lastSyncedAt: minsAgo(25), tokenError: null },
+      ],
+    });
+    const shopChecks = h.checks.filter((c) => c.id.startsWith("shop:"));
+    expect(shopChecks.map((c) => c.id)).toEqual(["shop:s1", "shop:s2"]);
+    expect(shopChecks.map((c) => c.label)).toEqual(["Shopee (Kyna Main) sync", "Shopee (Kyna Outlet) sync"]);
+    expect(shopChecks[0].level).toBe("ok");
+    expect(shopChecks[1].level).toBe("warn");
+  });
 });
 
 describe("undo a return scan", () => {

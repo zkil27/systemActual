@@ -8,6 +8,7 @@ import type { ChannelConnector, StockPushResult } from "./types";
 export const tiktokConnector: ChannelConnector = {
   platform: Platform.TIKTOK,
   label: "TikTok Shop",
+  canResumeOrderWindow: true,
 
   isConfigured() {
     return isTikTokConfigured();
@@ -28,6 +29,32 @@ export const tiktokConnector: ChannelConnector = {
     });
     const raw = data?.orders?.[0] as Record<string, unknown> | undefined;
     return raw ? mapTikTokOrder(raw) : null;
+  },
+
+  async *fetchOrdersWindow(shop, token, w, checkDeadline) {
+    const sec = (d: Date) => Math.floor(d.getTime() / 1000);
+    let pageToken = "";
+    for (;;) {
+      checkDeadline();
+      const data = await tiktokRequest({
+        method: "POST",
+        path: "/order/202309/orders/search",
+        accessToken: token,
+        shopCipher: shop.shopCipher,
+        query: {
+          // A 100-order page can take ~17s to come back; smaller pages leave
+          // time in the tick to save what was fetched.
+          page_size: "50",
+          sort_field: "update_time",
+          sort_order: "ASC",
+          ...(pageToken ? { page_token: pageToken } : {}),
+        },
+        body: { update_time_ge: sec(w.from), update_time_lt: sec(w.to) },
+      });
+      yield (Array.isArray(data?.orders) ? data.orders : []).map(mapTikTokOrder);
+      if (!data?.next_page_token) return;
+      pageToken = String(data.next_page_token);
+    }
   },
 
   async fetchOrderFinance(shop, token, orderSn) {

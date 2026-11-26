@@ -1,29 +1,31 @@
-import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
-import { getAuthSecretKey as getSecretKey } from "./auth-secret";
 import { normalizeCourierName } from "@/lib/connectors/normalizer";
 import { isOrderCancelledForPacking } from "@/lib/shipping/outbound";
 import { shortenGarmentName } from "@/lib/waves/pick-list";
 import { expectedLinesFromItems } from "@/lib/returns/item-check";
+import {
+  OWNER_COOKIE,
+  STAFF_COOKIE,
+  createOwnerToken,
+  createStaffToken,
+  verifyOwnerToken,
+  verifyStaffToken,
+  type OwnerSessionPayload,
+  type StaffSessionPayload,
+} from "./session-edge";
 
-export const OWNER_COOKIE = "kyna_owner_session";
-export const STAFF_COOKIE = "kyna_staff_session";
-
-export interface OwnerSessionPayload {
-  role: "owner";
-  userId: string;
-  email: string;
-  name: string;
-}
-
-export interface StaffSessionPayload {
-  role: "staff";
-  staffId: string;
-  name: string;
-  tv?: number;
-}
+export {
+  OWNER_COOKIE,
+  STAFF_COOKIE,
+  createOwnerToken,
+  createStaffToken,
+  verifyOwnerToken,
+  verifyStaffToken,
+  type OwnerSessionPayload,
+  type StaffSessionPayload,
+};
 
 export async function hashSecret(plain: string): Promise<string> {
   return bcrypt.hash(plain, 10);
@@ -33,62 +35,23 @@ export async function verifySecret(plain: string, hash: string): Promise<boolean
   return bcrypt.compare(plain, hash);
 }
 
-export async function createOwnerToken(payload: OwnerSessionPayload): Promise<string> {
-  return new SignJWT({ ...payload })
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime("30d")
-    .sign(getSecretKey());
-}
-
-export async function createStaffToken(payload: StaffSessionPayload): Promise<string> {
-  return new SignJWT({ ...payload })
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime("14h")
-    .sign(getSecretKey());
-}
-
-export async function verifyOwnerToken(
-  token: string | undefined
-): Promise<OwnerSessionPayload | null> {
-  if (!token) return null;
-  try {
-    const { payload } = await jwtVerify(token, getSecretKey());
-    if (payload.role !== "owner" || typeof payload.userId !== "string") return null;
-    return {
-      role: "owner",
-      userId: payload.userId,
-      email: String(payload.email ?? ""),
-      name: String(payload.name ?? ""),
-    };
-  } catch {
-    return null;
-  }
-}
-
-export async function verifyStaffToken(
-  token: string | undefined
-): Promise<StaffSessionPayload | null> {
-  if (!token) return null;
-  try {
-    const { payload } = await jwtVerify(token, getSecretKey());
-    if (payload.role !== "staff" || typeof payload.staffId !== "string") return null;
-    const tv = typeof payload.tv === "number" ? payload.tv : undefined;
-    return {
-      role: "staff",
-      staffId: payload.staffId,
-      name: String(payload.name ?? ""),
-      ...(tv !== undefined ? { tv } : {}),
-    };
-  } catch {
-    return null;
-  }
-}
-
 export async function getOwnerSession(): Promise<OwnerSessionPayload | null> {
   const store = await cookies();
-  return verifyOwnerToken(store.get(OWNER_COOKIE)?.value);
+  const payload = await verifyOwnerToken(store.get(OWNER_COOKIE)?.value);
+  if (!payload) return null;
+  const user = await prisma.ownerUser.findUnique({
+    where: { id: payload.userId },
+    select: { id: true, email: true, name: true, tokenVersion: true },
+  });
+  if (!user) return null;
+  if ((payload.tv ?? 1) !== user.tokenVersion) return null;
+  return {
+    role: "owner",
+    userId: user.id,
+    email: user.email,
+    name: user.name,
+    tv: user.tokenVersion,
+  };
 }
 
 export async function getStaffSession(): Promise<StaffSessionPayload | null> {

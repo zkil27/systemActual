@@ -20,6 +20,17 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    id: 13,
+    date: "2026-11-27",
+    title: "Safer controls and cleaner fees",
+    changes: [
+      "Shipping fees on TikTok orders now appear under Shipping in Profit, and refunded commissions no longer count twice.",
+      "Added Sign out all devices in Settings › Your account; changing your password also signs out other devices.",
+      "Telegram /pause, /aioff, and /sync now ask you to confirm first, with a quick Undo button for pause and assistant off.",
+      "Dispute appeal drafts keep clean blank lines between paragraphs, and the What's new button stays pinned on small phones.",
+    ],
+  },
+  {
     id: 12,
     date: "2026-11-27",
     title: "Clearer problem screens",

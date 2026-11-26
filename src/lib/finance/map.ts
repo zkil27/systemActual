@@ -52,10 +52,21 @@ export function flattenNumbers(obj: unknown, depth = 3, prefix = ""): Record<str
 const leaf = (key: string) => key.slice(key.lastIndexOf(".") + 1);
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-/** Sum of |value| for fields whose own name (last part) matches. Fees come signed either way. */
+/** Sum of |value| for fields whose own name (last part) matches. Used for Shopee where fees are unsigned. */
 function sumAbs(flat: Record<string, number>, names: RegExp): number {
   let total = 0;
   for (const [k, v] of Object.entries(flat)) if (names.test(leaf(k))) total += Math.abs(v);
+  return round2(total);
+}
+
+/**
+ * Signed fee sum for TikTok statements: negative values are fees charged,
+ * positive values are fees refunded on a later refund transaction. Negating
+ * returns net positive pesos charged so refunded commissions net to zero.
+ */
+function sumSignedFee(flat: Record<string, number>, names: RegExp): number {
+  let total = 0;
+  for (const [k, v] of Object.entries(flat)) if (names.test(leaf(k))) total += -v;
   return round2(total);
 }
 
@@ -96,6 +107,12 @@ export function mapTikTokOrderStatements(data: unknown): FinanceFigures | null {
   if (!Array.isArray(list) || list.length === 0) return null;
   const flat: Record<string, number> = {};
   let net = 0;
+  let commission = 0;
+  let serviceFee = 0;
+  let transactionFee = 0;
+  let affiliate = 0;
+  let shipping = 0;
+  let withholdingTax = 0;
   let any = false;
   let latest: number | null = null;
   list.forEach((tx, i) => {
@@ -105,17 +122,38 @@ export function mapTikTokOrderStatements(data: unknown): FinanceFigures | null {
     if (amount === null) return;
     any = true;
     net += amount;
+    const txFlat = flattenNumbers(t, 3);
+    // Timestamps aren't money; keep them out of the fee sums and breakdown.
+    for (const k of Object.keys(txFlat)) if (/_time$/.test(leaf(k))) delete txFlat[k];
     // One transaction per settlement or adjustment; key them apart so nothing merges.
-    for (const [k, v] of Object.entries(flattenNumbers(t, 3))) flat[list.length > 1 ? `${i}.${k}` : k] = v;
+    for (const [k, v] of Object.entries(txFlat)) flat[list.length > 1 ? `${i}.${k}` : k] = v;
+    commission += sumSignedFee(txFlat, COMMISSION);
+    serviceFee += sumSignedFee(txFlat, SERVICE);
+    transactionFee += sumSignedFee(txFlat, TRANSACTION);
+    affiliate += sumSignedFee(txFlat, AFFILIATE);
+    withholdingTax += sumSignedFee(txFlat, WITHHOLDING);
+    // TikTok reports buyer-paid and return shipping in `shipping_fee_amount` and repeats
+    // seller-borne return shipping in `shipping_cost_amount`. Prefer `shipping_fee_amount`
+    // when non-zero so return shipping is never double-counted.
+    const shipFee = num(t.shipping_fee_amount);
+    shipping += shipFee !== null && shipFee !== 0 ? -shipFee : sumSignedFee(txFlat, SHIPPING);
     for (const field of ["statement_time", "settlement_time", "order_settled_time", "payment_time"]) {
       const s = num(t[field]);
       if (s !== null && s > 0) latest = Math.max(latest ?? 0, s);
     }
   });
   if (!any) return null;
-  // Timestamps aren't money; keep them out of the fee sums.
-  for (const k of Object.keys(flat)) if (/_time$/.test(leaf(k))) delete flat[k];
-  return figuresFrom(flat, net, latest !== null ? new Date(latest * 1000) : null);
+  return {
+    netPayoutPhp: round2(net),
+    commissionPhp: round2(commission),
+    serviceFeePhp: round2(serviceFee),
+    transactionFeePhp: round2(transactionFee),
+    affiliatePhp: round2(affiliate),
+    shippingPhp: round2(shipping),
+    withholdingTaxPhp: round2(withholdingTax),
+    settledAt: latest !== null ? new Date(latest * 1000) : null,
+    breakdown: flat,
+  };
 }
 
 // ---------------------------------------------------------------- Profit

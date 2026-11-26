@@ -4,6 +4,7 @@ import {
   committedUnitsByListing,
   effectiveBuffer,
   effectiveLowStock,
+  listingUnitKey,
 } from "@/lib/catalog/garments";
 import { prisma } from "@/lib/prisma";
 import { ensureVariantStartingStock } from "@/lib/stock/ledger";
@@ -959,6 +960,7 @@ export async function getReorderSuggestions(
           },
           listings: {
             select: {
+              shopConnectionId: true,
               platform: true,
               listingId: true,
               variationId: true,
@@ -1007,7 +1009,7 @@ export async function getReorderSuggestions(
           listingId: true,
           variationId: true,
           quantity: true,
-          order: { select: { platform: true } },
+          order: { select: { shopConnectionId: true } },
         },
       }),
     ]);
@@ -1018,14 +1020,14 @@ export async function getReorderSuggestions(
   const variantByListingKey = new Map<string, string>();
   for (const v of variants) {
     for (const l of v.listings) {
-      variantByListingKey.set(`${l.platform}:${l.listingId}:${l.variationId}`, v.id);
+      variantByListingKey.set(listingUnitKey(l.shopConnectionId, l.listingId, l.variationId), v.id);
     }
   }
 
   const sold7ByVariant = new Map<string, number>();
   for (const ol of recentOrderLines) {
     const vid = variantByListingKey.get(
-      `${ol.order.platform}:${ol.listingId}:${ol.variationId}`
+      listingUnitKey(ol.order.shopConnectionId, ol.listingId, ol.variationId)
     );
     if (!vid) continue;
     sold7ByVariant.set(vid, (sold7ByVariant.get(vid) ?? 0) + ol.quantity);
@@ -1074,7 +1076,7 @@ export async function getReorderSuggestions(
       let committed = 0;
       for (const l of v.listings) {
         committed +=
-          committedByListing.get(`${l.platform}:${l.listingId}:${l.variationId}`) ?? 0;
+          committedByListing.get(listingUnitKey(l.shopConnectionId, l.listingId, l.variationId)) ?? 0;
       }
       return {
         variantId: v.id,

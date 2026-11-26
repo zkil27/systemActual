@@ -59,11 +59,11 @@ export const RETENTION_RULES: Record<string, RetentionRule> = {
   WorkerRun: { kind: "rule", note: "3 days" },
   ApiCallStat: { kind: "rule", note: "30 days" },
 
-  ReturnParcel: { kind: "none", note: "No rule yet (known gap in roadmap)" },
-  PhysicalScan: { kind: "cascade", note: "With its return parcel (which has no rule)" },
-  ReturnItemCheck: { kind: "cascade", note: "With its return parcel (which has no rule)" },
-  PriceChange: { kind: "none", note: "No rule yet" },
-  PurchaseOrder: { kind: "none", note: "No rule yet" },
+  ReturnParcel: { kind: "rule", note: "Closed/received non-disputed parcels 365 days" },
+  PhysicalScan: { kind: "cascade", note: "With its return parcel (proof photos 90 days)" },
+  ReturnItemCheck: { kind: "cascade", note: "With its return parcel" },
+  PriceChange: { kind: "rule", note: "365 days" },
+  PurchaseOrder: { kind: "rule", note: "Received/cancelled orders 730 days (2 years)" },
   PurchaseOrderLine: { kind: "cascade", note: "With its purchase order" },
 };
 

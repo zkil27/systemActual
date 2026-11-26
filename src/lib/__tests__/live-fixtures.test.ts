@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { mapShopeeOrder, mapTikTokOrder } from "@/lib/ledger/normalize";
 import { mapShopeeReturn, mapTikTokReturn } from "@/lib/returns/map";
 import { mapShopeeWalletTransaction, mapTikTokStatement } from "@/lib/money/map";
+import { mapShopeeEscrow, mapTikTokOrderStatements } from "@/lib/finance/map";
 
 /**
  * Runs the app's mappers over real (redacted) responses saved by
@@ -56,5 +57,15 @@ describe.skipIf(!existsSync(DIR))("live captures", () => {
     seen("TikTok return_status", returns.map((r) => r.return_status));
     seen("TikTok return_type", returns.map((r) => r.return_type));
     arr(load("tiktok-statements")?.statements).forEach((s) => mapTikTokStatement(s));
+    const orderStmt = load("tiktok-order-statement");
+    if (orderStmt) {
+      const fig = mapTikTokOrderStatements(orderStmt);
+      expect(fig).not.toBeNull();
+      expect(Number.isFinite(fig!.netPayoutPhp)).toBe(true);
+    }
+    const shopeeEscrow = load("shopee-escrow");
+    if (shopeeEscrow) {
+      expect(mapShopeeEscrow(shopeeEscrow)).not.toBeNull();
+    }
   });
 });

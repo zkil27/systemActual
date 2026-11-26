@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getOwnerSession, hashSecret, verifySecret } from "@/lib/auth";
+import { createOwnerToken, getOwnerSession, hashSecret, OWNER_COOKIE, verifySecret } from "@/lib/auth";
 import { actorFromSession, changedFields, recordAudit, type AuditActor } from "@/lib/audit";
 import { manilaToUtcHm, utcToManilaHm } from "@/lib/reports/brief-time";
 import { isShopeeConfigured } from "@/lib/connectors/shopee";
@@ -109,6 +109,7 @@ const updateSettingsSchema = z.object({
     "disconnect_shop",
     "update_owner_password",
     "update_owner_email",
+    "revoke_owner_sessions",
   ]),
   telegramDailyBriefManila: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
   currentPassword: z.string().min(1).max(200).optional(),
@@ -140,7 +141,10 @@ export async function POST(req: NextRequest) {
     }
     const data = parsed.data;
     const ownerSession = await getOwnerSession();
-    const actor: AuditActor = ownerSession ? actorFromSession(ownerSession) : { type: "OWNER", id: null, name: "Owner" };
+    if (!ownerSession) {
+      return NextResponse.json({ error: "Sign in again." }, { status: 401 });
+    }
+    const actor: AuditActor = actorFromSession(ownerSession);
 
     if (data.action === "update_settings") {
       const settingsBefore = await prisma.appSettings.findUnique({ where: { id: "default" } });
@@ -238,20 +242,65 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
+    if (data.action === "revoke_owner_sessions") {
+      const updated = await prisma.ownerUser.update({
+        where: { id: ownerSession.userId },
+        data: { tokenVersion: { increment: 1 } },
+        select: { id: true, tokenVersion: true },
+      });
+      await recordAudit({
+        actor,
+        action: "owner.revoke_sessions",
+        entity: "OwnerUser",
+        entityId: updated.id,
+        after: { tokenVersion: updated.tokenVersion },
+      });
+      const res = NextResponse.json({ ok: true });
+      res.cookies.delete(OWNER_COOKIE);
+      return res;
+    }
+
     if (data.action === "update_owner_password" || data.action === "update_owner_email") {
-      const owner = await getOwnerSession();
-      if (!owner) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
-      const user = await prisma.ownerUser.findUnique({ where: { id: owner.userId } });
+      const user = await prisma.ownerUser.findUnique({ where: { id: ownerSession.userId } });
       if (!user || !data.currentPassword || !(await verifySecret(data.currentPassword, user.passwordHash))) {
         return NextResponse.json({ error: "Current password is wrong." }, { status: 403 });
       }
       if (data.action === "update_owner_password") {
         if (!data.newPassword) return NextResponse.json({ error: "New password must be at least 8 characters." }, { status: 400 });
-        await prisma.ownerUser.update({
+        const updated = await prisma.ownerUser.update({
           where: { id: user.id },
-          data: { passwordHash: await hashSecret(data.newPassword), failedLoginAttempts: 0, loginLockedUntil: null },
+          data: {
+            passwordHash: await hashSecret(data.newPassword),
+            failedLoginAttempts: 0,
+            loginLockedUntil: null,
+            tokenVersion: { increment: 1 },
+          },
+          select: { id: true, email: true, name: true, tokenVersion: true },
         });
-        return NextResponse.json({ ok: true });
+        await recordAudit({
+          actor,
+          action: "owner.password_changed",
+          entity: "OwnerUser",
+          entityId: updated.id,
+          after: { tokenVersion: updated.tokenVersion },
+        });
+        // Rotate this device's cookie so other devices are signed out immediately while this device stays signed in.
+        const freshToken = await createOwnerToken({
+          role: "owner",
+          userId: updated.id,
+          email: updated.email,
+          name: updated.name,
+          tv: updated.tokenVersion,
+        });
+        const res = NextResponse.json({ ok: true });
+        res.cookies.set(OWNER_COOKIE, freshToken, {
+          httpOnly: true,
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === "production",
+          path: "/",
+          maxAge: 60 * 60 * 24 * 30,
+        });
+        return res;
       }
       if (!data.email) return NextResponse.json({ error: "Enter a valid email." }, { status: 400 });
       try {

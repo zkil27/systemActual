@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CalendarDays, ChevronRight, Lock, Monitor, Moon, Sun } from "lucide-react";
@@ -9,8 +9,6 @@ import { Button, Group } from "@/components/ui/Button";
 import { useConfirm } from "@/components/ui/ConfirmSheet";
 import { DatePickerSheet } from "@/components/ui/DatePickerSheet";
 import { Disclosure } from "@/components/ui/Disclosure";
-import { Sheet } from "@/components/ui/Sheet";
-import type { HealthSummary } from "@/lib/health";
 import { manilaDayLabel, updatedAgo } from "@/lib/ui/format";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { Switch } from "@/components/ui/Switch";
@@ -18,6 +16,10 @@ import { toast } from "@/components/ui/Toast";
 import { formatManilaDateTime, getManilaTodayStr } from "@/lib/time";
 import { useAmbientPreference, useTheme, type ThemePreference } from "@/lib/ui/theme";
 import { PrinterSettings } from "@/components/PrinterSettings";
+import { AccountSheet } from "@/components/settings/AccountSheet";
+import { StaffSheet } from "@/components/settings/StaffSheet";
+import { DeveloperRow, HealthPanel } from "@/components/settings/SystemPanels";
+import { postSettings, rowClass, rowLinkClass, type StaffRow } from "@/components/settings/shared";
 
 const THEME_OPTIONS: readonly { id: ThemePreference; label: string }[] = [
   { id: "light", label: "Light" },
@@ -68,309 +70,8 @@ interface SettingsPayload {
   telegramPreview?: string;
 }
 
-interface StaffRow {
-  id: string;
-  name: string;
-  active: boolean;
-  locked: boolean;
-  lockedUntil: string | null;
-  failedPinAttempts: number;
-}
-
-async function postSettings(body: Record<string, unknown>): Promise<{ ok: boolean; data: Record<string, unknown> }> {
-  try {
-    const res = await fetch("/api/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => ({}));
-    return { ok: res.ok && data.ok !== false, data };
-  } catch {
-    return { ok: false, data: { error: "No connection" } };
-  }
-}
-
 /** Costs, Return tracking and Telegram sit in different columns but save together. */
 const SETTINGS_FORM_ID = "settings-form";
-
-const fieldClass =
-  "h-12 w-full rounded-[var(--radius-control)] bg-surface-muted px-3.5 text-[16px] text-ink focus:shadow-[0_0_0_2px_var(--color-brand)] focus:outline-none";
-
-/** Tap a staff row: rename, reset PIN, clear a lockout. */
-function StaffSheet({ staff, onClose, onSaved }: { staff: StaffRow | null; onClose: () => void; onSaved: () => void }) {
-  const last = useRef<StaffRow | null>(null);
-  if (staff) last.current = staff;
-  const s = last.current;
-  const [name, setName] = useState("");
-  const [pin, setPin] = useState("");
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (staff) {
-      setName(staff.name);
-      setPin("");
-    }
-  }, [staff]);
-
-  async function run(body: Record<string, unknown>, done: string) {
-    setBusy(true);
-    const { ok, data } = await postSettings(body);
-    setBusy(false);
-    if (!ok) return toast(String(data.error ?? "Couldn't save"), "error");
-    toast(done);
-    onSaved();
-  }
-
-  return (
-    <Sheet open={staff !== null} onClose={onClose} title={s?.name ?? "Staff"}>
-      {s && (
-        <div className="space-y-6 pt-1">
-          {s.locked && (
-            <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] bg-missing-soft px-4 py-2">
-              <span className="text-[15px] font-semibold text-missing-ink">Locked out after wrong PINs</span>
-              <Button
-                variant="plain"
-                disabled={busy}
-                onClick={() => run({ action: "clear_staff_lockout", staffId: s.id }, "Unlocked")}
-                className="h-11 px-3"
-              >
-                Unlock
-              </Button>
-            </div>
-          )}
-          <form
-            className="space-y-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!/^\d{4}$/.test(pin)) return toast("PIN must be 4 digits", "error");
-              void run({ action: "update_staff_pin", staffId: s.id, pin }, "New PIN saved. They need to unlock again.");
-              setPin("");
-            }}
-          >
-            <label className="block">
-              <span className="mb-1 block text-[14px] font-semibold text-ink-3">New 4-digit PIN</span>
-              <input
-                inputMode="numeric"
-                autoComplete="off"
-                maxLength={4}
-                value={pin}
-                onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
-                className={`tabular-nums tracking-[0.4em] ${fieldClass}`}
-              />
-            </label>
-            <Button type="submit" full disabled={busy || pin.length !== 4}>
-              Reset PIN
-            </Button>
-          </form>
-          <form
-            className="space-y-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!name.trim() || name.trim() === s.name) return;
-              void run({ action: "rename_staff", staffId: s.id, staffName: name.trim() }, "Renamed");
-            }}
-          >
-            <label className="block">
-              <span className="mb-1 block text-[14px] font-semibold text-ink-3">Name</span>
-              <input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} className={fieldClass} />
-            </label>
-            <Button type="submit" variant="secondary" full disabled={busy || !name.trim() || name.trim() === s.name}>
-              Rename
-            </Button>
-          </form>
-          <Button
-            variant={s.active ? "danger" : "secondary"}
-            full
-            disabled={busy}
-            onClick={() =>
-              run({ action: "toggle_staff", staffId: s.id, active: !s.active }, s.active ? "Turned off" : "Turned on")
-            }
-          >
-            {s.active ? "Turn off (signs them out now)" : "Let them use the scanner again"}
-          </Button>
-        </div>
-      )}
-    </Sheet>
-  );
-}
-
-/** Owner email + password. Both need the current password. */
-function AccountSheet({
-  open,
-  email,
-  onClose,
-  onSaved,
-}: {
-  open: boolean;
-  email: string;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [current, setCurrent] = useState("");
-  const [newEmail, setNewEmail] = useState(email);
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [show, setShow] = useState(false);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (open) {
-      setCurrent("");
-      setNewEmail(email);
-      setNewPassword("");
-      setConfirmPassword("");
-    }
-  }, [open, email]);
-
-  async function run(body: Record<string, unknown>, done: string) {
-    setBusy(true);
-    const { ok, data } = await postSettings(body);
-    setBusy(false);
-    if (!ok) return toast(String(data.error ?? "Couldn't save"), "error");
-    toast(done);
-    onSaved();
-    onClose();
-  }
-
-  const type = show ? "text" : "password";
-  return (
-    <Sheet open={open} onClose={onClose} title="Your account">
-      <div className="space-y-5 pt-1">
-        <label className="block">
-          <span className="mb-1 block text-[14px] font-semibold text-ink-3">Current password</span>
-          <input type={type} autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} className={fieldClass} />
-        </label>
-        <label className="flex min-h-11 items-center gap-2 text-[15px] text-ink-2">
-          <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} className="h-5 w-5" />
-          Show passwords
-        </label>
-        <div className="space-y-2">
-          <label className="block">
-            <span className="mb-1 block text-[14px] font-semibold text-ink-3">Email</span>
-            <input type="email" autoComplete="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className={fieldClass} />
-          </label>
-          <Button
-            variant="secondary"
-            full
-            disabled={busy || !current || !newEmail.trim() || newEmail.trim().toLowerCase() === email.toLowerCase()}
-            onClick={() => run({ action: "update_owner_email", currentPassword: current, email: newEmail.trim() }, "Email changed")}
-          >
-            Change email
-          </Button>
-        </div>
-        <div className="space-y-2">
-          <label className="block">
-            <span className="mb-1 block text-[14px] font-semibold text-ink-3">New password (8+ characters)</span>
-            <input type={type} autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={fieldClass} />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-[14px] font-semibold text-ink-3">Type it again</span>
-            <input type={type} autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={fieldClass} />
-          </label>
-          {confirmPassword && newPassword !== confirmPassword && (
-            <p className="text-[14px] font-semibold text-missing-ink">The two passwords don&apos;t match.</p>
-          )}
-          <Button
-            full
-            disabled={busy || !current || newPassword.length < 8 || newPassword !== confirmPassword}
-            onClick={() => run({ action: "update_owner_password", currentPassword: current, newPassword }, "Password changed")}
-          >
-            Change password
-          </Button>
-        </div>
-      </div>
-    </Sheet>
-  );
-}
-
-const HEALTH_DOT: Record<string, string> = { ok: "bg-arrived", warn: "bg-failed", bad: "bg-missing" };
-const HEALTH_WORD: Record<string, string> = { ok: "All good", warn: "Needs a look", bad: "Something is wrong" };
-
-function HealthPanel() {
-  const [health, setHealth] = useState<HealthSummary | null>(null);
-  const [error, setError] = useState(false);
-  const load = useCallback(async () => {
-    setError(false);
-    try {
-      const res = await fetch("/api/health", { cache: "no-store" });
-      if (!res.ok) throw new Error(String(res.status));
-      setHealth(await res.json());
-    } catch {
-      setError(true);
-    }
-  }, []);
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  return (
-    <Group>
-      <Disclosure
-        summaryClassName={rowLinkClass}
-        label={
-          <span className="flex items-center gap-2.5">
-            <span aria-hidden="true" className={`h-2.5 w-2.5 rounded-full ${health ? HEALTH_DOT[health.level] : "bg-ink-3/40"}`} />
-            <span className="text-[17px] text-ink">System health</span>
-            <span className="text-[15px] text-ink-3">{health ? HEALTH_WORD[health.level] : error ? "Couldn't check" : "Checking…"}</span>
-          </span>
-        }
-        onOpenChange={(open) => {
-          if (open) void load();
-        }}
-      >
-        <ul className="divide-y divide-hairline border-t border-hairline">
-          {(health?.checks ?? []).map((c) => (
-            <li key={c.id} className="flex items-start gap-3 px-4 py-3">
-              <span aria-hidden="true" className={`mt-2 h-2 w-2 shrink-0 rounded-full ${HEALTH_DOT[c.level]}`} />
-              <span className="min-w-0">
-                <span className="block text-[16px] font-semibold text-ink">{c.label}</span>
-                <span className="block text-[14px] text-ink-3">{c.detail}</span>
-              </span>
-            </li>
-          ))}
-          {error && (
-            <li className="px-4 py-3">
-              <Button variant="secondary" onClick={load}>
-                Try again
-              </Button>
-            </li>
-          )}
-        </ul>
-      </Disclosure>
-    </Group>
-  );
-}
-
-/** Only shown to owner accounts on the DEVELOPER_EMAILS allowlist. */
-function DeveloperRow() {
-  const [developer, setDeveloper] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    fetch("/api/dev/access", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((b: { developer?: boolean } | null) => {
-        if (alive) setDeveloper(Boolean(b?.developer));
-      })
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
-  }, []);
-  if (!developer) return null;
-  return (
-    <section>
-      <GroupLabel>Developer</GroupLabel>
-      <Group>
-        <Link href="/dev" className={rowLinkClass}>
-          <span className="flex min-w-0 flex-col">
-            <span className="text-[17px] text-ink">Developer tools</span>
-            <span className="truncate text-[13px] text-ink-3">Database, errors, jobs and controls</span>
-          </span>
-          <ChevronRight className="chevron-nudge h-5 w-5 shrink-0 text-ink-3" />
-        </Link>
-      </Group>
-    </section>
-  );
-}
 
 /** "Nov 18", or "Nov 18, 2025" when the date isn't in this year. */
 function sinceLabel(ymd: string): string {
@@ -381,9 +82,6 @@ function sinceLabel(ymd: string): string {
 function GroupLabel({ children }: { children: React.ReactNode }) {
   return <h2 className="mb-2 px-4 text-[15px] font-semibold text-ink-3">{children}</h2>;
 }
-
-const rowClass = "flex min-h-[52px] items-center justify-between gap-4 px-4";
-const rowLinkClass = `${rowClass} group pressable-row hover:bg-surface-subtle active:bg-surface-muted`;
 
 function NumberRow({
   label,
@@ -1121,6 +819,7 @@ export default function SettingsPage() {
         email={data?.owner?.email ?? ""}
         onClose={() => setAccountOpen(false)}
         onSaved={() => void loadSettings()}
+        onRevokedAll={() => router.replace("/login")}
       />
       {confirmSheet}
     </AppShell>

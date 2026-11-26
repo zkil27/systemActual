@@ -1,4 +1,4 @@
-import { DigitalStatus, ReturnCategory } from "@prisma/client";
+import { DigitalStatus, OrderState, ReturnCategory } from "@prisma/client";
 
 /**
  * Every platform field and status value that decides which bucket a parcel is
@@ -186,10 +186,12 @@ const SHOPEE_LOST = new Set(["LOGISTICS_LOST"]);
  */
 export function isFailedDeliveryCandidate(order: {
   status: string;
+  state?: OrderState | null;
   shippedAt: Date | null;
   packageStatuses: Array<string | null>;
 }): boolean {
-  if (order.status.toUpperCase() !== "CANCELLED" || !order.shippedAt) return false;
+  const isCancelled = order.state ? order.state === OrderState.CANCELLED : order.status.toUpperCase() === "CANCELLED";
+  if (!isCancelled || !order.shippedAt) return false;
   return !order.packageStatuses.some((s) => s && SHOPEE_LOST.has(s.toUpperCase()));
 }
 
