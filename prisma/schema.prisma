@@ -67,14 +67,34 @@ enum PhysicalCondition {
 }
 
 model OwnerUser {
-  id                  String    @id @default(cuid())
-  email               String    @unique
+  id                  String             @id @default(cuid())
+  email               String             @unique
   passwordHash        String
   name                String
-  tokenVersion        Int       @default(1)
-  failedLoginAttempts Int       @default(0)
+  tokenVersion        Int                @default(1)
+  failedLoginAttempts Int                @default(0)
   loginLockedUntil    DateTime?
-  createdAt           DateTime  @default(now())
+  pushSubscriptions   PushSubscription[]
+  createdAt           DateTime           @default(now())
+}
+
+/// Web Push subscription for an owner's phone/browser (Home Screen PWA or desktop).
+/// Pruned automatically on 404/410 from the push service, on sign-out-all, or after 90 days unused.
+model PushSubscription {
+  id          String    @id @default(cuid())
+  ownerUserId String
+  ownerUser   OwnerUser @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  endpoint    String    @unique
+  p256dh      String
+  auth        String
+  deviceLabel String?
+  userAgent   String?
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([ownerUserId])
+  @@index([updatedAt])
 }
 
 model StaffMember {

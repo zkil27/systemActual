@@ -5,6 +5,7 @@ import {
   getReorderSuggestions,
 } from "@/lib/restock/service";
 import { getManilaDateString } from "@/lib/time";
+import { hasActivePushSubscriptions, sendOwnerPush } from "@/lib/push";
 import { formatTelegramDailyBrief } from "./brief";
 import { sendTelegramMessage } from "@/lib/telegram";
 
@@ -26,7 +27,10 @@ export function isBriefDue(now: Date, briefUtc: string, sentOn: string | null): 
 
 export async function sendDailyBriefIfDue(now: Date = new Date()): Promise<boolean> {
   const settings = await prisma.appSettings.findUnique({ where: { id: "default" } });
-  if (!settings?.telegramChatId) return false;
+  if (!settings) return false;
+  const hasTelegram = Boolean(settings.telegramChatId && process.env.TELEGRAM_BOT_TOKEN?.trim());
+  const hasPush = await hasActivePushSubscriptions();
+  if (!hasTelegram && !hasPush) return false;
   if (!isBriefDue(now, settings.telegramDailyBriefUtc, settings.dailyBriefSentOn)) return false;
 
   const today = getManilaDateString(now);
@@ -42,14 +46,33 @@ export async function sendDailyBriefIfDue(now: Date = new Date()): Promise<boole
     getReorderSuggestions(now),
     getOverduePurchaseOrders(now),
   ]);
-  return sendTelegramMessage(
-    settings.telegramChatId,
-    formatTelegramDailyBrief(report, {
-      reorderSoonCount: suggestions.length,
-      topLabels: suggestions
-        .slice(0, 3)
-        .map((s) => `${s.garmentName} (${s.variantLabel})`),
-      overduePoCount: overdue.length,
-    })
-  );
+  const briefText = formatTelegramDailyBrief(report, {
+    reorderSoonCount: suggestions.length,
+    topLabels: suggestions
+      .slice(0, 3)
+      .map((s) => `${s.garmentName} (${s.variantLabel})`),
+    overduePoCount: overdue.length,
+  });
+
+  const pushParts = [
+    `${report.combined.missingNowCount} missing`,
+    `${report.combined.overdueRtsCount} overdue`,
+    `${report.combined.physicallyArrivedCount} arrived today`,
+    ...(suggestions.length > 0 ? [`${suggestions.length} reorder soon`] : []),
+    ...(overdue.length > 0 ? [`${overdue.length} overdue PO`] : []),
+  ];
+
+  const [telegramOk, pushRes] = await Promise.all([
+    hasTelegram && settings.telegramChatId ? sendTelegramMessage(settings.telegramChatId, briefText) : Promise.resolve(false),
+    hasPush
+      ? sendOwnerPush({
+          title: `Daily summary (${report.rangeLabel})`,
+          body: pushParts.join(" · "),
+          url: "/",
+          tag: "kyna-brief",
+        })
+      : Promise.resolve({ sent: 0, failed: 0, pruned: 0 }),
+  ]);
+
+  return telegramOk || pushRes.sent > 0;
 }

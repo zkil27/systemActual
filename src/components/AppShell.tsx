@@ -28,6 +28,7 @@ import { usePullToRefresh } from "@/lib/ui/use-pull-to-refresh";
 import { formatBadgeCount } from "@/lib/ui/format";
 import { haptic, prefersReducedMotion } from "@/lib/ui/motion";
 import { activeTabIndex, BOTTOM_TABS, SIDEBAR_PRIMARY_ITEMS, type NavBadge, type NavItem } from "@/lib/ui/nav";
+import { syncExistingSubscriptionOnce } from "@/lib/ui/push-client";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -207,6 +208,10 @@ export function AppShell({
   useEffect(() => {
     setMenuOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    syncExistingSubscriptionOnce();
+  }, []);
 
   const [indicatorIndex, setIndicatorIndex] = useState(
     lastTabIndex >= 0 ? lastTabIndex : activeIndex

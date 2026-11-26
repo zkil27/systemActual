@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import { isPublicPath } from "@/lib/public-paths";
 
 describe("isPublicPath", () => {
-  it("lets the phone fetch the manifest and every icon before sign-in", () => {
+  it("lets the phone fetch the manifest, service worker, and every icon before sign-in", () => {
     for (const path of [
       "/manifest.webmanifest",
+      "/sw.js",
       "/icon",
       "/apple-icon",
       "/icons/192.png",
@@ -42,8 +43,10 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/api/dev/overview")).toBe(false);
   });
 
-  it("keeps the owner's printer controls private", () => {
+  it("keeps the owner's printer and push controls private", () => {
     expect(isPublicPath("/api/printer")).toBe(false);
+    expect(isPublicPath("/api/push/subscriptions")).toBe(false);
+    expect(isPublicPath("/api/push/test")).toBe(false);
   });
 
   it("keeps buyer chats owner-only (they show prices)", () => {

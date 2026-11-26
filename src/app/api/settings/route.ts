@@ -12,6 +12,7 @@ import { formatTelegramDailyBrief } from "@/lib/reports/brief";
 import { sendTelegramMessage } from "@/lib/telegram";
 import { formatWaveScheduleSetting, isContinuousWave, parseWaveTimes } from "@/lib/waves/schedule";
 import { getManilaDateString, getManilaDayBounds, getManilaTodayStr } from "@/lib/time";
+import { isMissingTableError } from "@/lib/dev/db-errors";
 
 export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("preview") === "1") {
@@ -248,6 +249,11 @@ export async function POST(req: NextRequest) {
         data: { tokenVersion: { increment: 1 } },
         select: { id: true, tokenVersion: true },
       });
+      await prisma.pushSubscription
+        .deleteMany({ where: { ownerUserId: ownerSession.userId } })
+        .catch((err) => {
+          if (!isMissingTableError(err)) console.error("[settings] clear push subs", err);
+        });
       await recordAudit({
         actor,
         action: "owner.revoke_sessions",

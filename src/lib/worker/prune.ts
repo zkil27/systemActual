@@ -36,6 +36,7 @@ const IMPORT_JOB_RETENTION_DAYS = 180;
 const RETURN_PARCEL_RETENTION_DAYS = 365;
 const PRICE_CHANGE_RETENTION_DAYS = 365;
 const PURCHASE_ORDER_RETENTION_DAYS = 730;
+const PUSH_SUBSCRIPTION_RETENTION_DAYS = 90;
 
 export interface DailyPruneResult {
   skipped: boolean;
@@ -274,6 +275,19 @@ export async function pruneDailyData(
             updatedAt: { lt: poCutoff },
           },
         }),
+        prisma.pushSubscription
+          .deleteMany({
+            where: {
+              updatedAt: { lt: new Date(now.getTime() - PUSH_SUBSCRIPTION_RETENTION_DAYS * 24 * 3600_000) },
+              OR: [
+                { lastUsedAt: null },
+                { lastUsedAt: { lt: new Date(now.getTime() - PUSH_SUBSCRIPTION_RETENTION_DAYS * 24 * 3600_000) } },
+              ],
+            },
+          })
+          .catch((err) => {
+            if (!isMissingTableError(err)) throw err;
+          }),
       ]);
       returnParcelsDeleted = returnPruned.count;
     } catch (err) {

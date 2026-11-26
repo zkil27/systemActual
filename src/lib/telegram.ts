@@ -15,6 +15,7 @@ import { formatManilaDateTime, getManilaRangeBounds } from "@/lib/time";
 import { missingWhere, overdueWhere } from "@/lib/returns/rules";
 import { getReadyCounts } from "@/lib/waves/build";
 import { addHeld, HELD_LABELS } from "@/lib/waves/ready";
+import { notifyOwnerPushFromText, type PushPayload } from "@/lib/push";
 
 export async function sendTelegramMessage(
   chatId: string,
@@ -43,11 +44,20 @@ export async function sendTelegramMessage(
 
 export async function notifyOwnerTelegram(
   text: string,
-  replyMarkup?: Record<string, unknown>
+  replyMarkup?: Record<string, unknown>,
+  pushOverride?: Partial<PushPayload>
 ): Promise<boolean> {
-  const settings = await prisma.appSettings.findUnique({ where: { id: "default" } });
-  if (!settings?.telegramChatId) return false;
-  return sendTelegramMessage(settings.telegramChatId, text, replyMarkup);
+  const [telegramResult, pushResult] = await Promise.allSettled([
+    (async () => {
+      const settings = await prisma.appSettings.findUnique({ where: { id: "default" } });
+      if (!settings?.telegramChatId) return false;
+      return sendTelegramMessage(settings.telegramChatId, text, replyMarkup);
+    })(),
+    notifyOwnerPushFromText(text, pushOverride),
+  ]);
+  const telegramOk = telegramResult.status === "fulfilled" && telegramResult.value;
+  const pushOk = pushResult.status === "fulfilled" && pushResult.value.sent > 0;
+  return telegramOk || pushOk;
 }
 
 export async function answerTelegramCallback(

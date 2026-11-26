@@ -6,6 +6,7 @@ import { getOverduePurchaseOrders } from "@/lib/restock/service";
 import { urgentDeadlineWhere } from "@/lib/returns/rules";
 import { unpickedPrintedWhere } from "@/lib/shipping/outbound";
 import { getRealShopWhere } from "@/lib/shops";
+import { hasActivePushSubscriptions } from "@/lib/push";
 import { notifyOwnerTelegram } from "@/lib/telegram";
 import { formatManilaDateTime } from "@/lib/time";
 
@@ -228,12 +229,15 @@ async function collectSpecs(now: Date): Promise<{ specs: AlertSpec[]; batches: A
 const ITEM_PREFIXES = ["stock:out:", "stock:low:", "dispute:due:", "listing:unlinked:", "wave:stalled:", "po:overdue:"];
 
 /**
- * Proactive Telegram alerts, deduped through AlertLog. Called from the worker
- * tick; does nothing without a linked chat, and at most every 5 minutes.
+ * Proactive owner alerts (Telegram + Web Push), deduped through AlertLog. Called
+ * from the worker tick; does nothing without a linked Telegram chat or push
+ * device, and at most every 5 minutes.
  */
 export async function runProactiveAlerts(now: Date = new Date()): Promise<{ sent: number }> {
   const settings = await prisma.appSettings.findUnique({ where: { id: "default" }, select: { telegramChatId: true } });
-  if (!settings?.telegramChatId || !process.env.TELEGRAM_BOT_TOKEN?.trim()) return { sent: 0 };
+  const hasTelegram = Boolean(settings?.telegramChatId && process.env.TELEGRAM_BOT_TOKEN?.trim());
+  const hasPush = await hasActivePushSubscriptions();
+  if (!hasTelegram && !hasPush) return { sent: 0 };
 
   // Claim this 5-minute slot first so two ticks can't both alert.
   const cutoff = new Date(now.getTime() - ALERTS_EVERY_MS);

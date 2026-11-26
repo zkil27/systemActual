@@ -24,6 +24,7 @@ const PUBLIC_PREFIXES = [
 /** Exact paths. The phone fetches these before anyone signs in. */
 const PUBLIC_EXACT = new Set([
   "/manifest.webmanifest",
+  "/sw.js",
   "/favicon.ico",
   "/icon",
   "/apple-icon",

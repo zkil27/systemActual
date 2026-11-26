@@ -17,9 +17,11 @@ import { formatManilaDateTime, getManilaTodayStr } from "@/lib/time";
 import { useAmbientPreference, useTheme, type ThemePreference } from "@/lib/ui/theme";
 import { PrinterSettings } from "@/components/PrinterSettings";
 import { AccountSheet } from "@/components/settings/AccountSheet";
+import { PushSettings } from "@/components/settings/PushSettings";
 import { StaffSheet } from "@/components/settings/StaffSheet";
 import { DeveloperRow, HealthPanel } from "@/components/settings/SystemPanels";
 import { postSettings, rowClass, rowLinkClass, type StaffRow } from "@/components/settings/shared";
+import { unsubscribeThisDevice } from "@/lib/ui/push-client";
 
 const THEME_OPTIONS: readonly { id: ThemePreference; label: string }[] = [
   { id: "light", label: "Light" },
@@ -420,6 +422,7 @@ export default function SettingsPage() {
   }
 
   async function handleLogout() {
+    await unsubscribeThisDevice().catch(() => {});
     await fetch("/api/auth/logout", { method: "POST" });
     router.replace("/login");
   }
@@ -645,6 +648,8 @@ export default function SettingsPage() {
           </div>
 
           <div className="space-y-5">
+            <PushSettings />
+
             <section>
               <GroupLabel>Telegram summary at 8 PM</GroupLabel>
               <Group className="divide-y divide-hairline">

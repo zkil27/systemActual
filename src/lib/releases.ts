@@ -20,6 +20,16 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    id: 14,
+    date: "2026-11-27",
+    title: "Phone push notifications",
+    changes: [
+      "Turn on Alerts on this device in Settings › Phone notifications to get alerts even when Kyna Ops is closed.",
+      "Get notified for new buyer messages, approvals, finished waves, stock and return issues, and the daily summary.",
+      "Tap any notification to open Chats, Approvals, Waves, Returns, or Items & stock directly.",
+    ],
+  },
+  {
     id: 13,
     date: "2026-11-27",
     title: "Safer controls and cleaner fees",

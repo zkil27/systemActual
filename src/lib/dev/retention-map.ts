@@ -19,6 +19,7 @@ export interface RetentionRule {
 
 export const RETENTION_RULES: Record<string, RetentionRule> = {
   OwnerUser: { kind: "bounded", note: "Owner accounts" },
+  PushSubscription: { kind: "rule", note: "Removed on 404/410, sign-out-all, or 90 days unused" },
   StaffMember: { kind: "bounded", note: "Staff list" },
   ShopConnection: { kind: "bounded", note: "One row per shop" },
   AppSettings: { kind: "bounded", note: "One row" },
