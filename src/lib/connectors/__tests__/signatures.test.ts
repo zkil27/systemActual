@@ -64,8 +64,18 @@ describe("Marketplace webhook HMAC-SHA256 verification", () => {
 describe("Webhook verification fails closed when keys are missing", () => {
   afterEach(() => vi.unstubAllEnvs());
 
-  it("rejects a Shopee push when SHOPEE_PARTNER_KEY is not set", () => {
+  it("accepts a Shopee push signed with SHOPEE_PUSH_PARTNER_KEY", () => {
+    vi.stubEnv("SHOPEE_PARTNER_KEY", "api-key");
+    vi.stubEnv("SHOPEE_PUSH_PARTNER_KEY", "push-key");
+    const webhookUrl = "https://kyna-ops.vercel.app/api/webhooks/shopee";
+    const rawBody = JSON.stringify({ code: 0, shop_id: 12345 });
+    const sigWithPushKey = crypto.createHmac("sha256", "push-key").update(`${webhookUrl}|${rawBody}`).digest("hex");
+    expect(verifyShopeeWebhookSignature({ webhookUrl, rawBody, signatureHeader: sigWithPushKey })).toBe(true);
+  });
+
+  it("rejects a Shopee push when SHOPEE_PARTNER_KEY and SHOPEE_PUSH_PARTNER_KEY are not set", () => {
     vi.stubEnv("SHOPEE_PARTNER_KEY", "");
+    vi.stubEnv("SHOPEE_PUSH_PARTNER_KEY", "");
     const rawBody = JSON.stringify({ code: 3, shop_id: 1 });
     // Even a signature computed with an empty key must not pass.
     const sigWithEmptyKey = crypto.createHmac("sha256", "").update(`u|${rawBody}`).digest("hex");

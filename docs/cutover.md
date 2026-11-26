@@ -14,7 +14,7 @@ Do these steps in order. Each one can be stopped or undone until **step 7**. Fro
   - `DATABASE_URL`, `DIRECT_URL`
   - `AUTH_SECRET`: 32+ random characters. It must not be the old example value.
   - `APP_BASE_URL`: the real https address. Shopee webhook signatures are checked against it.
-  - `SHOPEE_PARTNER_ID`, `SHOPEE_PARTNER_KEY`, `SHOPEE_BASE_URL`
+  - `SHOPEE_PARTNER_ID`, `SHOPEE_PARTNER_KEY`, `SHOPEE_PUSH_PARTNER_KEY`, `SHOPEE_BASE_URL`
   - `TIKTOK_APP_KEY`, `TIKTOK_APP_SECRET`, `TIKTOK_SERVICE_ID`, `TIKTOK_API_BASE_URL`
   - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `BLOB_READ_WRITE_TOKEN`
 - [ ] **Webhook URLs registered:**

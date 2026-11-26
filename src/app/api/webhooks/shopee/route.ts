@@ -12,13 +12,19 @@ export async function POST(req: NextRequest) {
   const rawBody = await req.text();
   const signature = req.headers.get("authorization");
 
-  // Always verify (fail closed). Without SHOPEE_PARTNER_KEY every push is rejected.
+  // Always verify (fail closed). Without SHOPEE_PUSH_PARTNER_KEY or SHOPEE_PARTNER_KEY every push is rejected.
+  const webhookUrl = shopeeWebhookUrl(req.url);
   const valid = verifyShopeeWebhookSignature({
-    webhookUrl: shopeeWebhookUrl(req.url),
+    webhookUrl,
     rawBody,
     signatureHeader: signature,
   });
   if (!valid) {
+    console.warn("[Shopee webhook] signature mismatch", {
+      hasAuth: Boolean(signature),
+      hasPushKey: Boolean(process.env.SHOPEE_PUSH_PARTNER_KEY?.trim()),
+      webhookUrl,
+    });
     return NextResponse.json({ error: "Invalid Shopee signature" }, { status: 401 });
   }
 
@@ -27,6 +33,11 @@ export async function POST(req: NextRequest) {
     payload = JSON.parse(rawBody) as Record<string, unknown>;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  // Shopee's "Verify and Save" test push uses code 0; acknowledge immediately.
+  if (payload.code === 0 || payload.code === "0") {
+    return NextResponse.json({ ok: true });
   }
 
   // Store first: a resend is answered without doing the work twice, and a

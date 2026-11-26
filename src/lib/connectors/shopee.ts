@@ -5,6 +5,7 @@ export function getShopeeConfig() {
   return {
     partnerId: process.env.SHOPEE_PARTNER_ID?.trim() || "",
     partnerKey: process.env.SHOPEE_PARTNER_KEY?.trim() || "",
+    pushPartnerKey: process.env.SHOPEE_PUSH_PARTNER_KEY?.trim() || "",
     baseUrl: (process.env.SHOPEE_BASE_URL || "https://partner.shopeemobile.com").replace(/\/$/, ""),
     appBaseUrl: (process.env.APP_BASE_URL || "http://localhost:3000").replace(/\/$/, ""),
   };
@@ -36,7 +37,8 @@ export function signShopeeRequest(params: {
 
 /**
  * Shopee Push Mechanism (Webhook) signature verification.
- * Base string: `${webhookUrl}|${rawBody}` keyed with partnerKey.
+ * Base string: `${webhookUrl}|${rawBody}` keyed with the Push Partner Key
+ * (`SHOPEE_PUSH_PARTNER_KEY`, falling back to `SHOPEE_PARTNER_KEY`).
  */
 export function verifyShopeeWebhookSignature(params: {
   webhookUrl: string;
@@ -44,15 +46,20 @@ export function verifyShopeeWebhookSignature(params: {
   signatureHeader: string | null | undefined;
   partnerKey?: string;
 }): boolean {
-  const key = params.partnerKey ?? getShopeeConfig().partnerKey;
-  if (!key || !params.signatureHeader) return false;
-  const expected = crypto
-    .createHmac("sha256", key)
-    .update(`${params.webhookUrl}|${params.rawBody}`)
-    .digest("hex");
+  if (!params.signatureHeader) return false;
+  const cfg = getShopeeConfig();
+  const keys =
+    params.partnerKey !== undefined
+      ? [params.partnerKey].filter(Boolean)
+      : [cfg.pushPartnerKey, cfg.partnerKey].filter(Boolean);
+  if (keys.length === 0) return false;
   const actual = params.signatureHeader.trim().toLowerCase();
-  if (expected.length !== actual.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(actual));
+  const base = `${params.webhookUrl}|${params.rawBody}`;
+  return keys.some((key) => {
+    const expected = crypto.createHmac("sha256", key).update(base).digest("hex");
+    if (expected.length !== actual.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(actual));
+  });
 }
 
 /**

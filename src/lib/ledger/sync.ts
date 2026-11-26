@@ -327,7 +327,8 @@ export async function syncReadyOrders(
         } else if (shop.platform === Platform.SHOPEE) {
           const now = new Date();
           const from = new Date(now.getTime() - SHOPEE_READY_LOOKBACK_MS);
-          for (const orderStatus of ["READY_TO_SHIP", "RETRY_SHIP"]) {
+          // Shopee v2 get_order_list only accepts READY_TO_SHIP (RETRY_SHIP is rejected with "order_status is invalid").
+          for (const orderStatus of ["READY_TO_SHIP"]) {
             let cursor = "";
             for (;;) {
               checkDeadline(deadline);
