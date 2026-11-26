@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { CalendarDays, ChevronRight, Lock, Monitor, Moon, Sun } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Button, Group } from "@/components/ui/Button";
-import { ComingSoonPill } from "@/components/ui/ComingSoon";
 import { useConfirm } from "@/components/ui/ConfirmSheet";
 import { DatePickerSheet } from "@/components/ui/DatePickerSheet";
 import { Disclosure } from "@/components/ui/Disclosure";
@@ -391,10 +390,10 @@ function NumberRow({
 
 type ShopRow = SettingsPayload["shops"][number];
 
-function storeStatus(shop: ShopRow | undefined, keysReady: boolean, noKeysLabel: string): string {
+function storeStatus(shop: ShopRow | undefined, keysReady: boolean): string {
   if (shop?.needsReconnect) return "Reconnect";
   if (shop?.connected) return "Connected";
-  return keysReady ? "Connect" : noKeysLabel;
+  return keysReady ? "Connect" : "Waiting for keys";
 }
 
 function storeDetail(shop: ShopRow | undefined): string | null {
@@ -709,15 +708,13 @@ export default function SettingsPage() {
             <Group className="divide-y divide-hairline">
               {(
                 [
-                  // Shopee has no app keys until Shopee approves Kyna Ops.
-                  { label: "Shopee PH", href: "/api/oauth/shopee/start", shop: shopee, keys: data?.integrations.shopeeEnvReady, noKeys: "Coming soon" },
-                  { label: "TikTok Shop PH", href: "/api/oauth/tiktok/start", shop: tiktok, keys: data?.integrations.tiktokEnvReady, noKeys: "Waiting for keys" },
+                  { label: "Shopee PH", href: "/api/oauth/shopee/start", shop: shopee, keys: data?.integrations.shopeeEnvReady },
+                  { label: "TikTok Shop PH", href: "/api/oauth/tiktok/start", shop: tiktok, keys: data?.integrations.tiktokEnvReady },
                 ] as const
               ).map((row) => {
                 const detail = storeDetail(row.shop);
                 const synced = row.shop?.connected && row.shop.lastSyncedAt ? `Synced ${updatedAgo(row.shop.lastSyncedAt)}` : null;
-                const status = storeStatus(row.shop, Boolean(row.keys), row.noKeys);
-                const soon = status === "Coming soon";
+                const status = storeStatus(row.shop, Boolean(row.keys));
                 const body = (
                   <>
                     <span className="flex min-w-0 flex-col py-2">
@@ -735,7 +732,7 @@ export default function SettingsPage() {
                         row.shop?.needsReconnect ? "font-semibold text-missing-ink" : "text-ink-3"
                       }`}
                     >
-                      {soon ? <ComingSoonPill /> : status}
+                      {status}
                       {row.keys && <ChevronRight className="chevron-nudge h-5 w-5" />}
                     </span>
                   </>

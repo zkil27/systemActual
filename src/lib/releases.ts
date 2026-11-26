@@ -20,6 +20,14 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    id: 9,
+    date: "2026-11-26",
+    title: "Shopee ready to connect",
+    changes: [
+      "Shopee PH in Settings is ready to connect instead of showing Coming soon.",
+    ],
+  },
+  {
     id: 8,
     date: "2026-11-26",
     title: "Shopee coming soon, softer colors",
