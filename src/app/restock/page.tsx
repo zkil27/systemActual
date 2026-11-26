@@ -88,21 +88,7 @@ export default function RestockPage() {
   }
 
   return (
-    <AppShell
-      title="Restock & suppliers"
-      onRefresh={load}
-      headerRight={
-        <button
-          type="button"
-          onClick={() => openNewPo(null)}
-          aria-label="New supplier order"
-          title="New supplier order"
-          className="pressable hidden h-11 w-11 items-center justify-center rounded-full text-brand hover:bg-ink/[0.05] lg:flex"
-        >
-          <Plus className="h-[22px] w-[22px]" />
-        </button>
-      }
-    >
+    <AppShell title="Restock & suppliers" onRefresh={load}>
       <div className="space-y-4">
         <StockHubNav active="restock" />
 
@@ -148,7 +134,7 @@ export default function RestockPage() {
           </Group>
         ) : tab === "orders" ? (
           <div className="space-y-3">
-            <Button full onClick={() => openNewPo(null)}>
+            <Button onClick={() => openNewPo(null)} className="w-full sm:w-auto">
               <Plus className="h-4 w-4" />
               New supplier order
             </Button>

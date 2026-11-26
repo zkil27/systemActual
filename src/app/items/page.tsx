@@ -659,7 +659,7 @@ export default function ItemsPage() {
                 variant="secondary"
                 disabled={busy || !shops.some((s) => s.connected)}
                 onClick={() => run({ action: "start_import" }, "Started")}
-                className="h-11 flex-1 whitespace-nowrap px-3.5 text-[14px]"
+                className="h-11 flex-1 whitespace-nowrap px-3.5 text-[14px] sm:flex-none"
               >
                 <RotateCw className="h-4 w-4 shrink-0" />
                 Sync stock
@@ -669,7 +669,7 @@ export default function ItemsPage() {
                   variant="secondary"
                   disabled={busy}
                   onClick={() => run({ action: "auto_link" }, "Linked {n} items")}
-                  className="h-11 flex-1 whitespace-nowrap px-3.5 text-[14px]"
+                  className="h-11 flex-1 whitespace-nowrap px-3.5 text-[14px] sm:flex-none"
                 >
                   <Sparkles className="h-4 w-4 shrink-0" />
                   Auto-link
@@ -678,7 +678,7 @@ export default function ItemsPage() {
               <Link
                 href="/stock-in?from=items"
                 onClick={() => haptic("tap")}
-                className="pressable inline-flex h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius-control)] bg-brand-soft px-3.5 text-[14px] font-bold text-brand hover:bg-brand/15"
+                className="pressable inline-flex h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius-control)] bg-brand-soft px-3.5 text-[14px] font-bold text-brand hover:bg-brand/15 sm:ml-auto"
               >
                 <PackagePlus className="h-4 w-4 shrink-0" />
                 Delivery

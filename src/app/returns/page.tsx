@@ -76,7 +76,7 @@ function FilterChips({
   }, [value, count]);
 
   return (
-    <ScrollChips role="tablist" label="Filters" className="-mx-5 lg:mr-0" rowClassName="gap-2 px-5 py-0.5 lg:pr-0">
+    <ScrollChips role="tablist" label="Filters" className="-mx-5 lg:mx-0" rowClassName="gap-2 px-5 py-0.5 lg:px-0">
       {box && (
         <span
           aria-hidden="true"
@@ -117,7 +117,7 @@ function FilterChips({
             className={`pressable relative z-10 h-10 shrink-0 rounded-full px-4 text-[15px] font-semibold ${
               active
                 ? activeText
-                : "text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] active:bg-ink/[0.06]"
+                : "bg-surface/85 text-ink-2 shadow-[inset_0_0_0_1px_var(--color-hairline-strong)] active:bg-ink/[0.06]"
             }`}
           >
             {f.label}
@@ -360,34 +360,14 @@ function ReturnsExplorerInner() {
           ? totalCount
           : undefined
       }
-      headerRight={
-        <button
-          type="button"
-          aria-label="Filter by date range"
-          title="Filter by date range"
-          aria-haspopup="dialog"
-          onClick={() => setCustomOpen(true)}
-          className={`pressable relative hidden h-11 w-11 items-center justify-center rounded-full hover:bg-ink/[0.05] lg:flex ${
-            customOpen || isCustomActive ? "text-brand" : "text-ink-2"
-          }`}
-        >
-          <CalendarDays className="h-[22px] w-[22px]" />
-          {isCustomActive && (
-            <span
-              aria-hidden="true"
-              className="anim-pop absolute right-2 top-2 h-2 w-2 rounded-full bg-brand ring-2 ring-ground"
-            />
-          )}
-        </button>
-      }
     >
       <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_420px] lg:items-start lg:gap-6 xl:grid-cols-[minmax(0,1fr)_460px]">
         <div className="min-w-0">
           <div ref={stickySentinelRef} aria-hidden="true" className="h-px w-full" />
           <div
-            className={`sticky top-[calc(env(safe-area-inset-top)+48px)] z-20 -mx-5 space-y-2.5 px-5 pt-2 pb-3 transition-[background-color,border-color,backdrop-filter,box-shadow] duration-200 lg:top-16 lg:mr-0 lg:pr-0 ${
+            className={`sticky top-[calc(env(safe-area-inset-top)+48px)] z-20 -mx-5 space-y-2.5 px-5 pt-2 pb-3 transition-[background-color,border-color,backdrop-filter,box-shadow] duration-200 lg:top-16 lg:mx-0 lg:px-0 lg:pt-3 ${
               stuck
-                ? "border-b border-hairline bg-surface/95 backdrop-blur-xl backdrop-saturate-150 shadow-[0_6px_20px_-12px_rgb(15_23_42/0.25)]"
+                ? "border-b border-hairline bg-surface/95 backdrop-blur-xl backdrop-saturate-150 shadow-[0_6px_20px_-12px_rgb(15_23_42/0.25)] lg:border-b-0 lg:bg-ground/92 lg:shadow-none"
                 : "border-b border-transparent bg-transparent"
             }`}
           >

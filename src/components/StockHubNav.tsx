@@ -13,7 +13,7 @@ export function StockHubNav({ active }: { active: "items" | "listings" | "restoc
   return (
     <nav
       aria-label="Stock sections"
-      className="grid h-11 grid-cols-3 rounded-[var(--radius-control)] bg-surface-track/80 p-[3px]"
+      className="grid h-11 grid-cols-3 rounded-[var(--radius-control)] bg-surface-track/80 p-[3px] lg:hidden"
     >
       {ITEMS.map((item) => {
         const isCurrent = item.id === active;
