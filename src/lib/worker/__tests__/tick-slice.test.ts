@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasTime, LEASE_MS, sliceDeadline, TICK_BUDGET_MS } from "../tick";
+import { hasTime, LEASE_MS, shouldRunWebhookTick, sliceDeadline, TICK_BUDGET_MS, WEBHOOK_DEBOUNCE_MS } from "../tick";
 
 describe("sliceDeadline", () => {
   it("gives a backfill only part of the remaining time", () => {
@@ -27,5 +27,31 @@ describe("tick lease", () => {
   it("outlives the route's 120 s limit, so two ticks never overlap", () => {
     expect(LEASE_MS).toBeGreaterThan(120_000);
     expect(LEASE_MS).toBeGreaterThan(TICK_BUDGET_MS);
+  });
+});
+
+describe("shouldRunWebhookTick", () => {
+  const now = new Date("2026-11-26T12:00:00Z");
+
+  it("asks for a rerun when a tick is actively holding the lease", () => {
+    expect(
+      shouldRunWebhookTick({ holder: "abc", lockedUntil: new Date(now.getTime() + 30_000) }, now)
+    ).toBe("rerun");
+  });
+
+  it("debounces when a tick finished within the cooldown window", () => {
+    expect(
+      shouldRunWebhookTick({ holder: null, lockedUntil: new Date(now.getTime() - (WEBHOOK_DEBOUNCE_MS - 1_000)) }, now)
+    ).toBe("debounce");
+  });
+
+  it("runs when no lock exists, the lease expired, or cooldown elapsed", () => {
+    expect(shouldRunWebhookTick(null, now)).toBe("run");
+    expect(
+      shouldRunWebhookTick({ holder: "crashed", lockedUntil: new Date(now.getTime() - 1) }, now)
+    ).toBe("run");
+    expect(
+      shouldRunWebhookTick({ holder: null, lockedUntil: new Date(now.getTime() - WEBHOOK_DEBOUNCE_MS) }, now)
+    ).toBe("run");
   });
 });

@@ -466,6 +466,7 @@ model Order {
   @@index([shopConnectionId, status])
   @@index([status, platformUpdatedAt])
   @@index([platformCreatedAt])
+  @@index([shippedAt])
   @@index([status, financeSavedAt, financeCheckedAt])
 }
 
@@ -612,6 +613,7 @@ model WalletTransaction {
 
   @@unique([platform, externalId])
   @@index([occurredAt, kind])
+  @@index([platform, orderSn])
 }
 
 /// What one completed order really earned: the shop's payout, its fees, and
@@ -817,6 +819,7 @@ model PrintJob {
   @@index([status, createdAt])
   @@index([status, claimedAt])
   @@index([waveId])
+  @@index([packageId])
 }
 
 enum WaveStatus {

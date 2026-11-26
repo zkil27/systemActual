@@ -50,6 +50,8 @@ describe("middleware matcher", () => {
       "/api/auth/staff-login",
       "/api/scan/lookup",
       "/api/stock-in",
+      "/api/handover",
+      "/api/proofs/return-proof-1.jpg",
       "/api/webhooks/shopee",
       "/api/telegram/webhook",
       "/api/oauth/shopee/callback",
@@ -71,6 +73,7 @@ describe("middleware matcher", () => {
       "/api/dashboard",
       "/api/printer",
       "/api/returns/abc",
+      "/api/handover-admin",
       "/icon-admin",
       "/apple-icon/secret",
     ]) {

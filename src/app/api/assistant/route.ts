@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { getOwnerSession } from "@/lib/auth";
 import { aiSettingsInput, shopAnswerInput } from "@/lib/ai/settings";
 import {
   deleteShopAnswer,
@@ -12,8 +13,11 @@ import {
 
 export const dynamic = "force-dynamic";
 
-/** Owner only (middleware). Chats assistant settings and shop answers. */
+/** Chats assistant settings and shop answers. */
 export async function GET() {
+  if (!(await getOwnerSession())) {
+    return NextResponse.json({ error: "Owner sign-in required." }, { status: 401 });
+  }
   try {
     const [settings, answers] = await Promise.all([getAiSettings(), listShopAnswers()]);
     return NextResponse.json({ settings, answers });
@@ -31,6 +35,9 @@ const body = z.discriminatedUnion("action", [
 ]);
 
 export async function POST(req: NextRequest) {
+  if (!(await getOwnerSession())) {
+    return NextResponse.json({ error: "Owner sign-in required." }, { status: 401 });
+  }
   const parsed = body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "Check the fields and try again." }, { status: 400 });

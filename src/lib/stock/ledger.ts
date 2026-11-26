@@ -54,17 +54,24 @@ export async function setShelfCount(
     ]);
     return;
   }
-  const current = (await onShelfByVariant([variantId])).get(variantId) ?? 0;
-  if (current === n) return;
-  await prisma.stockMovement.create({
-    data: {
-      garmentVariantId: variantId,
-      delta: n - current,
-      reason: StockReason.ADJUSTMENT,
-      sourceKey: `adjust:${variantId}:${crypto.randomUUID()}`,
-      note: opts.note ? `${opts.note}: ${current} → ${n}` : `Recount: ${current} → ${n}`,
-      staffMemberId: opts.staffMemberId ?? null,
-    },
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "GarmentVariant" WHERE id = ${variantId} FOR UPDATE`;
+    const agg = await tx.stockMovement.aggregate({
+      where: { garmentVariantId: variantId },
+      _sum: { delta: true },
+    });
+    const current = agg._sum.delta ?? 0;
+    if (current === n) return;
+    await tx.stockMovement.create({
+      data: {
+        garmentVariantId: variantId,
+        delta: n - current,
+        reason: StockReason.ADJUSTMENT,
+        sourceKey: `adjust:${variantId}:${crypto.randomUUID()}`,
+        note: opts.note ? `${opts.note}: ${current} → ${n}` : `Recount: ${current} → ${n}`,
+        staffMemberId: opts.staffMemberId ?? null,
+      },
+    });
   });
 }
 
@@ -189,42 +196,52 @@ export async function recordStaffStockReport(opts: {
     },
   });
   await ensureVariantStartingStock(variant);
-  const previousOnShelf = (await onShelfByVariant([opts.variantId])).get(opts.variantId) ?? 0;
 
   const cleanNote = opts.note?.trim() || "";
-  let delta: number;
-  let sourceKey: string;
-  let note: string;
+  let previousOnShelf = 0;
+  let newOnShelf = 0;
+  let delta = 0;
 
-  if (opts.mode === "EMPTY_SHELF") {
-    delta = -Math.max(0, previousOnShelf);
-    sourceKey = `empty:${opts.clientKey}`;
-    note = cleanNote
-      ? `Shelf empty (0): ${cleanNote}`
-      : `Shelf empty (0 left) reported by ${opts.staffName}`;
-  } else {
-    const deduct = Math.min(
-      Math.max(0, previousOnShelf),
-      Math.max(1, Math.floor(opts.quantity ?? 1))
-    );
-    delta = -deduct;
-    sourceKey = `defect:${opts.clientKey}`;
-    note = cleanNote
-      ? `Damaged on shelf (-${deduct}): ${cleanNote}`
-      : `Damaged on shelf (-${deduct}) reported by ${opts.staffName}`;
-  }
-
-  const newOnShelf = Math.max(0, previousOnShelf + delta);
   try {
-    await prisma.stockMovement.create({
-      data: {
-        garmentVariantId: opts.variantId,
-        delta,
-        reason: StockReason.ADJUSTMENT,
-        sourceKey,
-        staffMemberId: opts.staffMemberId,
-        note,
-      },
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "GarmentVariant" WHERE id = ${opts.variantId} FOR UPDATE`;
+      const agg = await tx.stockMovement.aggregate({
+        where: { garmentVariantId: opts.variantId },
+        _sum: { delta: true },
+      });
+      previousOnShelf = agg._sum.delta ?? 0;
+
+      let sourceKey: string;
+      let note: string;
+      if (opts.mode === "EMPTY_SHELF") {
+        delta = -Math.max(0, previousOnShelf);
+        sourceKey = `empty:${opts.clientKey}`;
+        note = cleanNote
+          ? `Shelf empty (0): ${cleanNote}`
+          : `Shelf empty (0 left) reported by ${opts.staffName}`;
+      } else {
+        const deduct = Math.min(
+          Math.max(0, previousOnShelf),
+          Math.max(1, Math.floor(opts.quantity ?? 1))
+        );
+        delta = -deduct;
+        sourceKey = `defect:${opts.clientKey}`;
+        note = cleanNote
+          ? `Damaged on shelf (-${deduct}): ${cleanNote}`
+          : `Damaged on shelf (-${deduct}) reported by ${opts.staffName}`;
+      }
+
+      newOnShelf = Math.max(0, previousOnShelf + delta);
+      await tx.stockMovement.create({
+        data: {
+          garmentVariantId: opts.variantId,
+          delta,
+          reason: StockReason.ADJUSTMENT,
+          sourceKey,
+          staffMemberId: opts.staffMemberId,
+          note,
+        },
+      });
     });
     return {
       duplicate: false,

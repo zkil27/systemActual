@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getOwnerSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getProfitReport, parseMonth } from "@/lib/finance/report";
 import { MONTH_CSV_HEADER, ORDER_CSV_HEADER, manilaStamp, toCsv } from "@/lib/finance/csv";
@@ -10,6 +11,9 @@ import { getRealShopWhere } from "@/lib/shops";
  * month's orders are still kept, otherwise one row per shop.
  */
 export async function GET(req: NextRequest) {
+  if (!(await getOwnerSession())) {
+    return NextResponse.json({ error: "Owner sign-in required." }, { status: 401 });
+  }
   try {
     const sp = req.nextUrl.searchParams;
     const month = parseMonth(sp.get("month"));

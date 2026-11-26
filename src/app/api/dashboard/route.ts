@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse, after } from "next/server";
+import { getOwnerSession } from "@/lib/auth";
 import { getDailyTruthReport } from "@/lib/analytics/daily-returns";
 import { getSyncStatus } from "@/lib/sync/status";
 import { runTick } from "@/lib/worker/tick";
@@ -6,6 +7,9 @@ import { runTick } from "@/lib/worker/tick";
 export const maxDuration = 120;
 
 export async function GET(req: NextRequest) {
+  if (!(await getOwnerSession())) {
+    return NextResponse.json({ error: "Owner sign-in required." }, { status: 401 });
+  }
   try {
     const sp = req.nextUrl.searchParams;
     const rangeParam = sp.get("range");

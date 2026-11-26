@@ -9,17 +9,22 @@ import {
   type PushCandidate,
 } from "@/lib/stock/rules";
 
-const { mockPrisma } = vi.hoisted(() => ({
-  mockPrisma: {
+const { mockPrisma } = vi.hoisted(() => {
+  const mockPrisma = {
+    $transaction: vi.fn(),
+    $queryRaw: vi.fn().mockResolvedValue([]),
     garmentVariant: {
       findUniqueOrThrow: vi.fn(),
     },
     stockMovement: {
       groupBy: vi.fn(),
+      aggregate: vi.fn(),
       create: vi.fn(),
     },
-  },
-}));
+  };
+  mockPrisma.$transaction.mockImplementation((fn: (tx: typeof mockPrisma) => unknown) => fn(mockPrisma));
+  return { mockPrisma };
+});
 
 vi.mock("@/lib/prisma", () => ({
   prisma: mockPrisma,
@@ -117,6 +122,7 @@ describe("recordStaffStockReport", () => {
     mockPrisma.stockMovement.groupBy.mockResolvedValue([
       { garmentVariantId: "gv-1", _sum: { delta: 7 } },
     ]);
+    mockPrisma.stockMovement.aggregate.mockResolvedValue({ _sum: { delta: 7 } });
     mockPrisma.stockMovement.create.mockResolvedValue({ id: "sm-1" });
   });
 

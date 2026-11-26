@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { getOwnerSession } from "@/lib/auth";
 import { checkReplyText, ReplyKeyConflictError } from "@/lib/chats/send";
 import {
   canSendPhotoTo,
@@ -16,11 +17,14 @@ export const maxDuration = 30;
 const clientKeySchema = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/);
 
 /**
- * Owner only (middleware). Sends a reply: JSON `{ clientKey, text }` or
+ * Sends a reply: JSON `{ clientKey, text }` or
  * multipart `{ clientKey, photo }`. Sending the same clientKey again retries
  * a failed reply and never posts twice.
  */
 export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
+  if (!(await getOwnerSession())) {
+    return NextResponse.json({ error: "Owner sign-in required." }, { status: 401 });
+  }
   const { id } = await context.params;
   if (!id || id.length > 64) return NextResponse.json({ error: "Chat not found." }, { status: 404 });
 

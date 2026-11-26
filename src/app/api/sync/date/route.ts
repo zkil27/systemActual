@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Platform } from "@prisma/client";
+import { getOwnerSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureFreshToken } from "@/lib/connectors/tokens";
 import { syncOrdersWindow } from "@/lib/ledger/sync";
@@ -13,6 +14,9 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** On-demand sync for one Manila calendar day without moving live sync cursors. */
 export async function POST(req: NextRequest) {
+  if (!(await getOwnerSession())) {
+    return NextResponse.json({ error: "Owner sign-in required." }, { status: 401 });
+  }
   try {
     const body = (await req.json().catch(() => null)) as { date?: unknown } | null;
     const rawDate = typeof body?.date === "string" ? body.date.trim() : "";

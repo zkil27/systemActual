@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { decryptSecret } from "@/lib/crypto";
+import { fetchWithRetry, readMarketplaceJson, throwMarketplaceError } from "./http";
 import { tiktokExpiry } from "./tokens";
 
 export function getTikTokConfig() {
@@ -68,20 +69,21 @@ export function buildTikTokAuthUrl(state: string): string {
   return `${base}?service_id=${encodeURIComponent(serviceId)}&state=${encodeURIComponent(state)}`;
 }
 
-export async function exchangeTikTokCode(code: string) {
+export async function exchangeTikTokCode(code: string, fetchFn: typeof fetch = fetch) {
   const cfg = getTikTokConfig();
   const url = `${cfg.authUrl}/api/v2/token/get?app_key=${encodeURIComponent(cfg.appKey)}&app_secret=${encodeURIComponent(cfg.appSecret)}&auth_code=${encodeURIComponent(code)}&grant_type=authorized_code`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-  const data = await res.json();
+  const res = await fetchWithRetry(url, { method: "GET", signal: AbortSignal.timeout(15_000) }, { fetchFn });
+  const data = await readMarketplaceJson(res, "TikTok");
+  const payload = (data.data ?? {}) as Record<string, unknown>;
   if (!res.ok || data.code !== 0) {
-    throw new Error(data.message || "TikTok token exchange failed");
+    throwMarketplaceError(res, String(data.message || "TikTok token exchange failed"));
   }
   return {
-    accessToken: String(data.data.access_token),
-    refreshToken: String(data.data.refresh_token),
+    accessToken: String(payload.access_token),
+    refreshToken: String(payload.refresh_token),
     // access_token_expire_in is an absolute Unix timestamp, not a duration.
-    expiresAt: tiktokExpiry(data.data.access_token_expire_in, Date.now()),
-    sellerName: String(data.data.seller_name || "TikTok Shop PH"),
+    expiresAt: tiktokExpiry(payload.access_token_expire_in, Date.now()),
+    sellerName: String(payload.seller_name || "TikTok Shop PH"),
   };
 }
 
@@ -97,7 +99,8 @@ export async function tiktokRequest(opts: {
   query?: Record<string, string>;
   body?: Record<string, unknown>;
   fetchFn?: typeof fetch;
-}) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+}): Promise<any> {
   const cfg = getTikTokConfig();
   const accessToken = decryptSecret(opts.accessToken);
   const shopCipher = opts.shopCipher ? decryptSecret(opts.shopCipher) : null;
@@ -111,18 +114,22 @@ export async function tiktokRequest(opts: {
   };
   const sign = signTikTokRequest({ appSecret: cfg.appSecret, path: opts.path, query, rawBody });
   const qs = new URLSearchParams({ ...query, sign });
-  const res = await (opts.fetchFn ?? fetch)(`${cfg.apiBaseUrl}${opts.path}?${qs.toString()}`, {
-    method: opts.method,
-    headers: {
-      ...(rawBody ? { "Content-Type": "application/json" } : {}),
-      "x-tts-access-token": accessToken,
+  const res = await fetchWithRetry(
+    `${cfg.apiBaseUrl}${opts.path}?${qs.toString()}`,
+    {
+      method: opts.method,
+      headers: {
+        ...(rawBody ? { "Content-Type": "application/json" } : {}),
+        "x-tts-access-token": accessToken,
+      },
+      body: rawBody,
+      signal: AbortSignal.timeout(15_000),
     },
-    body: rawBody,
-    signal: AbortSignal.timeout(15_000),
-  });
-  const data = await res.json();
+    { fetchFn: opts.fetchFn }
+  );
+  const data = await readMarketplaceJson(res, "TikTok");
   if (!res.ok || data.code !== 0) {
-    throw new Error(data.message || `TikTok API error on ${opts.path}`);
+    throwMarketplaceError(res, String(data.message || `TikTok API error on ${opts.path}`));
   }
   return data.data;
 }
@@ -140,7 +147,8 @@ export async function tiktokUploadRequest(opts: {
   fileName: string;
   query?: Record<string, string>;
   fetchFn?: typeof fetch;
-}) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+}): Promise<any> {
   const cfg = getTikTokConfig();
   const accessToken = decryptSecret(opts.accessToken);
   const shopCipher = opts.shopCipher ? decryptSecret(opts.shopCipher) : null;
@@ -153,13 +161,14 @@ export async function tiktokUploadRequest(opts: {
   const sign = signTikTokRequest({ appSecret: cfg.appSecret, path: opts.path, query });
   const form = new FormData();
   form.append(opts.field, opts.file, opts.fileName);
-  const res = await (opts.fetchFn ?? fetch)(
+  const res = await fetchWithRetry(
     `${cfg.apiBaseUrl}${opts.path}?${new URLSearchParams({ ...query, sign }).toString()}`,
-    { method: "POST", headers: { "x-tts-access-token": accessToken }, body: form, signal: AbortSignal.timeout(30_000) }
+    { method: "POST", headers: { "x-tts-access-token": accessToken }, body: form, signal: AbortSignal.timeout(30_000) },
+    { fetchFn: opts.fetchFn }
   );
-  const data = await res.json();
+  const data = await readMarketplaceJson(res, "TikTok");
   if (!res.ok || data.code !== 0) {
-    throw new Error(data.message || `TikTok API error on ${opts.path}`);
+    throwMarketplaceError(res, String(data.message || `TikTok API error on ${opts.path}`));
   }
   return data.data;
 }

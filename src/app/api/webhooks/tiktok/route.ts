@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyTikTokWebhookSignature } from "@/lib/connectors/tiktok";
 import { eventFields, processEvent, storeEvent } from "@/lib/integrations/inbox";
 import { handleMarketplaceEvent } from "@/lib/integrations/handle-event";
-import { runTick } from "@/lib/worker/tick";
+import { triggerWebhookTick } from "@/lib/worker/tick";
 
 export const maxDuration = 120;
 
@@ -54,12 +54,14 @@ export async function POST(req: NextRequest) {
       .catch((err) => console.error("[TikTok fast-cancel]", err));
   }
 
-  // TikTok needs a 200 within 3 seconds. Handle the event (fast single-order
-  // sync) after replying, then run the full tick.
+  // TikTok needs a 200 within 3 seconds. Urgent cancellations alert packers immediately;
+  // normal order updates are drained in bounded batches by the debounced tick.
   after(async () => {
     try {
-      await processEvent(eventId, handleMarketplaceEvent);
-      await runTick("webhook", { platform: Platform.TIKTOK });
+      if (fields.isCancel) {
+        await processEvent(eventId, handleMarketplaceEvent);
+      }
+      await triggerWebhookTick(Platform.TIKTOK);
     } catch (err) {
       console.error("[TikTok webhook tick error]", err);
     }

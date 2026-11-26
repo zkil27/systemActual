@@ -3,6 +3,7 @@ import { Platform, type ShopConnection } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { notifyOwnerTelegram } from "@/lib/telegram";
+import { fetchWithRetry, readMarketplaceJson, throwMarketplaceError } from "./http";
 
 /**
  * Access-token lifecycle for both platforms.
@@ -68,7 +69,7 @@ export async function refreshShopeeTokens(
     .createHmac("sha256", cfg.partnerKey)
     .update(`${cfg.partnerId}${path}${timestamp}`)
     .digest("hex");
-  const res = await fetchFn(
+  const res = await fetchWithRetry(
     `${cfg.baseUrl}${path}?partner_id=${cfg.partnerId}&timestamp=${timestamp}&sign=${sign}`,
     {
       method: "POST",
@@ -79,11 +80,12 @@ export async function refreshShopeeTokens(
         shop_id: Number(shopId),
       }),
       signal: AbortSignal.timeout(15_000),
-    }
+    },
+    { fetchFn }
   );
-  const data = await res.json();
+  const data = await readMarketplaceJson(res, "Shopee");
   if (!res.ok || data.error || !data.access_token) {
-    throw new Error(data.message || data.error || "Shopee token refresh failed");
+    throwMarketplaceError(res, String(data.message || data.error || "Shopee token refresh failed"));
   }
   return {
     accessToken: String(data.access_token),
@@ -104,17 +106,20 @@ export async function refreshTikTokTokens(
     refresh_token: refreshToken,
     grant_type: "refresh_token",
   });
-  const res = await fetchFn(`${cfg.authUrl}/api/v2/token/refresh?${qs.toString()}`, {
-    signal: AbortSignal.timeout(15_000),
-  });
-  const data = await res.json();
-  if (!res.ok || data.code !== 0 || !data.data?.access_token) {
-    throw new Error(data.message || "TikTok token refresh failed");
+  const res = await fetchWithRetry(
+    `${cfg.authUrl}/api/v2/token/refresh?${qs.toString()}`,
+    { method: "GET", signal: AbortSignal.timeout(15_000) },
+    { fetchFn }
+  );
+  const data = await readMarketplaceJson(res, "TikTok");
+  const payload = (data.data ?? {}) as Record<string, unknown>;
+  if (!res.ok || data.code !== 0 || !payload.access_token) {
+    throwMarketplaceError(res, String(data.message || "TikTok token refresh failed"));
   }
   return {
-    accessToken: String(data.data.access_token),
-    refreshToken: String(data.data.refresh_token || refreshToken),
-    expiresAt: tiktokExpiry(data.data.access_token_expire_in, now.getTime()),
+    accessToken: String(payload.access_token),
+    refreshToken: String(payload.refresh_token || refreshToken),
+    expiresAt: tiktokExpiry(payload.access_token_expire_in, now.getTime()),
   };
 }
 

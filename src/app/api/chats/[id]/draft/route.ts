@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { getOwnerSession } from "@/lib/auth";
 import { updateDraft } from "@/lib/ai/drafts";
 
 const body = z.object({
@@ -8,8 +9,11 @@ const body = z.object({
   rating: z.enum(["good", "bad"]).optional(),
 });
 
-/** Owner only (middleware). Use, dismiss or rate the assistant's draft. */
+/** Use, dismiss or rate the assistant's draft. */
 export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
+  if (!(await getOwnerSession())) {
+    return NextResponse.json({ error: "Owner sign-in required." }, { status: 401 });
+  }
   const { id } = await context.params;
   const parsed = body.safeParse(await req.json().catch(() => null));
   if (!id || id.length > 64 || !parsed.success) return NextResponse.json({ error: "Try again." }, { status: 400 });

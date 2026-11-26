@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { getOwnerSession } from "@/lib/auth";
 import { getThread } from "@/lib/chats/service";
 
 export const dynamic = "force-dynamic";
 
 const idSchema = z.string().min(1).max(64);
 
-/** Owner only (middleware). One chat with its order; `?after=` returns only newer messages. */
+/** One chat with its order; `?after=` returns only newer messages. */
 export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
+  if (!(await getOwnerSession())) {
+    return NextResponse.json({ error: "Owner sign-in required." }, { status: 401 });
+  }
   const { id } = await context.params;
   const after = req.nextUrl.searchParams.get("after");
   if (!idSchema.safeParse(id).success || (after && !idSchema.safeParse(after).success)) {

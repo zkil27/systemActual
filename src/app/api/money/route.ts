@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { MoneyKind, Platform } from "@prisma/client";
+import { getOwnerSession } from "@/lib/auth";
 import { getMoneyBreakdown, moneyRowsToCsv } from "@/lib/money/breakdown";
 import { getManilaDateRangeBounds, getManilaDayBounds, getManilaTodayStr } from "@/lib/time";
 
@@ -12,6 +13,9 @@ const PLATFORMS = new Set<string>(Object.values(Platform));
  * optional ?kind=CREDIT|ADS|… ?platform=SHOPEE|TIKTOK, ?format=csv for a download.
  */
 export async function GET(req: NextRequest) {
+  if (!(await getOwnerSession())) {
+    return NextResponse.json({ error: "Owner sign-in required." }, { status: 401 });
+  }
   try {
     const sp = req.nextUrl.searchParams;
     const bounds = getManilaDateRangeBounds({

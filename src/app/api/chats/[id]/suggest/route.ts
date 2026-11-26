@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { getOwnerSession } from "@/lib/auth";
 import { suggestReply } from "@/lib/ai/suggest";
 
 export const dynamic = "force-dynamic";
@@ -8,8 +9,11 @@ export const maxDuration = 60;
 
 const idSchema = z.string().min(1).max(64);
 
-/** Owner only (middleware). Ask the AI for a draft reply. Never sends anything. */
+/** Ask the AI for a draft reply. Never sends anything. */
 export async function POST(_req: Request, context: { params: Promise<{ id: string }> }) {
+  if (!(await getOwnerSession())) {
+    return NextResponse.json({ error: "Owner sign-in required." }, { status: 401 });
+  }
   const { id } = await context.params;
   if (!idSchema.safeParse(id).success) return NextResponse.json({ error: "Chat not found." }, { status: 404 });
   try {

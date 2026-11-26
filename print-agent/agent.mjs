@@ -241,7 +241,8 @@ async function tickLoop() {
   for (;;) {
     let nextMs = DEFAULT_TICK_MS;
     try {
-      const { ok, status, data } = await api("/api/worker/tick", { method: "POST", timeoutMs: 90_000 });
+      // Server TICK_BUDGET_MS is 90s and maxDuration is 120s; wait 125s so slow ticks return nextTickMs cleanly.
+      const { ok, status, data } = await api("/api/worker/tick", { method: "POST", timeoutMs: 125_000 });
       if (!ok) log(`Sync returned ${status}`);
       else if (typeof data?.nextTickMs === "number") nextMs = data.nextTickMs;
     } catch (err) {

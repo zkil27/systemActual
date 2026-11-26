@@ -15,12 +15,14 @@ describe("isPublicPath", () => {
     }
   });
 
-  it("keeps the staff scanner and login public", () => {
+  it("lets the staff scanner, stock-in, handover, and login pass Edge (routes verify PIN/owner session)", () => {
     expect(isPublicPath("/login")).toBe(true);
     expect(isPublicPath("/scan")).toBe(true);
     expect(isPublicPath("/api/scan/lookup")).toBe(true);
     expect(isPublicPath("/stock-in")).toBe(true);
     expect(isPublicPath("/api/stock-in")).toBe(true);
+    expect(isPublicPath("/api/handover")).toBe(true);
+    expect(isPublicPath("/api/handover-admin")).toBe(false);
   });
 
   it("lets the worker tick and the printer agent through (they check their own tokens)", () => {

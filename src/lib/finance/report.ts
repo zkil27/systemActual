@@ -4,6 +4,8 @@ import { FINANCE_GIVE_UP_MS, manilaMonth } from "./sync";
 
 /** Per-order rows are kept this long; months older than that live only in FinanceMonth. */
 export const FINANCE_DETAIL_RETENTION_DAYS = 120;
+/** Raw marketplace field snapshots are pruned sooner to save free-tier Postgres space. */
+export const FINANCE_BREAKDOWN_RETENTION_DAYS = 14;
 const ROLLUP_LOCK_ID = "finance-rollup-last";
 const ROLLUP_EVERY_MS = 30 * 60_000;
 
@@ -212,6 +214,14 @@ export async function maybeRollUpFinance(now: Date = new Date()): Promise<boolea
 }
 
 export async function pruneOrderFinance(now: Date = new Date()): Promise<number> {
+  const breakdownCutoff = new Date(now.getTime() - FINANCE_BREAKDOWN_RETENTION_DAYS * 24 * 3600_000);
+  await prisma.orderFinance.updateMany({
+    where: {
+      settledAt: { lt: breakdownCutoff },
+      breakdown: { not: Prisma.JsonNull },
+    },
+    data: { breakdown: Prisma.JsonNull },
+  });
   const res = await prisma.orderFinance.deleteMany({
     where: { settledAt: { lt: new Date(now.getTime() - FINANCE_DETAIL_RETENTION_DAYS * 24 * 3600_000) } },
   });

@@ -146,13 +146,16 @@ export async function drainIntegrationEvents(
   deadline: number,
   handler: EventHandler,
   now: Date = new Date(),
-  batch = 25
+  batch = 25,
+  opts?: { graceMs?: number; concurrency?: number }
 ): Promise<number> {
+  const graceMs = opts?.graceMs ?? EVENT_GRACE_MS;
+  const concurrency = Math.max(1, opts?.concurrency ?? 3);
   const events = await prisma.integrationEvent.findMany({
     where: {
       processedAt: null,
       attempts: { lt: MAX_EVENT_ATTEMPTS },
-      receivedAt: { lt: new Date(now.getTime() - EVENT_GRACE_MS) },
+      ...(graceMs > 0 ? { receivedAt: { lt: new Date(now.getTime() - graceMs) } } : {}),
       OR: [{ claimedAt: null }, { claimedAt: { lt: new Date(now.getTime() - EVENT_CLAIM_TIMEOUT_MS) } }],
     },
     orderBy: { receivedAt: "asc" },
@@ -160,9 +163,13 @@ export async function drainIntegrationEvents(
     select: { id: true },
   });
   let done = 0;
-  for (const ev of events) {
+  for (let i = 0; i < events.length; i += concurrency) {
     if (Date.now() > deadline) break;
-    if (await processEvent(ev.id, handler)) done++;
+    const chunk = events.slice(i, i + concurrency);
+    const results = await Promise.all(chunk.map((ev) => processEvent(ev.id, handler, now)));
+    for (const ok of results) {
+      if (ok) done++;
+    }
   }
   return done;
 }

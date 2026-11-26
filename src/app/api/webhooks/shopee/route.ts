@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { shopeeWebhookUrl, verifyShopeeWebhookSignature } from "@/lib/connectors/shopee";
 import { eventFields, processEvent, storeEvent } from "@/lib/integrations/inbox";
 import { handleMarketplaceEvent } from "@/lib/integrations/handle-event";
-import { runTick } from "@/lib/worker/tick";
+import { triggerWebhookTick } from "@/lib/worker/tick";
 
 export const maxDuration = 120;
 
@@ -56,11 +56,13 @@ export async function POST(req: NextRequest) {
       .catch((err) => console.error("[Shopee fast-cancel]", err));
   }
 
-  // Reply now; handle the event (fast single-order sync), then run the full tick.
+  // Reply now; urgent cancellations alert packers immediately, while normal pushes are drained by the debounced tick.
   after(async () => {
     try {
-      await processEvent(eventId, handleMarketplaceEvent);
-      await runTick("webhook", { platform: Platform.SHOPEE });
+      if (fields.isCancel) {
+        await processEvent(eventId, handleMarketplaceEvent);
+      }
+      await triggerWebhookTick(Platform.SHOPEE);
     } catch (err) {
       console.error("[Shopee webhook tick error]", err);
     }

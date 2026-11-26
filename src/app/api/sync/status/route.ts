@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse, after } from "next/server";
+import { getOwnerSession } from "@/lib/auth";
 import { getSyncStatus } from "@/lib/sync/status";
 import { runTick } from "@/lib/worker/tick";
 
@@ -10,6 +11,9 @@ export const dynamic = "force-dynamic";
  * Clients only re-fetch heavy page payloads when `version` changes or `syncing` completes.
  */
 export async function GET(req: NextRequest) {
+  if (!(await getOwnerSession())) {
+    return NextResponse.json({ error: "Owner sign-in required." }, { status: 401 });
+  }
   try {
     const status = await getSyncStatus();
     const shouldTrigger =

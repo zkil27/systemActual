@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { DisputeStatus, PhysicalCondition, Prisma, ReturnCategory } from "@prisma/client";
+import { getOwnerSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getRealShopWhere } from "@/lib/shops";
 import {
@@ -23,6 +24,9 @@ import { piecesNote } from "@/lib/ui/item-check-ui";
 import { getManilaDateRangeBounds } from "@/lib/time";
 
 export async function GET(req: NextRequest) {
+  if (!(await getOwnerSession())) {
+    return NextResponse.json({ error: "Owner sign-in required." }, { status: 401 });
+  }
   try {
     const sp = req.nextUrl.searchParams;
     const filter = sp.get("filter") || "all";

@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
+import { getOwnerSession } from "@/lib/auth";
 import { unreadTotals } from "@/lib/chats/service";
 
 export const dynamic = "force-dynamic";
 
-/** Owner only (middleware). Unread chat counts for the tab badge. */
+/** Unread chat counts for the tab badge. */
 export async function GET() {
+  if (!(await getOwnerSession())) {
+    return NextResponse.json({ error: "Owner sign-in required." }, { status: 401 });
+  }
   try {
     return NextResponse.json(await unreadTotals());
   } catch (err) {

@@ -29,6 +29,8 @@ const PUBLIC_EXACT = new Set([
   "/apple-icon",
   // Build ID + release notes; every open app polls it, signed in or not.
   "/api/version",
+  // Warehouse handover manifest: checked against getScannerSession() in-route.
+  "/api/handover",
 ]);
 
 export function isPublicPath(pathname: string): boolean {

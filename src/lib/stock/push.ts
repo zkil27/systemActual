@@ -112,29 +112,50 @@ export async function pushStock(deadline: number) {
 
   let pushed = 0;
   let failed = 0;
-  for (const shop of shops) {
+  for (let shopIdx = 0; shopIdx < shops.length; shopIdx++) {
+    const shop = shops[shopIdx];
     if (Date.now() >= deadline) break;
     if (shop.platform === Platform.TIKTOK && !shop.shopCipher) continue;
+    const shopsLeft = shops.length - shopIdx;
+    const shopDeadline = Date.now() + Math.max(0, deadline - Date.now()) / shopsLeft;
     const token = await ensureFreshToken(shop);
     const plan = planPushes(await candidatesFor(shop.id, shared));
 
     const byListing = new Map<string, PushCandidate[]>();
-    for (const c of plan) byListing.set(c.listingId, [...(byListing.get(c.listingId) ?? []), c]);
+    for (const c of plan) {
+      const list = byListing.get(c.listingId);
+      if (list) list.push(c);
+      else byListing.set(c.listingId, [c]);
+    }
 
     for (const rows of byListing.values()) {
-      if (Date.now() >= deadline) break;
+      if (Date.now() >= shopDeadline || Date.now() >= deadline) break;
       const res =
         shop.platform === Platform.SHOPEE
           ? await pushShopeeItem(shop.shopId, token, rows)
           : await pushTikTokProduct(shop.shopCipher!, token, rows);
       const targets = new Map(rows.map((r) => [r.listingVariantId, r.target]));
       const now = new Date();
+
+      const okByTarget = new Map<number, string[]>();
       for (const id of res.ok) {
-        await prisma.listingVariant.update({
-          where: { id },
-          data: { pushedStock: targets.get(id), pushedAt: now, pushError: null, pushFailures: 0 },
-        });
+        const target = targets.get(id);
+        if (target === undefined) continue;
+        const ids = okByTarget.get(target);
+        if (ids) ids.push(id);
+        else okByTarget.set(target, [id]);
       }
+      if (okByTarget.size > 0) {
+        await Promise.all(
+          [...okByTarget.entries()].map(([target, ids]) =>
+            prisma.listingVariant.updateMany({
+              where: { id: { in: ids } },
+              data: { pushedStock: target, pushedAt: now, pushError: null, pushFailures: 0 },
+            })
+          )
+        );
+      }
+
       for (const f of res.failed) {
         const updated = await prisma.listingVariant.update({
           where: { id: f.id },

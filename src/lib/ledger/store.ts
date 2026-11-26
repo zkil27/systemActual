@@ -10,6 +10,8 @@ import {
 import { ensureGarmentFor } from "@/lib/catalog/garments";
 
 export const ORDER_RETENTION_DAYS = 90;
+/** Hard cap for orphaned non-final orders whose closing webhook/window was missed. */
+export const STALE_ORDER_RETENTION_DAYS = 180;
 
 const existingSelect = {
   id: true,
@@ -312,7 +314,7 @@ export async function saveOrderBatch(
   if (!batch.length) return { saved: 0 };
   const now = opts?.now ?? new Date();
   const seenListings = opts?.seenListings ?? new Set<string>();
-  const concurrency = Math.max(1, opts?.concurrency ?? 6);
+  const concurrency = Math.max(1, opts?.concurrency ?? 3);
 
   const [existingBySn] = await Promise.all([
     loadExistingOrders(
@@ -343,11 +345,17 @@ export async function saveOrderBatch(
   return { saved };
 }
 
-/** Deletes finished orders older than the retention window. */
+/** Deletes finished orders after 90 days and any stuck non-final orders after 180 days. */
 export async function pruneOldOrders(now: Date = new Date()): Promise<number> {
-  const cutoff = new Date(now.getTime() - ORDER_RETENTION_DAYS * 24 * 3600_000);
+  const cutoff90d = new Date(now.getTime() - ORDER_RETENTION_DAYS * 24 * 3600_000);
+  const cutoff180d = new Date(now.getTime() - STALE_ORDER_RETENTION_DAYS * 24 * 3600_000);
   const res = await prisma.order.deleteMany({
-    where: { status: { in: FINAL_ORDER_STATUSES }, platformUpdatedAt: { lt: cutoff } },
+    where: {
+      OR: [
+        { status: { in: FINAL_ORDER_STATUSES }, platformUpdatedAt: { lt: cutoff90d } },
+        { platformUpdatedAt: { lt: cutoff180d } },
+      ],
+    },
   });
   return res.count;
 }

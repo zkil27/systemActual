@@ -1,5 +1,6 @@
 import { Platform, Prisma, type ShopConnection } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { MarketplaceHttpError } from "@/lib/connectors/http";
 import { shopeeGet } from "@/lib/connectors/shopee";
 import { tiktokRequest } from "@/lib/connectors/tiktok";
 import { expectedLinesFromItems, lineKeyOf } from "@/lib/returns/item-check";
@@ -171,6 +172,7 @@ export async function saveFinance(conn: ShopConnection, order: OrderForFinance, 
 
 /** Too many requests: stop asking this shop for the rest of the tick. */
 export function isRateLimited(err: unknown): boolean {
+  if (err instanceof MarketplaceHttpError && err.status === 429) return true;
   const m = err instanceof Error ? err.message : String(err);
   return /too many|rate limit|frequen|throttl|429/i.test(m);
 }

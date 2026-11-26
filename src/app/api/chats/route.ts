@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { z } from "zod";
+import { getOwnerSession } from "@/lib/auth";
 import { listChats, unreadTotals } from "@/lib/chats/service";
 import { syncAllTikTokChats } from "@/lib/chats/tiktok-sync";
 
@@ -12,8 +13,11 @@ const query = z.object({
   cursor: z.string().min(1).max(64).optional(),
 });
 
-/** Owner only (middleware). Chats for one shop, newest first, plus unread counts for both. */
+/** Chats for one shop, newest first, plus unread counts for both. */
 export async function GET(req: NextRequest) {
+  if (!(await getOwnerSession())) {
+    return NextResponse.json({ error: "Owner sign-in required." }, { status: 401 });
+  }
   const parsed = query.safeParse({
     platform: req.nextUrl.searchParams.get("platform")?.toUpperCase(),
     cursor: req.nextUrl.searchParams.get("cursor") || undefined,

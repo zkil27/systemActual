@@ -31,10 +31,10 @@ export async function startWave(waveId: string, now: Date = new Date()) {
   }
   const writable = await prisma.shopConnection.findMany({
     where: { isDemo: false, writesEnabled: true, accessToken: { not: null } },
-    select: { platform: true },
+    select: { id: true },
   });
-  const platforms = [...new Set(writable.map((s) => s.platform))];
-  if (!platforms.length) throw new WaveStartError("Turn on \"Update … from Kyna Ops\" for a shop in Settings first.");
+  const writableShopIds = writable.map((s) => s.id);
+  if (!writableShopIds.length) throw new WaveStartError("Turn on \"Update … from Kyna Ops\" for a shop in Settings first.");
 
   const claim = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT 1 AS ok FROM (SELECT pg_advisory_xact_lock(${WAVE_START_LOCK})) AS l`;
@@ -49,7 +49,7 @@ export async function startWave(waveId: string, now: Date = new Date()) {
   if (claim === "gone") throw new WaveStartError("This wave already started.");
 
   await prisma.waveItem.updateMany({
-    where: { waveId, platform: { notIn: platforms } },
+    where: { waveId, package: { order: { shopConnectionId: { notIn: writableShopIds } } } },
     data: { status: WaveItemStatus.FAILED, error: "Updates from Kyna Ops are off for this shop." },
   });
 
@@ -337,7 +337,7 @@ export async function excludeWaveParcel(waveId: string, waveItemId: string) {
       return {
         packageId: wi.packageId,
         orderId: wi.orderId,
-        orderSn: wi.platform === Platform.SHOPEE ? o.orderSn : o.orderSn,
+        orderSn: o.orderSn,
         platform: wi.platform,
         carrier: wi.package.carrier,
         channelId: wi.package.channelId,
@@ -356,11 +356,23 @@ export async function excludeWaveParcel(waveId: string, waveItemId: string) {
 
     const planned = planWave(candidates);
     const posByPkg = new Map(planned.map((p) => [p.packageId, p.position]));
+    const posUpdates: Array<{ id: string; pos: number }> = [];
     for (const wi of remaining) {
       const pos = posByPkg.get(wi.packageId);
       if (pos !== undefined && pos !== wi.position) {
-        await tx.waveItem.update({ where: { id: wi.id }, data: { position: pos } });
+        posUpdates.push({ id: wi.id, pos });
       }
+    }
+    if (posUpdates.length > 0) {
+      const values = Prisma.join(
+        posUpdates.map((u) => Prisma.sql`(${u.id}, ${u.pos}::integer)`)
+      );
+      await tx.$executeRaw`
+        UPDATE "WaveItem" AS w
+        SET "position" = v."pos", "updatedAt" = NOW()
+        FROM (VALUES ${values}) AS v("id", "pos")
+        WHERE w."id" = v."id" AND w."waveId" = ${waveId}
+      `;
     }
 
     const prevSummary = wave.summaryJson as unknown as WaveSummary;

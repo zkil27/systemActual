@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { decryptSecret } from "@/lib/crypto";
+import { fetchWithRetry, readMarketplaceJson, safeReadJson, throwMarketplaceError } from "./http";
 
 export function getShopeeConfig() {
   return {
@@ -89,7 +90,7 @@ export function buildShopeeAuthUrl(state: string): string {
   return `${cfg.baseUrl}${path}?partner_id=${cfg.partnerId}&timestamp=${timestamp}&sign=${sign}&redirect=${redirect}`;
 }
 
-export async function exchangeShopeeCode(code: string, shopId: string) {
+export async function exchangeShopeeCode(code: string, shopId: string, fetchFn: typeof fetch = fetch) {
   const cfg = getShopeeConfig();
   const path = "/api/v2/auth/token/get";
   const timestamp = Math.floor(Date.now() / 1000);
@@ -101,19 +102,23 @@ export async function exchangeShopeeCode(code: string, shopId: string) {
   });
 
   const url = `${cfg.baseUrl}${path}?partner_id=${cfg.partnerId}&timestamp=${timestamp}&sign=${sign}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      code,
-      shop_id: Number(shopId),
-      partner_id: Number(cfg.partnerId),
-    }),
-    signal: AbortSignal.timeout(15_000),
-  });
-  const data = await res.json();
+  const res = await fetchWithRetry(
+    url,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code,
+        shop_id: Number(shopId),
+        partner_id: Number(cfg.partnerId),
+      }),
+      signal: AbortSignal.timeout(15_000),
+    },
+    { fetchFn }
+  );
+  const data = await readMarketplaceJson(res, "Shopee");
   if (!res.ok || data.error) {
-    throw new Error(data.message || data.error || "Shopee token exchange failed");
+    throwMarketplaceError(res, String(data.message || data.error || "Shopee token exchange failed"));
   }
   return {
     accessToken: String(data.access_token),
@@ -126,8 +131,10 @@ export async function shopeeGet(
   path: string,
   shopId: string,
   accessToken: string,
-  query: Record<string, string | number>
-) {
+  query: Record<string, string | number>,
+  fetchFn: typeof fetch = fetch
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<any> {
   const token = decryptSecret(accessToken);
   const cfg = getShopeeConfig();
   const timestamp = Math.floor(Date.now() / 1000);
@@ -147,12 +154,14 @@ export async function shopeeGet(
     sign,
     ...Object.fromEntries(Object.entries(query).map(([k, v]) => [k, String(v)])),
   });
-  const res = await fetch(`${cfg.baseUrl}${path}?${qs.toString()}`, {
-    signal: AbortSignal.timeout(15_000),
-  });
-  const data = await res.json();
+  const res = await fetchWithRetry(
+    `${cfg.baseUrl}${path}?${qs.toString()}`,
+    { method: "GET", signal: AbortSignal.timeout(15_000) },
+    { fetchFn }
+  );
+  const data = await readMarketplaceJson(res, "Shopee");
   if (!res.ok || data.error) {
-    throw new Error(data.message || data.error || `Shopee API error on ${path}`);
+    throwMarketplaceError(res, String(data.message || data.error || `Shopee API error on ${path}`));
   }
   return data.response;
 }
@@ -164,7 +173,8 @@ export async function shopeePost(
   accessToken: string,
   body: Record<string, unknown>,
   fetchFn: typeof fetch = fetch
-) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<any> {
   const token = decryptSecret(accessToken);
   const cfg = getShopeeConfig();
   const timestamp = Math.floor(Date.now() / 1000);
@@ -183,15 +193,19 @@ export async function shopeePost(
     shop_id: shopId,
     sign,
   });
-  const res = await fetchFn(`${cfg.baseUrl}${path}?${qs.toString()}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(15_000),
-  });
-  const data = await res.json();
+  const res = await fetchWithRetry(
+    `${cfg.baseUrl}${path}?${qs.toString()}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15_000),
+    },
+    { fetchFn }
+  );
+  const data = await readMarketplaceJson(res, "Shopee");
   if (!res.ok || data.error) {
-    throw new Error(data.message || data.error || `Shopee API error on ${path}`);
+    throwMarketplaceError(res, String(data.message || data.error || `Shopee API error on ${path}`));
   }
   return data.response;
 }
@@ -225,16 +239,23 @@ export async function shopeePostFile(
     shop_id: shopId,
     sign,
   });
-  const res = await fetchFn(`${cfg.baseUrl}${path}?${qs.toString()}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(30_000),
-  });
-  const type = res.headers.get("content-type") ?? "";
+  const res = await fetchWithRetry(
+    `${cfg.baseUrl}${path}?${qs.toString()}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    },
+    { fetchFn }
+  );
+  const type = res.headers?.get?.("content-type") ?? "";
   if (!res.ok || type.includes("json")) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.message || data.error || `Shopee couldn't give the file (${res.status})`);
+    const { json } = await safeReadJson(res);
+    throwMarketplaceError(
+      res,
+      String(json?.message || json?.error || `Shopee couldn't give the file (${res.status})`)
+    );
   }
   return Buffer.from(await res.arrayBuffer());
 }

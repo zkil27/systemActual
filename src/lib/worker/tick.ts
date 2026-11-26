@@ -23,7 +23,7 @@ import { drainIntegrationEvents } from "@/lib/integrations/inbox";
 import { syncOrderFinance } from "@/lib/finance/sync";
 import { maybeRollUpFinance } from "@/lib/finance/report";
 import { handleMarketplaceEvent } from "@/lib/integrations/handle-event";
-import { runLocked } from "./lock";
+import { prismaLockStore, runLocked } from "./lock";
 
 /**
  * One worker tick. Triggered by the warehouse PC agent (adaptively while the
@@ -34,6 +34,8 @@ import { runLocked } from "./lock";
 export const TICK_BUDGET_MS = 90_000;
 /** Longer than the route's 120 s maxDuration, so a slow tick is killed before its lease can expire under it. */
 export const LEASE_MS = 135_000;
+/** Minimum cooldown between webhook-triggered ticks when nothing is running. */
+export const WEBHOOK_DEBOUNCE_MS = 15_000;
 /** A rerun pass only starts with at least this long left. */
 const MIN_PASS_MS = 20_000;
 const STOCK_PUSH_FALLBACK_MS = 5 * 60_000;
@@ -176,11 +178,14 @@ async function tickOnce(
     select: { id: true, platform: true },
   });
 
-  // Webhook events whose handling crashed or timed out get another try.
+  // Webhook events queued in the inbox (plus any whose handling crashed/timed out).
   try {
     if (hasTime(deadline, 30_000)) {
       await withSpan("worker.tick.inbox", () =>
-        drainIntegrationEvents(sliceDeadline(deadline, 0.15), handleMarketplaceEvent)
+        drainIntegrationEvents(sliceDeadline(deadline, 0.2), handleMarketplaceEvent, new Date(), 25, {
+          graceMs: 0,
+          concurrency: 3,
+        })
       );
     }
   } catch (err) {
@@ -300,7 +305,7 @@ async function tickOnce(
   // The daily prune marks itself done only after it runs, so skipping it here
   // just moves it to the next tick with time to spare.
   const [pruneRes, runningWaves] = await Promise.all([
-    hasTime(deadline, 20_000) ? pruneDailyData() : Promise.resolve({ orders: 0 }),
+    hasTime(deadline, 20_000) ? pruneDailyData(new Date(), deadline) : Promise.resolve({ orders: 0 }),
     prisma.wave.count({ where: { status: WaveStatus.RUNNING } }),
   ]);
 
@@ -337,4 +342,40 @@ export async function runTick(
     nextTickMs: last?.nextTickMs ?? 180_000,
     ms: Date.now() - started,
   };
+}
+
+/** Pure decision for whether a webhook burst should start a tick, ask for a rerun, or debounce. */
+export function shouldRunWebhookTick(
+  lock: { holder: string | null; lockedUntil: Date } | null,
+  now: Date,
+  debounceMs: number = WEBHOOK_DEBOUNCE_MS
+): "run" | "rerun" | "debounce" {
+  if (lock && lock.holder && lock.lockedUntil.getTime() > now.getTime()) {
+    return "rerun";
+  }
+  if (lock && !lock.holder && now.getTime() - lock.lockedUntil.getTime() < debounceMs) {
+    return "debounce";
+  }
+  return "run";
+}
+
+/** Debounces webhook bursts so only one tick runs every ~15 s while active ticks still get a rerun. */
+export async function triggerWebhookTick(
+  platform: Platform,
+  now: Date = new Date()
+): Promise<"ran" | "rerun" | "debounced"> {
+  const lock = await prisma.workerLock.findUnique({
+    where: { id: "tick" },
+    select: { holder: true, lockedUntil: true },
+  });
+  const decision = shouldRunWebhookTick(lock, now);
+  if (decision === "rerun") {
+    await prismaLockStore.requestRerun("tick");
+    return "rerun";
+  }
+  if (decision === "debounce") {
+    return "debounced";
+  }
+  await runTick("webhook", { platform });
+  return "ran";
 }

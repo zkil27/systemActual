@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Platform } from "@prisma/client";
+import { getOwnerSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { detectAndParseSpreadsheet } from "@/lib/connectors/csv-importer";
 import { upsertNormalizedReturn } from "@/lib/connectors/normalizer";
@@ -16,6 +17,9 @@ function noShopMessage(platform: Platform): string {
 }
 
 export async function GET() {
+  if (!(await getOwnerSession())) {
+    return NextResponse.json({ error: "Owner sign-in required." }, { status: 401 });
+  }
   const jobs = await prisma.importJob.findMany({
     orderBy: { createdAt: "desc" },
     take: 15,
@@ -24,6 +28,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  if (!(await getOwnerSession())) {
+    return NextResponse.json({ error: "Owner sign-in required." }, { status: 401 });
+  }
   try {
     const formData = await req.formData();
     const file = formData.get("file");

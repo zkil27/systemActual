@@ -11,6 +11,7 @@ const eslintConfig = [
       ".next/**",
       "node_modules/**",
       ".vercel/**",
+      ".claude/**",
       ".kiro/**",
       ".impeccable/**",
       // Plain Node script for the warehouse PC, not part of the Next app.

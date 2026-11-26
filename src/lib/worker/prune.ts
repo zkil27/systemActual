@@ -16,11 +16,15 @@ const PROOF_PHOTO_RETENTION_DAYS = 90;
 const WALLET_RETENTION_DAYS = 180;
 const STOCK_HISTORY_RETENTION_DAYS = 180;
 /** Variants rolled up per day, so one prune never runs long. */
-const ROLLUP_VARIANTS_PER_RUN = 200;
+const ROLLUP_VARIANTS_PER_RUN = 50;
 const ALERT_LOG_RETENTION_DAYS = 30;
+const AI_EVENT_RETENTION_DAYS = 30;
+const AI_USAGE_RETENTION_DAYS = 90;
+const IMPORT_JOB_RETENTION_DAYS = 180;
 
 export interface DailyPruneResult {
   skipped: boolean;
+  partial?: boolean;
   orders: number;
   printJobs: number;
   waves: number;
@@ -52,7 +56,10 @@ export function planStockRollup(
     }));
 }
 
-async function rollUpStockMovements(cutoff: Date): Promise<number> {
+async function rollUpStockMovements(
+  cutoff: Date,
+  deadline: number
+): Promise<{ rolled: number; timedOut: boolean }> {
   const sums = await prisma.stockMovement.groupBy({
     by: ["garmentVariantId"],
     where: { createdAt: { lt: cutoff } },
@@ -67,18 +74,27 @@ async function rollUpStockMovements(cutoff: Date): Promise<number> {
     sums.map((g) => ({ garmentVariantId: g.garmentVariantId, delta: g._sum.delta ?? 0, count: g._count._all })),
     cutoff
   );
+  const day = cutoff.toISOString().slice(0, 10);
   let rolled = 0;
   for (const row of plan) {
+    if (Date.now() >= deadline) return { rolled, timedOut: true };
     await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "GarmentVariant" WHERE id = ${row.garmentVariantId} FOR UPDATE`;
+      const agg = await tx.stockMovement.aggregate({
+        where: { garmentVariantId: row.garmentVariantId, createdAt: { lt: cutoff } },
+        _sum: { delta: true },
+        _count: { _all: true },
+      });
+      if ((agg._count._all ?? 0) <= 1) return;
       const deleted = await tx.stockMovement.deleteMany({
         where: { garmentVariantId: row.garmentVariantId, createdAt: { lt: cutoff } },
       });
       await tx.stockMovement.create({
         data: {
           garmentVariantId: row.garmentVariantId,
-          delta: row.delta,
+          delta: agg._sum.delta ?? 0,
           reason: StockReason.ADJUSTMENT,
-          note: row.note,
+          note: `Carried forward: ${agg._count._all} changes before ${day}`,
           sourceKey: row.sourceKey,
           createdAt: row.createdAt,
         },
@@ -86,14 +102,18 @@ async function rollUpStockMovements(cutoff: Date): Promise<number> {
       rolled += deleted.count;
     });
   }
-  return rolled;
+  return { rolled, timedOut: false };
 }
 
 /**
  * Runs retention cleanup at most once per Manila calendar day to keep Supabase
- * under 500 MB and Vercel Blob under 1 GB.
+ * under 500 MB and Vercel Blob under 1 GB. Stops cleanly if `deadline` runs out
+ * without stamping today's lock, so the next tick finishes the remaining tables.
  */
-export async function pruneDailyData(now: Date = new Date()): Promise<DailyPruneResult> {
+export async function pruneDailyData(
+  now: Date = new Date(),
+  deadline: number = Date.now() + 25_000
+): Promise<DailyPruneResult> {
   const todayStr = getManilaDateString(now);
   const existing = await prisma.workerLock.findUnique({ where: { id: DAILY_PRUNE_LOCK_ID } });
   if (existing?.holder === todayStr) {
@@ -109,6 +129,7 @@ export async function pruneDailyData(now: Date = new Date()): Promise<DailyPrune
     };
   }
 
+  const outOfTime = () => Date.now() >= deadline;
   const cutoff14d = new Date(now.getTime() - EVENT_PAYLOAD_RETENTION_DAYS * 24 * 3600_000);
   const cutoff30d = new Date(now.getTime() - PRINT_JOB_RETENTION_DAYS * 24 * 3600_000);
   const cutoff90d = new Date(now.getTime() - WAVE_RETENTION_DAYS * 24 * 3600_000);
@@ -117,6 +138,9 @@ export async function pruneDailyData(now: Date = new Date()): Promise<DailyPrune
   const walletCutoff = new Date(now.getTime() - WALLET_RETENTION_DAYS * 24 * 3600_000);
   const stockCutoff = new Date(now.getTime() - STOCK_HISTORY_RETENTION_DAYS * 24 * 3600_000);
   const alertCutoff = new Date(now.getTime() - ALERT_LOG_RETENTION_DAYS * 24 * 3600_000);
+  const aiEventCutoff = new Date(now.getTime() - AI_EVENT_RETENTION_DAYS * 24 * 3600_000);
+  const aiUsageCutoff = new Date(now.getTime() - AI_USAGE_RETENTION_DAYS * 24 * 3600_000);
+  const importJobCutoff = new Date(now.getTime() - IMPORT_JOB_RETENTION_DAYS * 24 * 3600_000);
 
   const [orders, printJobs, waves, eventsCleared, walletDeleted] = await Promise.all([
     pruneOldOrders(now),
@@ -149,42 +173,80 @@ export async function pruneDailyData(now: Date = new Date()): Promise<DailyPrune
     prisma.alertLog.deleteMany({ where: { sentAt: { lt: alertCutoff } } }).then((r) => r.count),
   ]);
 
-  try {
-    await pruneOldChats(now);
-  } catch (err) {
-    console.error("[prune] chats", err);
-  }
-
-  try {
-    await prisma.auditLog.deleteMany({
-      where: { at: { lt: new Date(now.getTime() - AUDIT_RETENTION_DAYS * 24 * 3600_000) } },
-    });
-  } catch (err) {
-    console.error("[prune] audit log", err);
-  }
-
-  try {
-    await pruneIntegrationEvents(now);
-  } catch (err) {
-    console.error("[prune] webhook inbox", err);
-  }
-
-  try {
-    // Monthly totals stay; per-order profit rows go after 120 days (free database).
-    await pruneOrderFinance(now);
-  } catch (err) {
-    console.error("[prune] order finance", err);
-  }
-
+  let partial = false;
   let movementsRolledUp = 0;
-  try {
-    movementsRolledUp = await rollUpStockMovements(stockCutoff);
-  } catch (err) {
-    console.error("[prune] stock rollup", err);
+  let blobsDeleted = 0;
+
+  if (!outOfTime()) {
+    try {
+      await pruneOldChats(now);
+    } catch (err) {
+      console.error("[prune] chats", err);
+    }
+  } else {
+    partial = true;
   }
 
-  let blobsDeleted = 0;
-  if (process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
+  if (!partial && !outOfTime()) {
+    try {
+      await prisma.auditLog.deleteMany({
+        where: { at: { lt: new Date(now.getTime() - AUDIT_RETENTION_DAYS * 24 * 3600_000) } },
+      });
+    } catch (err) {
+      console.error("[prune] audit log", err);
+    }
+  } else {
+    partial = true;
+  }
+
+  if (!partial && !outOfTime()) {
+    try {
+      await pruneIntegrationEvents(now);
+    } catch (err) {
+      console.error("[prune] webhook inbox", err);
+    }
+  } else {
+    partial = true;
+  }
+
+  if (!partial && !outOfTime()) {
+    try {
+      // Monthly totals stay; per-order profit rows go after 120 days and raw breakdowns after 14 days.
+      await pruneOrderFinance(now);
+    } catch (err) {
+      console.error("[prune] order finance", err);
+    }
+  } else {
+    partial = true;
+  }
+
+  if (!partial && !outOfTime()) {
+    try {
+      await Promise.all([
+        prisma.aiEvent.deleteMany({ where: { createdAt: { lt: aiEventCutoff } } }),
+        prisma.aiUsage.deleteMany({ where: { updatedAt: { lt: aiUsageCutoff } } }),
+        prisma.importJob.deleteMany({ where: { createdAt: { lt: importJobCutoff } } }),
+      ]);
+    } catch (err) {
+      console.error("[prune] ai/import tables", err);
+    }
+  } else {
+    partial = true;
+  }
+
+  if (!partial && !outOfTime()) {
+    try {
+      const rollup = await rollUpStockMovements(stockCutoff, deadline);
+      movementsRolledUp = rollup.rolled;
+      if (rollup.timedOut) partial = true;
+    } catch (err) {
+      console.error("[prune] stock rollup", err);
+    }
+  } else {
+    partial = true;
+  }
+
+  if (!partial && !outOfTime() && process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
     try {
       const oldScans = await prisma.physicalScan.findMany({
         where: {
@@ -223,14 +285,18 @@ export async function pruneDailyData(now: Date = new Date()): Promise<DailyPrune
     } catch (err) {
       console.error("[prune] blob cleanup", err);
     }
+  } else if (outOfTime()) {
+    partial = true;
   }
 
-  // Stamp the day only after the work is done, so a prune that crashed halfway runs again.
-  await prisma.workerLock.upsert({
-    where: { id: DAILY_PRUNE_LOCK_ID },
-    create: { id: DAILY_PRUNE_LOCK_ID, lockedUntil: now, holder: todayStr, rerunRequested: false },
-    update: { lockedUntil: now, holder: todayStr, rerunRequested: false },
-  });
+  // Stamp the day only after all cleanup phases finished within the deadline.
+  if (!partial) {
+    await prisma.workerLock.upsert({
+      where: { id: DAILY_PRUNE_LOCK_ID },
+      create: { id: DAILY_PRUNE_LOCK_ID, lockedUntil: now, holder: todayStr, rerunRequested: false },
+      update: { lockedUntil: now, holder: todayStr, rerunRequested: false },
+    });
+  }
 
-  return { skipped: false, orders, printJobs, waves, eventsCleared, blobsDeleted, walletDeleted, movementsRolledUp };
+  return { skipped: false, partial, orders, printJobs, waves, eventsCleared, blobsDeleted, walletDeleted, movementsRolledUp };
 }
