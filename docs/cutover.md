@@ -69,7 +69,7 @@ it: `select cron.unschedule('kyna-worker-tick');`
 
 ## 2. Rehearse on test shops (Writes, test shops only)
 
-Use Shopee's sandbox (`SHOPEE_BASE_URL=https://partner.test-stable.shopeemobile.com`) and a TikTok test shop. These parts haven't run end to end anywhere yet, so this step matters:
+Use Shopee's sandbox (`SHOPEE_BASE_URL=https://openplatform.sandbox.test-stable.shopee.sg`, with the app's **Test** keys and the **Test Redirect URL Domain** set to `APP_BASE_URL`) and a TikTok test shop. These parts haven't run end to end anywhere yet, so this step matters:
 
 - [ ] Connect both test shops in Settings. "Connected" appears, with a renewal time.
 - [ ] Set up the printer PC (`print-agent/README.md`). **Test print** works.
