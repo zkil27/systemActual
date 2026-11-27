@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { ensureFreshToken } from "@/lib/connectors/tokens";
 import { pruneDailyData } from "@/lib/worker/prune";
 import { notifyNewBuyerMessage } from "@/lib/chats/notify";
+import { syncAllShopeeChats } from "@/lib/chats/shopee-sync";
 import { syncAllTikTokChats } from "@/lib/chats/tiktok-sync";
 import { processPendingChatReplies } from "@/lib/ai/auto-reply";
 import { syncOrders } from "@/lib/ledger/sync";
@@ -291,9 +292,15 @@ async function tickOnce(
   }
 
   try {
-    // TikTok buyer chats: changed chats only, at most once a minute per shop.
+    // Buyer chats (TikTok + Shopee): changed chats only, at most once a minute per shop.
     if (hasTime(deadline, 10_000)) {
-      await withSpan("worker.tick.chats", () => syncAllTikTokChats(sliceDeadline(deadline, 0.3)));
+      await withSpan("worker.tick.chats", async () => {
+        const chatDeadline = sliceDeadline(deadline, 0.35);
+        await Promise.allSettled([
+          syncAllTikTokChats(chatDeadline),
+          syncAllShopeeChats(chatDeadline),
+        ]);
+      });
     }
   } catch (err) {
     tickError("chats", err);

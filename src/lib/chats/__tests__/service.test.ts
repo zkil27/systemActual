@@ -1,21 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
-import { listChats, markChatRead, sumUnread } from "@/lib/chats/service";
+import { markChatRead, sumUnread } from "@/lib/chats/service";
+import { chatsComingSoon } from "@/lib/chats/format";
 
-describe("listChats", () => {
-  it("lists no Shopee chats while Shopee is coming soon", async () => {
-    expect(await listChats("SHOPEE")).toEqual({ items: [], nextCursor: null, comingSoon: true });
+describe("chatsComingSoon", () => {
+  it("marks both Shopee and TikTok chats as live", () => {
+    expect(chatsComingSoon("SHOPEE")).toBe(false);
+    expect(chatsComingSoon("TIKTOK")).toBe(false);
   });
 });
 
 describe("sumUnread", () => {
-  it("counts real TikTok chats only", () => {
+  it("counts real Shopee and TikTok chats and skips demo shops", () => {
     const totals = sumUnread([
-      { platform: "SHOPEE", isDemo: false, unread: 2 }, // coming soon
+      { platform: "SHOPEE", isDemo: false, unread: 2 },
       { platform: "SHOPEE", isDemo: true, unread: 1 },
       { platform: "TIKTOK", isDemo: true, unread: 5 }, // sample shop
       { platform: "TIKTOK", isDemo: false, unread: 4 },
     ]);
-    expect(totals).toEqual({ SHOPEE: 0, TIKTOK: 4, total: 4 });
+    expect(totals).toEqual({ SHOPEE: 2, TIKTOK: 4, total: 6 });
   });
 });
 

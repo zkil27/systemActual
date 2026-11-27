@@ -339,6 +339,103 @@ export async function shopeePost(
 }
 
 /**
+ * Signed Shopee shop-level POST with a pre-serialized raw JSON body.
+ * Required for Seller Chat endpoints that expect 64-bit integer IDs
+ * (`conversation_id`, `to_id`) larger than JS `Number.MAX_SAFE_INTEGER`.
+ */
+export async function shopeePostRaw(
+  path: string,
+  shopId: string,
+  accessToken: string,
+  rawJsonBody: string,
+  fetchFn: typeof fetch = fetch
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<any> {
+  const token = decryptSecret(accessToken);
+  const cfg = getShopeeConfig();
+  const timestamp = Math.floor(Date.now() / 1000);
+  const sign = signShopeeRequest({
+    partnerId: cfg.partnerId,
+    partnerKey: cfg.partnerKey,
+    path,
+    timestamp,
+    accessToken: token,
+    shopId,
+  });
+  const qs = new URLSearchParams({
+    partner_id: cfg.partnerId,
+    timestamp: String(timestamp),
+    access_token: token,
+    shop_id: shopId,
+    sign,
+  });
+  const res = await fetchWithRetry(
+    `${cfg.baseUrl}${path}?${qs.toString()}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: rawJsonBody,
+      signal: AbortSignal.timeout(15_000),
+    },
+    { fetchFn }
+  );
+  const data = await readMarketplaceJson(res, "Shopee");
+  if (!res.ok || data.error) {
+    throwMarketplaceError(res, String(data.message || data.error || `Shopee API error on ${path}`));
+  }
+  return data.response;
+}
+
+/**
+ * Signed Shopee Seller Chat image upload (`POST /api/v2/sellerchat/upload_image`).
+ */
+export async function shopeeUploadChatImage(
+  shopId: string,
+  accessToken: string,
+  file: Blob,
+  fileName: string,
+  fetchFn: typeof fetch = fetch
+): Promise<{ url: string }> {
+  const token = decryptSecret(accessToken);
+  const cfg = getShopeeConfig();
+  const path = "/api/v2/sellerchat/upload_image";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const sign = signShopeeRequest({
+    partnerId: cfg.partnerId,
+    partnerKey: cfg.partnerKey,
+    path,
+    timestamp,
+    accessToken: token,
+    shopId,
+  });
+  const qs = new URLSearchParams({
+    partner_id: cfg.partnerId,
+    timestamp: String(timestamp),
+    access_token: token,
+    shop_id: shopId,
+    sign,
+  });
+  const form = new FormData();
+  form.append("file", file, fileName);
+
+  const res = await fetchWithRetry(
+    `${cfg.baseUrl}${path}?${qs.toString()}`,
+    { method: "POST", body: form, signal: AbortSignal.timeout(30_000) },
+    { fetchFn }
+  );
+  const data = await readMarketplaceJson(res, "Shopee");
+  if (!res.ok || data.error) {
+    throwMarketplaceError(res, String(data.message || data.error || "Shopee chat image upload failed"));
+  }
+  const resp = data.response as Record<string, unknown> | undefined;
+  const url = typeof resp?.url === "string" ? resp.url.trim() : "";
+  if (!url) {
+    throw new Error("Shopee didn't return the uploaded photo.");
+  }
+  return { url };
+}
+
+/**
  * Signed POST that returns a file (e.g. download_shipping_document). Shopee
  * answers with the PDF on success and with JSON on error.
  */

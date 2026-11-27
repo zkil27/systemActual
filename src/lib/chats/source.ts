@@ -40,12 +40,17 @@ export interface ChatShopRef {
 
 /** Whether this real shop's chats come from the platform (they replace the sample chats). */
 export function isChatLive(shop: ChatShopRef): boolean {
-  return !shop.isDemo && shop.platform === "TIKTOK" && Boolean(shop.accessToken) && Boolean(shop.chatAccessAt);
+  return (
+    !shop.isDemo &&
+    (shop.platform === "TIKTOK" || shop.platform === "SHOPEE") &&
+    Boolean(shop.accessToken) &&
+    Boolean(shop.chatAccessAt)
+  );
 }
 
 /**
- * CHAT_SEND_TIKTOK: unset or "off" = no replies to real TikTok chats; "all" =
- * every chat; otherwise a comma list of TikTok conversation ids (test buyers).
+ * CHAT_SEND_TIKTOK: unset or "off" = no replies to real chats; "all" =
+ * every chat; otherwise a comma list of conversation ids (test buyers).
  */
 export function tiktokSendSetting(raw: string | undefined = process.env.CHAT_SEND_TIKTOK): "off" | "all" | Set<string> {
   const v = raw?.trim();
@@ -55,7 +60,7 @@ export function tiktokSendSetting(raw: string | undefined = process.env.CHAT_SEN
 }
 
 /**
- * Resolves the effective TikTok send policy from the owner Settings switch and
+ * Resolves the effective chat send policy from the owner Settings switch and
  * optional CHAT_SEND_TIKTOK env override (test-buyer allowlist while switch is off).
  */
 export function resolveChatSendSetting(
@@ -67,21 +72,68 @@ export function resolveChatSendSetting(
   return env instanceof Set ? env : "off";
 }
 
-/** Replying from Kyna Ops: always for sample chats; for TikTok when Settings allows it (or test allowlist). */
+/** Replying from Kyna Ops: always for sample chats; for TikTok and Shopee when Settings allows it (or test allowlist). */
 export function canSendFrom(shop: ChatShopRef, conversationExternalId?: string, setting = tiktokSendSetting()): boolean {
   if (shop.isDemo) return true;
-  if (shop.platform !== "TIKTOK" || setting === "off") return false;
+  if ((shop.platform !== "TIKTOK" && shop.platform !== "SHOPEE") || setting === "off") return false;
   if (setting === "all") return true;
   return Boolean(conversationExternalId && setting.has(conversationExternalId));
 }
 
-/** Photos: sample chats and TikTok (Shopee later). Still subject to canSendFrom. */
+/** Photos: sample chats, TikTok, and Shopee. Still subject to canSendFrom. */
 export function canSendPhotosFrom(shop: ChatShopRef): boolean {
-  return shop.isDemo || shop.platform === "TIKTOK";
+  return shop.isDemo || shop.platform === "TIKTOK" || shop.platform === "SHOPEE";
 }
 
-export const REPLY_OFF_NOTE = "Replying from Kyna Ops is switched off. Turn it on in Settings → Chats assistant, or reply in TikTok Seller Center.";
+export const REPLY_OFF_NOTE = "Replying from Kyna Ops is switched off. Turn it on in Settings → Chats assistant, or reply in Seller Center.";
 export const PHOTO_OFF_NOTE = "Sending photos from Kyna Ops isn't available for this shop yet.";
+
+const shopeeChatSource: ChatSource = {
+  async send(conv, message) {
+    const [{ prisma }, { ensureFreshToken }, api] = await Promise.all([
+      import("@/lib/prisma"),
+      import("@/lib/connectors/tokens"),
+      import("./shopee-api"),
+    ]);
+    const shop = await prisma.shopConnection.findUnique({ where: { id: conv.shopConnectionId } });
+    if (!shop?.accessToken) throw new Error("The Shopee shop isn't connected.");
+    const token = await ensureFreshToken(shop);
+    const creds = { shopId: shop.shopId, accessToken: token };
+    const call = api.shopeeChatCaller(creds);
+    const remote = await api.getShopeeConversation(call, conv.externalId);
+    if (!remote?.to_id) throw new Error("Couldn't find the buyer for this Shopee chat.");
+
+    let id: string | null;
+    if ("text" in message) {
+      id = await api.sendShopeeTextMessage(call, remote.to_id, message.text);
+    } else {
+      const { readChatPhoto } = await import("@/lib/storage");
+      const photo = await readChatPhoto(message.imageUrl);
+      const imageUrl = await api.uploadShopeeChatPhoto(
+        api.shopeeChatUploader(creds),
+        new Blob([new Uint8Array(photo.buffer)], { type: photo.format.contentType }),
+        photo.fileName
+      );
+      id = await api.sendShopeeImageMessage(call, remote.to_id, imageUrl);
+    }
+    return { externalId: id ?? `sent-${randomBytes(8).toString("hex")}`, sentAt: new Date() };
+  },
+  async markRead(conv) {
+    const [{ prisma }, { ensureFreshToken }, api] = await Promise.all([
+      import("@/lib/prisma"),
+      import("@/lib/connectors/tokens"),
+      import("./shopee-api"),
+    ]);
+    const shop = await prisma.shopConnection.findUnique({ where: { id: conv.shopConnectionId } });
+    if (!shop?.accessToken) return;
+    const token = await ensureFreshToken(shop);
+    const call = api.shopeeChatCaller({ shopId: shop.shopId, accessToken: token });
+    const remote = await api.getShopeeConversation(call, conv.externalId);
+    const lastId = remote?.latest_message_id;
+    if (!lastId) return;
+    await api.markShopeeConversationRead(call, conv.externalId, lastId);
+  },
+};
 
 const tiktokChatSource: ChatSource = {
   async send(conv, message) {
@@ -128,5 +180,6 @@ const tiktokChatSource: ChatSource = {
 export function chatSourceFor(shop: ChatShopRef): ChatSource {
   if (shop.isDemo) return demoChatSource;
   if (shop.platform === "TIKTOK") return tiktokChatSource;
+  if (shop.platform === "SHOPEE") return shopeeChatSource;
   throw new Error("Chats for this shop aren't connected yet.");
 }

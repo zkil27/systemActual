@@ -21,8 +21,9 @@ import { OrderCard } from "./OrderCard";
 import { PhotoSendSheet } from "./PhotoSendSheet";
 
 const THREAD_POLL_MS = 4_000;
-/** TikTok Seller Center (PH). The chat inbox opens from there. */
+/** Seller Center chat URLs (PH). */
 const TIKTOK_SELLER_CHAT_URL = "https://seller-ph.tiktok.com/";
+const SHOPEE_SELLER_CHAT_URL = "https://seller.shopee.ph/portal/chat";
 /** A check that hangs on a weak signal is dropped, so the next one can run. */
 const POLL_TIMEOUT_MS = 10_000;
 /** Slightly longer than the sheet's exit animation. */
@@ -576,14 +577,14 @@ export function ChatThreadView({
             }`}
           >
             <p className="text-[15px] text-ink-2">{meta.replyNote}</p>
-            {meta.platform === "TIKTOK" && (
+            {(meta.platform === "TIKTOK" || meta.platform === "SHOPEE") && (
               <a
-                href={TIKTOK_SELLER_CHAT_URL}
+                href={meta.platform === "SHOPEE" ? SHOPEE_SELLER_CHAT_URL : TIKTOK_SELLER_CHAT_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="pressable mt-1 inline-flex min-h-11 items-center gap-1.5 text-[15px] font-bold text-brand"
               >
-                Open TikTok Seller Center
+                {meta.platform === "SHOPEE" ? "Open Shopee Seller Center" : "Open TikTok Seller Center"}
                 <ExternalLink className="h-4 w-4" aria-hidden="true" />
               </a>
             )}

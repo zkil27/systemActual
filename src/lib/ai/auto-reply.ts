@@ -63,7 +63,7 @@ export function decideChatAutomation(
   input: DecideChatAutomationInput
 ): ChatAutomationAction {
   const { settings, platform, isDemo, gate, topics } = input;
-  if (!settings.enabled || platform === "SHOPEE" || isDemo) return "skip";
+  if (!settings.enabled || isDemo) return "skip";
   if (!gate.pending) return "skip";
   if (gate.hasMedia && !gate.buyerText) return "skip";
   if (topics.length === 0) return "skip";
@@ -144,7 +144,7 @@ export async function processPendingChatReplies(
 
   const conversations = await prisma.chatConversation.findMany({
     where: {
-      platform: Platform.TIKTOK,
+      platform: { in: [Platform.TIKTOK, Platform.SHOPEE] },
       shopConnection: { isDemo: false },
       unreadCount: { gt: 0 },
       canReply: true,
@@ -269,11 +269,13 @@ export async function processPendingChatReplies(
         ? await shopCatalog(conv.shopConnection, conv.platform)
         : [];
 
+      const platform = conv.platform === Platform.SHOPEE ? "SHOPEE" : "TIKTOK";
       const generated = await generateReply(
         {
           answers,
           order,
           messages: promptMessages,
+          platform,
           listings,
           catalog,
           reservePct: settings.eveningReservePct,

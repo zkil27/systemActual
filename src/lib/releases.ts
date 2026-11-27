@@ -20,6 +20,15 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    id: 17,
+    date: "2026-11-27",
+    title: "Shopee chats are live",
+    changes: [
+      "Read and reply to Shopee buyer chats right inside Chats, including photos, order cards, and product cards.",
+      "Shopee unread counts now show on the Shopee tab and Chats badge, and Chats assistant drafts work for Shopee too.",
+    ],
+  },
+  {
     id: 16,
     date: "2026-11-27",
     title: "Shopee main account sign-in",

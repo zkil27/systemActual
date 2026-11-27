@@ -56,6 +56,7 @@ export async function generateReply(
     answers: PromptAnswer[];
     order: OrderPanel | null;
     messages: PromptMessage[];
+    platform?: "SHOPEE" | "TIKTOK";
     listings?: ListingFacts[];
     catalog?: CatalogItem[];
     reservePct?: number;
@@ -73,7 +74,14 @@ export async function generateReply(
     .filter((m) => m.sender === "BUYER" && m.text)
     .map((m) => m.text)
     .join("\n");
-  const prompt = buildPrompt({ answers: input.answers, order: input.order, messages: input.messages, listings, catalog });
+  const prompt = buildPrompt({
+    answers: input.answers,
+    order: input.order,
+    messages: input.messages,
+    platform: input.platform,
+    listings,
+    catalog,
+  });
   const facts = groundingText({ answers: input.answers, order: input.order, messages: input.messages, listings, catalog });
   const shopFacts = shopFactsText({ answers: input.answers, order: input.order, listings, catalog, buyerText });
   const sizeRanges = sizeRangesOf(listings);

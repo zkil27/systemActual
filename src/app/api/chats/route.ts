@@ -2,10 +2,11 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { z } from "zod";
 import { getOwnerSession } from "@/lib/auth";
 import { listChats, unreadTotals } from "@/lib/chats/service";
+import { syncAllShopeeChats } from "@/lib/chats/shopee-sync";
 import { syncAllTikTokChats } from "@/lib/chats/tiktok-sync";
 
 export const dynamic = "force-dynamic";
-// The first TikTok import can take a while; it runs after the response.
+// The first import can take a while; it runs after the response.
 export const maxDuration = 60;
 
 const query = z.object({
@@ -25,10 +26,11 @@ export async function GET(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Pick Shopee or TikTok." }, { status: 400 });
   }
-  if (parsed.data.platform === "TIKTOK" && !parsed.data.cursor) {
-    // While the screen is open, check TikTok for changed chats (at most every 15 s per shop).
+  if (!parsed.data.cursor) {
+    // While the screen is open, check the platform for changed chats (at most every 15 s per shop).
+    const syncFn = parsed.data.platform === "SHOPEE" ? syncAllShopeeChats : syncAllTikTokChats;
     after(() =>
-      syncAllTikTokChats(Date.now() + 50_000, 15_000).catch((err) =>
+      syncFn(Date.now() + 50_000, 15_000).catch((err) =>
         console.error("[chats] background sync", err instanceof Error ? err.message : err)
       )
     );

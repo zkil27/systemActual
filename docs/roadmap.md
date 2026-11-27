@@ -13,7 +13,7 @@ Last updated: 2026-11-27.
 | 1 | Return truth, item by item, plus foundations | Live on `main` (migrations deployed) |
 | 2 | Profit per order | Live on `main` (TikTok fee mapping fix on `dev`) |
 | 3 | Restock and suppliers | Live on `main` (migrations deployed) |
-| 4 | Chats on both shops, safe auto-replies | Live on `main` (Shopee chats coming soon) |
+| 4 | Chats on both shops, safe auto-replies | Live on `main` (TikTok + Shopee live) |
 | 5 | Listings and prices in one place | Live on `main` (migrations deployed) |
 | Dev tools | Developer section (`/dev`), developer only | Live on `main` (`DEVELOPER_EMAILS` set) |
 | Ongoing | Maintainability | Backlog below |
@@ -126,19 +126,20 @@ Data & retention:
 - `Supplier`, `PurchaseOrder`, `PurchaseOrderLine`, and nullable `StockMovement.purchaseOrderLineId`.
 - Orders are small, so keep them permanently or for 2 years.
 
-## Phase 4: chats on both shops, safe auto-replies (done on dev — Shopee coming soon)
+## Phase 4: chats on both shops, safe auto-replies (done)
 
 Problem:
-- Only TikTok chats are connected (`src/lib/chats/*`). The Shopee tab stays "Coming soon" (`chatsComingSoon` in `src/lib/chats/format.ts`) while the Shopee Open Platform live review is pending (test API only). The sample data (demo shops, sample chats and returns) was removed on 2026-11-26.
+- Chats needed both TikTok and Shopee live buyer messaging, safe AI drafts/auto-replies, and owner approval controls.
 
 What exists:
+- **TikTok + Shopee Seller Chat live (`src/lib/chats/tiktok-*.ts`, `shopee-*.ts`, `source.ts`, `service.ts`):** syncs buyer conversations & messages (text, photos, order cards, product cards, system notices), refreshes open threads live, marks conversations read on the platform, sends text & photo replies, and shows unread counts per platform.
 - **Settings switches replacing env-only gates (`AiSettings.chatSendEnabled`, `autoSendEnabled`, `approvalQueueEnabled`):** in Settings → Chats assistant (`src/app/settings/assistant/page.tsx`, `src/lib/ai/settings.ts`, `src/lib/chats/source.ts`), with env allowlists (`CHAT_SEND_TIKTOK`, `AI_AUTOSEND_TIKTOK`) preserved for safe single-buyer testing while global switches stay off. All changes log to `AuditLog`.
-- **Safe background auto-reply (`src/lib/ai/auto-reply.ts`, hooked into `src/lib/worker/tick.ts`):** only auto-sends TikTok topics set to `Auto` that pass safety rules (`withAutoLabel`), skipping Shopee (`Coming soon`), returns/refunds/complaints, media-only turns, `needsCheck`, `handoff`, `needsOwner`, and 2h human-reply cooldowns; logs to `AiEvent` and `AuditLog` (`systemActor("chat-assistant")`).
+- **Safe background auto-reply (`src/lib/ai/auto-reply.ts`, hooked into `src/lib/worker/tick.ts`):** auto-sends TikTok and Shopee topics set to `Auto` that pass safety rules (`withAutoLabel`), using platform-specific wording and stored catalog context, skipping returns/refunds/complaints, media-only turns, `needsCheck`, `handoff`, `needsOwner`, and 2h human-reply cooldowns; logs to `AiEvent` and `AuditLog` (`systemActor("chat-assistant")`).
 - **General Approval Queue (`ActionRequest` + `src/lib/approvals/*`, `src/app/approvals/page.tsx`, `/api/approvals`):** draft or uncertain AI replies queue into `ActionRequest`, send Telegram 1-tap `Approve & send` / `Reject` inline buttons (`src/app/api/telegram/webhook/route.ts`), support `/approvals` on Telegram, and prune non-pending rows after 60 days (`src/lib/worker/prune.ts`).
 
 Open:
 - [x] Apply `prisma/migrations/20261126050000_phase4_chat_controls_and_approvals/migration.sql` to Supabase Postgres (applied).
-- When Shopee approves live access: implement Shopee Open Platform seller chat sync/send, make `chatsComingSoon` return false for connected live Shopee shops, and drop "Coming soon" on Upload (`src/app/imports/page.tsx`).
+- [x] Implement Shopee Open Platform Seller Chat sync, send (text & photo), read receipt, and AI assistant support.
 
 Data & retention:
 - `AiSettings` controls + `ActionRequest` (`PENDING` expires in 24h; decided/expired rows pruned after 60 days).

@@ -194,17 +194,17 @@ describe("TikTok chat webhooks and switches", () => {
     expect(isChatWebhook(null)).toBe(false);
   });
 
-  it("shows real TikTok chats only after the first load, and keeps sending off", () => {
+  it("shows real chats only after the first load, and keeps sending off", () => {
     const real = { isDemo: false, platform: "TIKTOK", accessToken: "t" };
     expect(isChatLive(real)).toBe(false);
     expect(isChatLive({ ...real, chatAccessAt: new Date() })).toBe(true);
-    expect(isChatLive({ ...real, platform: "SHOPEE", chatAccessAt: new Date() })).toBe(false);
+    expect(isChatLive({ ...real, platform: "SHOPEE", chatAccessAt: new Date() })).toBe(true);
     // Explicit setting: the test must not depend on the local .env.
     expect(canSendFrom(real, "c1", "off")).toBe(false);
     expect(canSendFrom({ isDemo: true, platform: "TIKTOK" }, undefined, "off")).toBe(true);
   });
 
-  it("sends to real TikTok chats only where CHAT_SEND_TIKTOK allows", () => {
+  it("sends to real chats only where the send setting allows", () => {
     const real = { isDemo: false, platform: "TIKTOK" };
     expect(tiktokSendSetting("")).toBe("off");
     expect(tiktokSendSetting(" OFF ")).toBe("off");
@@ -214,7 +214,8 @@ describe("TikTok chat webhooks and switches", () => {
     expect(canSendFrom(real, "999", only)).toBe(false);
     expect(canSendFrom(real, undefined, only)).toBe(false);
     expect(canSendFrom(real, "999", "all")).toBe(true);
-    expect(canSendFrom({ ...real, platform: "SHOPEE" }, "x", "all")).toBe(false);
+    expect(canSendFrom({ ...real, platform: "SHOPEE" }, "x", "all")).toBe(true);
+    expect(canSendFrom({ ...real, platform: "SHOPEE" }, "x", "off")).toBe(false);
     expect(canSendFrom(real, "7711505717312651527", "off")).toBe(false);
     // Allowed chat: text and photos. Not allowed: neither.
     expect(replyState(true, real, "123", only)).toEqual({ canReply: true, canSendPhotos: true, replyNote: null });

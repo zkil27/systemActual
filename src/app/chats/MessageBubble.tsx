@@ -37,7 +37,7 @@ export function MessageBubble({
     return (
       <p
         role="note"
-        aria-label={`TikTok notice, ${time}: ${m.text}`}
+        aria-label={`Shop notice, ${time}: ${m.text}`}
         className="mx-auto max-w-[min(420px,86%)] px-3 text-center text-[13px] leading-snug text-ink-3 [overflow-wrap:anywhere]"
       >
         {m.text}
@@ -46,8 +46,8 @@ export function MessageBubble({
   }
 
   const bot = m.sender === "ROBOT" || m.autoBy === "duoke";
-  const botName = m.autoBy === "duoke" ? "Duoke auto-reply" : "TikTok auto-reply";
-  // The shop's side: the owner's replies and the TikTok auto-reply.
+  const botName = m.autoBy === "duoke" ? "Duoke auto-reply" : "Shop auto-reply";
+  // The shop's side: the owner's replies and platform auto-replies.
   const mine = m.sender === "SELLER" || bot;
   const who = bot ? botName : m.sender === "SELLER" ? "You" : "Buyer";
   const label = `${who}, ${time}: ${describe(m)}`;

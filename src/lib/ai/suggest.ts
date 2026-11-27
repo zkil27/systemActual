@@ -2,7 +2,7 @@ import { ChatDraftStatus, Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { tiktokRequest } from "@/lib/connectors/tiktok";
 import { ensureFreshToken } from "@/lib/connectors/tokens";
-import { getListingFacts, getShopCatalog, listingIdsForChat, shouldIncludeCatalog, type CatalogItem, type ListingFacts } from "./listing";
+import { getListingFacts, getShopCatalog, listingIdsForChat, shouldIncludeCatalog, type CatalogItem, type ListingFacts, type ListingFetcher } from "./listing";
 import { toCard } from "@/lib/chats/service";
 import { buyerWritesEnglish, draftId, expirePending, fallbackDraft, loadOrderPanel, NEEDS_CHECK_SUFFIX, toView, type DraftView } from "./drafts";
 import { needsAnswer, type GateMessage } from "./gate";
@@ -66,41 +66,44 @@ async function logEvent(data: {
 
 type ChatShop = Parameters<typeof ensureFreshToken>[0] & { isDemo: boolean; shopCipher: string | null };
 
-/** Active catalog summary from Postgres for this shop (cached 5 minutes, zero TikTok API calls). */
+/** Active catalog summary from Postgres for this shop (cached 5 minutes, zero platform API calls). */
 export async function shopCatalog(shop: Pick<ChatShop, "id" | "isDemo">, platform: string): Promise<CatalogItem[]> {
-  if (shop.isDemo || platform !== Platform.TIKTOK) return [];
+  if (shop.isDemo || (platform !== Platform.TIKTOK && platform !== Platform.SHOPEE)) return [];
   return getShopCatalog(shop.id);
 }
 
-/** The TikTok listings this chat is about, read live from the shop. Sample chats have none. */
+/** The shop listings this chat is about (live for TikTok, stored catalog for Shopee). Sample chats have none. */
 export async function chatListings(
   shop: ChatShop,
   platform: string,
   orderSn: string | null,
   messages: PromptMessage[]
 ): Promise<ListingFacts[]> {
-  if (shop.isDemo || platform !== Platform.TIKTOK) return [];
+  if (shop.isDemo || (platform !== Platform.TIKTOK && platform !== Platform.SHOPEE)) return [];
   try {
     const cards = messages
       .filter((m) => m.kind === "PRODUCT_CARD" && m.card)
       .map((m) => ({ productId: m.card!.productId ?? null, itemName: m.card!.itemName }));
     const ids = await listingIdsForChat({ shopConnectionId: shop.id, cards, orderSn });
     if (ids.length === 0) return [];
-    let token: string | null = null;
-    try {
-      token = await ensureFreshToken(shop);
-    } catch {
-      // Reconnect needed: the stored copy still has sizes and the last stock.
+    let fetcher: ListingFetcher | null = null;
+    if (platform === Platform.TIKTOK) {
+      let token: string | null = null;
+      try {
+        token = await ensureFreshToken(shop);
+      } catch {
+        // Reconnect needed: the stored copy still has sizes and the last stock.
+      }
+      fetcher = token
+        ? async (productId: string) =>
+            ((await tiktokRequest({
+              method: "GET",
+              path: `/product/202309/products/${encodeURIComponent(productId)}`,
+              accessToken: token!,
+              shopCipher: shop.shopCipher,
+            })) ?? null) as Record<string, unknown> | null
+        : null;
     }
-    const fetcher = token
-      ? (productId: string) =>
-          tiktokRequest({
-            method: "GET",
-            path: `/product/202309/products/${encodeURIComponent(productId)}`,
-            accessToken: token!,
-            shopCipher: shop.shopCipher,
-          })
-      : null;
     const facts = await Promise.all(ids.map((productId) => getListingFacts({ shopConnectionId: shop.id, productId, fetcher })));
     return facts.filter((f): f is ListingFacts => Boolean(f));
   } catch (err) {
@@ -197,7 +200,11 @@ export async function suggestReply(conversationId: string, deps: CompletionDeps 
     const catalog = shouldIncludeCatalog({ topics, hasListings: listings.length > 0, buyerText: gate.buyerText })
       ? await shopCatalog(conv.shopConnection, conv.platform)
       : [];
-    const result = await generateReply({ answers, order, messages, listings, catalog, reservePct: settings.eveningReservePct }, deps);
+    const platform = conv.platform === Platform.SHOPEE ? "SHOPEE" : "TIKTOK";
+    const result = await generateReply(
+      { answers, order, messages, platform, listings, catalog, reservePct: settings.eveningReservePct },
+      deps
+    );
     for (const b of result.blocked) {
       await logEvent({ conversationId, decision: "blocked", intent: topic, blockedReason: b.reason, ...b.usage });
     }
@@ -205,7 +212,7 @@ export async function suggestReply(conversationId: string, deps: CompletionDeps 
       if (result.reason === "blocked") return fail("blocked", blockedMessage(result.label ?? "it broke a shop rule"));
       await logEvent({ conversationId, decision: result.reason === "quota_out" ? "quota_out" : "ai_failed", intent: topic });
       // AI busy or down: offer the saved answer instead, labelled so the owner checks it fits.
-      const saved = buyerWritesEnglish(gate.buyerTexts) ? null : await fallbackDraft(topics, order);
+      const saved = buyerWritesEnglish(gate.buyerTexts) ? null : await fallbackDraft(topics, order, platform);
       if (saved) {
         const row = await prisma.chatDraft.create({
           data: {

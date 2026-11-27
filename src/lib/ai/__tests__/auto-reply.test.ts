@@ -28,8 +28,9 @@ describe("decideChatAutomation", () => {
     autoSendOverride: "all" as const,
   };
 
-  it("never processes Shopee chats while Shopee is coming soon", () => {
-    expect(decideChatAutomation({ ...base, platform: "SHOPEE" })).toBe("skip");
+  it("processes Shopee chats with the same safety rules as TikTok", () => {
+    expect(decideChatAutomation({ ...base, platform: "SHOPEE" })).toBe("auto_send");
+    expect(decideChatAutomation({ ...base, platform: "SHOPEE", topics: ["returns"] })).toBe("approval_queue");
   });
 
   it("auto-sends safe topics when all switches and rules allow it", () => {

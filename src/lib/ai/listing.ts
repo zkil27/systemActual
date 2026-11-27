@@ -1,4 +1,3 @@
-import { Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { AiTopic } from "./settings";
 
@@ -548,7 +547,7 @@ export async function listingIdsForChat(opts: {
   for (const c of [...opts.cards].reverse()) add(c.productId ?? byName.find((b) => b.name === c.itemName)?.listingId);
   if (opts.orderSn && ids.length < max) {
     const lines = await prisma.orderLine.findMany({
-      where: { order: { orderSn: opts.orderSn, platform: Platform.TIKTOK } },
+      where: { order: { orderSn: opts.orderSn, shopConnectionId: opts.shopConnectionId } },
       select: { listingId: true },
     });
     for (const l of lines) add(l.listingId);

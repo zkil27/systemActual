@@ -208,7 +208,7 @@ export async function refreshDraft(conversationId: string, now: Date = new Date(
   }
   if (buyerWritesEnglish(gate.buyerTexts)) return { draft: null, gate, topic, canSuggest: false };
 
-  const t = await fallbackDraft(topics, order);
+  const t = await fallbackDraft(topics, order, conv.platform);
   if (!t) return { draft: null, gate, topic, canSuggest: false };
 
   const id = draftId(conversationId, gate.lastBuyerMessageId, "TEMPLATE");
@@ -242,9 +242,13 @@ export async function refreshDraft(conversationId: string, now: Date = new Date(
 }
 
 /** The saved-answer reply for these topics, or null. Only used when the AI can't answer. */
-export async function fallbackDraft(topics: AiTopic[], order: OrderPanel | null) {
+export async function fallbackDraft(
+  topics: AiTopic[],
+  order: OrderPanel | null,
+  platform: "SHOPEE" | "TIKTOK" = "TIKTOK"
+) {
   const answers = await activeShopAnswers([...new Set(topics.flatMap(answerTopicsFor))]);
-  return templateDraftFor({ topics, order, answers });
+  return templateDraftFor({ topics, order, answers, platform });
 }
 
 /** The owner used, dismissed or rated a draft. */

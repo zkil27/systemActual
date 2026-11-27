@@ -41,9 +41,10 @@ function itemPart(order: OrderPanel): string {
 }
 
 /** Order status and tracking from the order linked to the chat. */
-export function orderTemplate(order: OrderPanel | null): string {
+export function orderTemplate(order: OrderPanel | null, platform: "SHOPEE" | "TIKTOK" = "TIKTOK"): string {
+  const appName = platform === "SHOPEE" ? "Shopee app" : "TikTok app";
   if (!order) {
-    return "Hi po! Para ma-check namin, pakisend po ng order number. Makikita po ito sa TikTok app under My Orders.";
+    return `Hi po! Para ma-check namin, pakisend po ng order number. Makikita po ito sa ${appName} under My Orders.`;
   }
   const status = order.statusLabel.toLowerCase();
   const what = itemPart(order);
@@ -58,7 +59,7 @@ export function orderTemplate(order: OrderPanel | null): string {
   }
   if (order.trackingNumber) {
     const courier = order.carrier ? `${order.carrier}, ` : "";
-    return `Hi po! ${what} is ${status} po. Courier: ${courier}tracking no. ${order.trackingNumber}. You can follow it in the TikTok app under My Orders.`;
+    return `Hi po! ${what} is ${status} po. Courier: ${courier}tracking no. ${order.trackingNumber}. You can follow it in the ${appName} under My Orders.`;
   }
   return `Hi po! ${what} is ${status} po. We'll share the tracking number once the courier picks it up.`;
 }
@@ -88,6 +89,7 @@ export function templateDraftFor(opts: {
   topics: AiTopic[];
   order: OrderPanel | null;
   answers: TemplateAnswer[];
+  platform?: "SHOPEE" | "TIKTOK";
 }): TemplateDraft | null {
   const parts: string[] = [];
   const covered: AiTopic[] = [];
@@ -95,7 +97,7 @@ export function templateDraftFor(opts: {
   let usedOrder = false;
   let usedAnswers = false;
   for (const topic of opts.topics) {
-    const t = templateDraft({ topic, order: opts.order, answers: opts.answers });
+    const t = templateDraft({ topic, order: opts.order, answers: opts.answers, platform: opts.platform });
     if (!t) {
       missing.push(topic);
       continue;
@@ -120,8 +122,9 @@ export function templateDraft(opts: {
   topic: AiTopic;
   order: OrderPanel | null;
   answers: TemplateAnswer[];
+  platform?: "SHOPEE" | "TIKTOK";
 }): { text: string; basis: "order" | "shop_answer" } | null {
-  if (opts.topic === "order") return { text: orderTemplate(opts.order), basis: "order" };
+  if (opts.topic === "order") return { text: orderTemplate(opts.order, opts.platform), basis: "order" };
   const text = shopAnswerTemplate(opts.topic, opts.answers);
   return text ? { text, basis: "shop_answer" } : null;
 }

@@ -159,10 +159,13 @@ export async function getThread(id: string, afterId?: string | null): Promise<Ch
   });
   if (!conv) return null;
 
-  // Open real TikTok chat: fetch anything new before answering (throttled).
+  // Open real chat: fetch anything new before answering (throttled).
   if (!conv.shopConnection.isDemo && conv.platform === Platform.TIKTOK) {
     const { refreshTikTokConversation } = await import("./tiktok-sync");
     await refreshTikTokConversation(conv.id).catch(() => false);
+  } else if (!conv.shopConnection.isDemo && conv.platform === Platform.SHOPEE) {
+    const { refreshShopeeConversation } = await import("./shopee-sync");
+    await refreshShopeeConversation(conv.id).catch(() => false);
   }
 
   let messages: MessageRow[];
@@ -233,7 +236,8 @@ export function replyState(
   setting?: ReturnType<typeof tiktokSendSetting>
 ): { canReply: boolean; canSendPhotos: boolean; replyNote: string | null } {
   if (!convCanReply) {
-    return { canReply: false, canSendPhotos: false, replyNote: "TikTok doesn't allow replies in this chat anymore." };
+    const shopName = shop.platform === "SHOPEE" ? "Shopee" : "TikTok";
+    return { canReply: false, canSendPhotos: false, replyNote: `${shopName} doesn't allow replies in this chat anymore.` };
   }
   if (!canSendFrom(shop, conversationExternalId, setting)) {
     return { canReply: false, canSendPhotos: false, replyNote: REPLY_OFF_NOTE };
