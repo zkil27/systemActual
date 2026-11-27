@@ -10,6 +10,11 @@ import {
   type TokenDeps,
   type TokenSet,
 } from "@/lib/connectors/tokens";
+import {
+  exchangeShopeeMainAccountCode,
+  getShopeeShopInfo,
+  resolveShopeeMainAccountShop,
+} from "@/lib/connectors/shopee";
 import { getAuthorizedShops } from "@/lib/connectors/tiktok";
 
 const now = new Date("2026-11-21T02:00:00.000Z");
@@ -179,5 +184,63 @@ describe("getAuthorizedShops", () => {
     expect(url).toContain("/authorization/202309/shops?");
     expect(url).not.toContain("shop_cipher");
     expect(shops).toEqual([{ id: "7494049642642441621", name: "Kyna Clothing PH", region: "PH", cipher: "ROW_abc" }]);
+  });
+});
+
+describe("Shopee main account OAuth", () => {
+  it("exchanges a main_account_id code and returns shop_id_list", async () => {
+    const fetchFn = jsonFetch({
+      access_token: "ma-access",
+      refresh_token: "ma-refresh",
+      expire_in: 14400,
+      shop_id_list: [180383119, 1773295924],
+    });
+    const out = await exchangeShopeeMainAccountCode("auth-code", "998877", fetchFn);
+    const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
+    expect(url).toMatch(/\/api\/v2\/auth\/token\/get\?partner_id=1001&timestamp=\d+&sign=[0-9a-f]{64}$/);
+    expect(JSON.parse(String(init.body))).toEqual({
+      code: "auth-code",
+      main_account_id: 998877,
+      partner_id: 1001,
+    });
+    expect(out).toEqual({
+      accessToken: "ma-access",
+      refreshToken: "ma-refresh",
+      expiresIn: 14400,
+      shopIds: ["180383119", "1773295924"],
+    });
+  });
+
+  it("reads shop_name and region from root of get_shop_info", async () => {
+    const fetchFn = jsonFetch({
+      error: "",
+      message: "",
+      shop_name: "Kyna PH",
+      region: "ph",
+    });
+    const info = await getShopeeShopInfo("180383119", "ma-access", fetchFn);
+    expect(info).toEqual({ shopId: "180383119", shopName: "Kyna PH", region: "PH" });
+  });
+
+  it("prefers the PH shop when a main account authorizes multiple regions", async () => {
+    const fetchFn = vi.fn(async (url: string | URL | Request) => {
+      const s = String(url);
+      const body = s.includes("shop_id=180383119")
+        ? { error: "", shop_name: "Kyna PH", region: "PH" }
+        : { error: "", shop_name: "Kyna MY", region: "MY" };
+      return { ok: true, json: async () => body } as Response;
+    });
+    const picked = await resolveShopeeMainAccountShop(["1773295924", "180383119"], "ma-access", fetchFn);
+    expect(picked).toEqual({ shopId: "180383119", shopName: "Kyna PH", region: "PH" });
+  });
+
+  it("falls back to the first shop if get_shop_info fails", async () => {
+    const fetchFn = jsonFetch({ error: "error_auth", message: "denied" }, false);
+    const picked = await resolveShopeeMainAccountShop(["180383119"], "ma-access", fetchFn);
+    expect(picked).toEqual({ shopId: "180383119", shopName: "Shopee Store #180383119", region: "" });
+  });
+
+  it("returns null when shop_id_list is empty", async () => {
+    expect(await resolveShopeeMainAccountShop([], "ma-access")).toBeNull();
   });
 });

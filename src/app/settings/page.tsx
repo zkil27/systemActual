@@ -201,7 +201,28 @@ export default function SettingsPage() {
 
   useEffect(() => {
     loadSettings();
-  }, []);
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get("connected");
+    const err = params.get("error");
+    if (connected === "shopee") toast("Shopee connected");
+    else if (connected === "tiktok") toast("TikTok Shop connected");
+    else if (err) {
+      const messages: Record<string, string> = {
+        shopee_state_mismatch: "Shopee sign-in expired — try connecting again",
+        shopee_missing_code: "Shopee didn't finish signing in — try again",
+        shopee_no_shops: "No Shopee store found on that account",
+        shopee_oauth_failed: "Couldn't connect Shopee — try again",
+        tiktok_state_mismatch: "TikTok sign-in expired — try connecting again",
+        tiktok_missing_code: "TikTok didn't finish signing in — try again",
+        tiktok_no_shops: "No TikTok Shop found on that account",
+        tiktok_oauth_failed: "Couldn't connect TikTok Shop — try again",
+      };
+      toast(messages[err] ?? "Couldn't connect store — try again", "error");
+    }
+    if (connected || err) {
+      router.replace("/settings");
+    }
+  }, [router]);
 
   const dirty =
     data !== null &&
@@ -427,8 +448,11 @@ export default function SettingsPage() {
     router.replace("/login");
   }
 
-  const shopee = data?.shops.find((s) => s.platform === "SHOPEE" && !s.isDemo);
-  const tiktok = data?.shops.find((s) => s.platform === "TIKTOK" && !s.isDemo);
+  const pickShop = (platform: "SHOPEE" | "TIKTOK") =>
+    data?.shops.find((s) => s.platform === platform && !s.isDemo && s.connected) ??
+    data?.shops.find((s) => s.platform === platform && !s.isDemo);
+  const shopee = pickShop("SHOPEE");
+  const tiktok = pickShop("TIKTOK");
 
   return (
     <AppShell title="Settings" width="wide">

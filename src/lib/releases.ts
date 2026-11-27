@@ -20,6 +20,15 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    id: 16,
+    date: "2026-11-27",
+    title: "Shopee main account sign-in",
+    changes: [
+      "Connecting Shopee in Settings now works with a Shopee Main Account and picks your Philippines store automatically.",
+      "Settings now shows a clear message after connecting Shopee or TikTok Shop if sign-in succeeds or fails.",
+    ],
+  },
+  {
     id: 15,
     date: "2026-11-27",
     title: "Add items to both shops",

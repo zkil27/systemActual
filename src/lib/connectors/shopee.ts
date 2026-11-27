@@ -127,6 +127,134 @@ export async function exchangeShopeeCode(code: string, shopId: string, fetchFn: 
   };
 }
 
+/**
+ * Token exchange for Shopee Main Account OAuth callbacks, which return
+ * `main_account_id` instead of `shop_id` and respond with `shop_id_list`.
+ */
+export async function exchangeShopeeMainAccountCode(
+  code: string,
+  mainAccountId: string,
+  fetchFn: typeof fetch = fetch
+) {
+  const cfg = getShopeeConfig();
+  const path = "/api/v2/auth/token/get";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const sign = signShopeeRequest({
+    partnerId: cfg.partnerId,
+    partnerKey: cfg.partnerKey,
+    path,
+    timestamp,
+  });
+
+  const url = `${cfg.baseUrl}${path}?partner_id=${cfg.partnerId}&timestamp=${timestamp}&sign=${sign}`;
+  const res = await fetchWithRetry(
+    url,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code,
+        main_account_id: Number(mainAccountId),
+        partner_id: Number(cfg.partnerId),
+      }),
+      signal: AbortSignal.timeout(15_000),
+    },
+    { fetchFn }
+  );
+  const data = await readMarketplaceJson(res, "Shopee");
+  if (!res.ok || data.error || !data.access_token) {
+    throwMarketplaceError(res, String(data.message || data.error || "Shopee token exchange failed"));
+  }
+  const rawList = Array.isArray(data.shop_id_list) ? data.shop_id_list : [];
+  const shopIds = rawList
+    .map((id) => String(id ?? "").trim())
+    .filter((id) => id.length > 0);
+  return {
+    accessToken: String(data.access_token),
+    refreshToken: String(data.refresh_token),
+    expiresIn: Number(data.expire_in || 14400),
+    shopIds,
+  };
+}
+
+/**
+ * Fetches basic shop profile (`shop_name`, `region`). Shopee returns these
+ * fields at the root of the JSON payload (not nested inside `response`).
+ */
+export async function getShopeeShopInfo(
+  shopId: string,
+  accessToken: string,
+  fetchFn: typeof fetch = fetch
+): Promise<{ shopId: string; shopName: string; region: string }> {
+  const token = decryptSecret(accessToken);
+  const cfg = getShopeeConfig();
+  const path = "/api/v2/shop/get_shop_info";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const sign = signShopeeRequest({
+    partnerId: cfg.partnerId,
+    partnerKey: cfg.partnerKey,
+    path,
+    timestamp,
+    accessToken: token,
+    shopId,
+  });
+  const qs = new URLSearchParams({
+    partner_id: cfg.partnerId,
+    timestamp: String(timestamp),
+    access_token: token,
+    shop_id: shopId,
+    sign,
+  });
+  const res = await fetchWithRetry(
+    `${cfg.baseUrl}${path}?${qs.toString()}`,
+    { method: "GET", signal: AbortSignal.timeout(15_000) },
+    { fetchFn }
+  );
+  const data = await readMarketplaceJson(res, "Shopee");
+  if (!res.ok || data.error) {
+    throwMarketplaceError(res, String(data.message || data.error || `Shopee API error on ${path}`));
+  }
+  const body = (data.response && typeof data.response === "object" ? data.response : data) as Record<
+    string,
+    unknown
+  >;
+  return {
+    shopId,
+    shopName: String(body.shop_name || "").trim(),
+    region: String(body.region || "").trim().toUpperCase(),
+  };
+}
+
+/**
+ * Picks the primary shop to connect from a Shopee Main Account's `shop_id_list`.
+ * Prefers `preferredRegion` (PH by default, matching PHP currency in Kyna Ops)
+ * and falls back to the first shop if region info is unavailable.
+ */
+export async function resolveShopeeMainAccountShop(
+  shopIds: string[],
+  accessToken: string,
+  fetchFn: typeof fetch = fetch,
+  preferredRegion = "PH"
+): Promise<{ shopId: string; shopName: string; region: string } | null> {
+  if (shopIds.length === 0) return null;
+  const target = preferredRegion.toUpperCase();
+  const infos = await Promise.all(
+    shopIds.map(async (shopId) => {
+      try {
+        return await getShopeeShopInfo(shopId, accessToken, fetchFn);
+      } catch {
+        return { shopId, shopName: "", region: "" };
+      }
+    })
+  );
+  const match = infos.find((s) => s.region === target) ?? infos[0];
+  return {
+    shopId: match.shopId,
+    shopName: match.shopName || `Shopee Store #${match.shopId}`,
+    region: match.region,
+  };
+}
+
 export async function shopeeGet(
   path: string,
   shopId: string,
