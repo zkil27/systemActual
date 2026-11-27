@@ -2,7 +2,7 @@ import { ChatDraftStatus, Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { tiktokRequest } from "@/lib/connectors/tiktok";
 import { ensureFreshToken } from "@/lib/connectors/tokens";
-import { getListingFacts, listingIdsForChat, type ListingFacts } from "./listing";
+import { getListingFacts, getShopCatalog, listingIdsForChat, shouldIncludeCatalog, type CatalogItem, type ListingFacts } from "./listing";
 import { toCard } from "@/lib/chats/service";
 import { buyerWritesEnglish, draftId, expirePending, fallbackDraft, loadOrderPanel, NEEDS_CHECK_SUFFIX, toView, type DraftView } from "./drafts";
 import { needsAnswer, type GateMessage } from "./gate";
@@ -10,6 +10,7 @@ import { classifyIntents, isHoldingReply, needsOwner } from "./intent";
 import { generateReply } from "./generate";
 import type { PromptMessage } from "./prompt";
 import type { CompletionDeps } from "./providers";
+import { acquireReplyLock } from "./reply-lock";
 import { topicMode, type AiTopic } from "./settings";
 import { activeShopAnswers, getAiSettings } from "./settings-store";
 
@@ -64,6 +65,12 @@ async function logEvent(data: {
 }
 
 type ChatShop = Parameters<typeof ensureFreshToken>[0] & { isDemo: boolean; shopCipher: string | null };
+
+/** Active catalog summary from Postgres for this shop (cached 5 minutes, zero TikTok API calls). */
+export async function shopCatalog(shop: Pick<ChatShop, "id" | "isDemo">, platform: string): Promise<CatalogItem[]> {
+  if (shop.isDemo || platform !== Platform.TIKTOK) return [];
+  return getShopCatalog(shop.id);
+}
 
 /** The TikTok listings this chat is about, read live from the shop. Sample chats have none. */
 export async function chatListings(
@@ -144,78 +151,101 @@ export async function suggestReply(conversationId: string, deps: CompletionDeps 
   if (gate.hasMedia && !gate.buyerText) return fail("media");
 
   // Already suggested for this buyer message and still waiting: show that one.
-  const waiting = await prisma.chatDraft.findFirst({
-    where: { conversationId, basedOnMessageId: gate.lastBuyerMessageId, source: "AI", status: ChatDraftStatus.PENDING },
-  });
+  const findWaiting = () =>
+    prisma.chatDraft.findFirst({
+      where: { conversationId, basedOnMessageId: gate.lastBuyerMessageId, source: "AI", status: ChatDraftStatus.PENDING },
+    });
+  const waiting = await findWaiting();
   if (waiting) return { ok: true, draft: toView(waiting) };
 
-  const order = await loadOrderPanel({
-    platform: conv.platform,
-    orderSn: conv.orderSn,
-    sampleOrder: conv.sampleOrder,
-    isDemo: conv.shopConnection.isDemo,
-  });
-  const allTopics = classifyIntents(gate.buyerTexts, { hasOrder: Boolean(order) });
-  const topics = allTopics.filter((t) => topicMode(settings.topicModes, t) !== "off");
-  if (topics.length === 0) return fail("topics_off");
-  const topic: AiTopic = topics.includes("returns") ? "returns" : topics[0];
-
-  const answers = await activeShopAnswers();
-  const messages: PromptMessage[] = rows.map((m) => ({
-    sender: m.sender,
-    kind: m.kind,
-    text: m.text,
-    card: toCard(m.cardData),
-    holding: m.sender === "SELLER" && m.kind === "TEXT" && !m.clientKey && isHoldingReply(m.text),
-  }));
-
-  const listings = await chatListings(conv.shopConnection, conv.platform, conv.orderSn, messages);
-  const result = await generateReply({ answers, order, messages, listings, reservePct: settings.eveningReservePct }, deps);
-  for (const b of result.blocked) {
-    await logEvent({ conversationId, decision: "blocked", intent: topic, blockedReason: b.reason, ...b.usage });
-  }
-  if (!result.ok) {
-    if (result.reason === "blocked") return fail("blocked", blockedMessage(result.label ?? "it broke a shop rule"));
-    await logEvent({ conversationId, decision: result.reason === "quota_out" ? "quota_out" : "ai_failed", intent: topic });
-    // AI busy or down: offer the saved answer instead, labelled so the owner checks it fits.
-    const saved = buyerWritesEnglish(gate.buyerTexts) ? null : await fallbackDraft(topics, order);
-    if (saved) {
-      const row = await prisma.chatDraft.create({
-        data: {
-          id: draftId(conversationId, gate.lastBuyerMessageId, "TEMPLATE"),
-          conversationId,
-          text: saved.text,
-          source: "TEMPLATE",
-          intent: topic,
-          provider: saved.basis,
-          model: saved.missing.length ? `missing:${saved.missing.join(",")}` : null,
-          basedOnMessageId: gate.lastBuyerMessageId,
-        },
-      }).catch(() => null);
-      if (row) {
-        await expirePending(conversationId, row.id);
-        return { ok: true, draft: toView(row) };
-      }
+  // Dedupe concurrent requests (e.g. open Chats screen + background tick) so we don't pay twice.
+  const lock = await acquireReplyLock(conversationId, gate.lastBuyerMessageId);
+  if (!lock.acquired) {
+    for (let i = 0; i < 6; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const ready = await findWaiting();
+      if (ready) return { ok: true, draft: toView(ready) };
     }
-    return fail(result.reason);
+    return fail("failed", "A reply is already being drafted. Refresh in a moment.");
   }
 
-  const { text, usage } = result;
-  // Returns, complaints, "I want a person" and requests only a person can grant always need the owner's eye.
-  const check = result.needsCheck || topic === "returns" || gate.handoff || needsOwner(gate.buyerTexts);
+  try {
+    const afterLock = await findWaiting();
+    if (afterLock) return { ok: true, draft: toView(afterLock) };
 
-  const row = await prisma.chatDraft.create({
-    data: {
-      conversationId,
-      text,
-      source: "AI",
-      intent: topic,
-      provider: usage.provider,
-      model: check ? `${usage.model}${NEEDS_CHECK_SUFFIX}` : usage.model,
-      basedOnMessageId: gate.lastBuyerMessageId,
-    },
-  });
-  await expirePending(conversationId, row.id);
-  await logEvent({ conversationId, decision: "ai_draft", intent: topic, ...usage });
-  return { ok: true, draft: toView(row) };
+    const order = await loadOrderPanel({
+      platform: conv.platform,
+      orderSn: conv.orderSn,
+      sampleOrder: conv.sampleOrder,
+      isDemo: conv.shopConnection.isDemo,
+    });
+    const allTopics = classifyIntents(gate.buyerTexts, { hasOrder: Boolean(order) });
+    const topics = allTopics.filter((t) => topicMode(settings.topicModes, t) !== "off");
+    if (topics.length === 0) return fail("topics_off");
+    const topic: AiTopic = topics.includes("returns") ? "returns" : topics[0];
+
+    const answers = await activeShopAnswers();
+    const messages: PromptMessage[] = rows.map((m) => ({
+      sender: m.sender,
+      kind: m.kind,
+      text: m.text,
+      card: toCard(m.cardData),
+      holding: m.sender === "SELLER" && m.kind === "TEXT" && !m.clientKey && isHoldingReply(m.text),
+    }));
+
+    const listings = await chatListings(conv.shopConnection, conv.platform, conv.orderSn, messages);
+    const catalog = shouldIncludeCatalog({ topics, hasListings: listings.length > 0, buyerText: gate.buyerText })
+      ? await shopCatalog(conv.shopConnection, conv.platform)
+      : [];
+    const result = await generateReply({ answers, order, messages, listings, catalog, reservePct: settings.eveningReservePct }, deps);
+    for (const b of result.blocked) {
+      await logEvent({ conversationId, decision: "blocked", intent: topic, blockedReason: b.reason, ...b.usage });
+    }
+    if (!result.ok) {
+      if (result.reason === "blocked") return fail("blocked", blockedMessage(result.label ?? "it broke a shop rule"));
+      await logEvent({ conversationId, decision: result.reason === "quota_out" ? "quota_out" : "ai_failed", intent: topic });
+      // AI busy or down: offer the saved answer instead, labelled so the owner checks it fits.
+      const saved = buyerWritesEnglish(gate.buyerTexts) ? null : await fallbackDraft(topics, order);
+      if (saved) {
+        const row = await prisma.chatDraft.create({
+          data: {
+            id: draftId(conversationId, gate.lastBuyerMessageId, "TEMPLATE"),
+            conversationId,
+            text: saved.text,
+            source: "TEMPLATE",
+            intent: topic,
+            provider: saved.basis,
+            model: saved.missing.length ? `missing:${saved.missing.join(",")}` : null,
+            basedOnMessageId: gate.lastBuyerMessageId,
+          },
+        }).catch(() => null);
+        if (row) {
+          await expirePending(conversationId, row.id);
+          return { ok: true, draft: toView(row) };
+        }
+      }
+      return fail(result.reason);
+    }
+
+    const { text, usage } = result;
+    // Returns, complaints, "I want a person" and requests only a person can grant always need the owner's eye.
+    const check = result.needsCheck || topic === "returns" || gate.handoff || needsOwner(gate.buyerTexts);
+
+    const row = await prisma.chatDraft.create({
+      data: {
+        conversationId,
+        text,
+        source: "AI",
+        intent: topic,
+        provider: usage.provider,
+        model: check ? `${usage.model}${NEEDS_CHECK_SUFFIX}` : usage.model,
+        basedOnMessageId: gate.lastBuyerMessageId,
+      },
+    });
+    await expirePending(conversationId, row.id);
+    await logEvent({ conversationId, decision: "ai_draft", intent: topic, ...usage });
+    return { ok: true, draft: toView(row) };
+  } finally {
+    await lock.release();
+  }
 }

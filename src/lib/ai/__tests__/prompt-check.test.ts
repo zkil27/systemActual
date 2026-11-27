@@ -139,6 +139,7 @@ describe("checkReply", () => {
     expect(check("May 10% discount po kayo!")).toMatchObject({ ok: false, reason: "promise" });
     expect(check("Libre na po ang shipping")).toMatchObject({ ok: false, reason: "promise" });
     expect(check("Papalitan po namin agad")).toMatchObject({ ok: false, reason: "promise" });
+    expect(check("Sisiguraduhin po naming walang damage ang item.")).toMatchObject({ ok: false, reason: "promise" });
   });
 
   it("blocks stock guesses but allows offering to check", () => {

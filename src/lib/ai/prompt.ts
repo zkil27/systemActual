@@ -1,5 +1,5 @@
 import type { ChatCard, OrderPanel } from "@/lib/chats/types";
-import { listingBlock, type ListingFacts } from "./listing";
+import { catalogBlock, listingBlock, type CatalogItem, type ListingFacts } from "./listing";
 import type { ChatMessage } from "./providers";
 import { redactPersonal } from "./redact";
 
@@ -37,11 +37,11 @@ How to reply:
 - Match the language of the buyer's newest message. English → reply in English. Tagalog or Taglish → reply in natural Taglish. Use "po" in Tagalog and Taglish.
 - Be warm and polite. 1 to 3 short sentences, under 60 words. Plain text, at most one emoji.
 - Answer every question in the buyer's newest messages.
-- State only what is in SHOP FACTS, ORDER or PRODUCT DETAILS. Don't guess stock, sizes, prices, colors, measurements, dates, delivery times or shop steps that aren't there.
+- State only what is in SHOP FACTS, SHOP CATALOG, ORDER or PRODUCT DETAILS. Don't guess stock, sizes, prices, colors, measurements, dates, delivery times or shop steps that aren't there.
 - PRODUCT DETAILS is the item's own TikTok listing. Use it for the product: fabric, fit, sizes and their ranges, length, colors, price and stock. Use SHOP FACTS for shipping, delivery, returns and payment, even if the listing says something else.
 - Stock: use only the words in PRODUCT DETAILS: "available", "few left" or "sold out". Never give a number of pieces, never promise to hold or reserve an item, and for "few left" suggest checking out soon. If a color or size isn't listed, say the team will check.
 - Never say what the shop can or can't do (notes, gift wrap, pickup, someone else receiving, special requests) unless SHOP FACTS says it. Say the team will check instead.
-- Only say the shop sells an item, color or size when PRODUCT DETAILS lists it. For anything else, say the team will check.
+- Only say the shop sells an item, color or size when PRODUCT DETAILS or SHOP CATALOG lists it. SHOP CATALOG shows active items (and short listing descriptions for matching items), with no stock or prices—you may use the exact details shown there (like style, fabric or length) and ask the buyer to send the product card or check the listing for sizes and stock. If nothing in SHOP CATALOG matches what they asked for (or the exact length isn't stated), say so honestly or say the team will check.
 - Don't describe thickness, see-through, stretch, softness or fit beyond the exact words in PRODUCT DETAILS, not even to say "not stretchy". An elastic waist doesn't mean stretchy fabric. If it isn't there, answer the parts you know and say the team will check that part.
 - If the buyer gives only weight or height (like "70kg" or "5'2"), don't pick a size: ask for their waist (skirts, shorts) or bust (tops) in inches.
 - Never promise an order will arrive by a date, day or event (birthday, party, trip). Give the usual delivery time from SHOP FACTS and say the team will check.
@@ -177,18 +177,31 @@ function detailsBlock(listings: ListingFacts[] | undefined): string {
   return (listings ?? []).map(listingBlock).join("\n\n");
 }
 
+function recentBuyerText(messages: PromptMessage[]): string {
+  const lastShop = messages.map((m) => m.sender).lastIndexOf("SELLER");
+  return messages
+    .slice(lastShop + 1)
+    .filter((m) => m.sender === "BUYER" && m.text)
+    .map((m) => m.text)
+    .join(" ");
+}
+
 export function buildPrompt(opts: {
   answers: PromptAnswer[];
   order: OrderPanel | null;
   messages: PromptMessage[];
   /** The TikTok listings the chat is about (product cards, order items). */
   listings?: ListingFacts[];
+  /** Compact overview of the shop's active catalog (titles, categories, and matched description snippets). */
+  catalog?: CatalogItem[];
 }): ChatMessage[] {
   const products = productsBlock(opts.messages);
   const details = detailsBlock(opts.listings);
+  const catalog = catalogBlock(opts.catalog, recentBuyerText(opts.messages));
   const user = [
     "SHOP FACTS:",
     factsBlock(opts.answers),
+    ...(catalog ? ["", "SHOP CATALOG (active items in the shop; no stock or prices here):", catalog] : []),
     "",
     "ORDER:",
     orderBlock(opts.order),
@@ -210,9 +223,15 @@ export function buildPrompt(opts: {
   ];
 }
 
-/** What the shop itself says (answers, order, listings), without the buyer's words. */
-export function shopFactsText(opts: { answers: PromptAnswer[]; order: OrderPanel | null; listings?: ListingFacts[] }): string {
-  return [factsBlock(opts.answers), orderBlock(opts.order), detailsBlock(opts.listings)].join("\n");
+/** What the shop itself says (answers, catalog, order, listings), without the buyer's words. */
+export function shopFactsText(opts: {
+  answers: PromptAnswer[];
+  order: OrderPanel | null;
+  listings?: ListingFacts[];
+  catalog?: CatalogItem[];
+  buyerText?: string;
+}): string {
+  return [factsBlock(opts.answers), catalogBlock(opts.catalog, opts.buyerText), orderBlock(opts.order), detailsBlock(opts.listings)].join("\n");
 }
 
 /** Everything the reply may state, for the grounding checks. */
@@ -221,9 +240,12 @@ export function groundingText(opts: {
   order: OrderPanel | null;
   messages: PromptMessage[];
   listings?: ListingFacts[];
+  catalog?: CatalogItem[];
 }): string {
+  const buyer = recentBuyerText(opts.messages);
   return [
     factsBlock(opts.answers),
+    catalogBlock(opts.catalog, buyer),
     orderBlock(opts.order),
     productsBlock(opts.messages),
     detailsBlock(opts.listings),

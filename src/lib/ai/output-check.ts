@@ -17,7 +17,7 @@ export type CheckResult = { ok: true } | { ok: false; reason: CheckReason; label
 export const MAX_REPLY_CHARS = 700;
 
 const LEAK =
-  /\b(as an ai|ai model|language model|i('m| am) an ai|system prompt|my instructions|these instructions|shop facts|grounding)\b|<<<|>>>|\[(check|phone|email|link|number|address)\]/i;
+  /\b(as an ai|ai model|language model|i('m| am) an ai|system prompt|my instructions|these instructions|shop facts|shop catalog|grounding)\b|<<<|>>>|\[(check|phone|email|link|number|address)\]/i;
 
 // Money and exchange promises. Fine only when the facts use the same word.
 const PROMISE_WORDS = [
@@ -36,7 +36,7 @@ const PROMISE_WORDS = [
   /\breplacement\b/i,
   /\bpapalitan\b/i,
   // "para sigurado" / "para makasigurado" means "to be sure", not a promise.
-  /\bguarantee(d)?\b|(?<!\bpara\s+(?:ma(?:ka)?)?)\bsigurado(ng)?\b|\bpromise\b|\bpangako\b/i,
+  /\bguarantee(d)?\b|(?<!\bpara\s+(?:ma(?:ka)?)?)\bsigurado(ng)?\b|\bsisiguraduhin\b|\bsisiguradohin\b|\bpromise\b|\bpangako\b/i,
   // Holding stock for one buyer.
   /\b(i-?reserve|reserve(d)?|itatabi|itabi|i-?hold|hold\s+(it|for))\b/i,
 ];
@@ -75,6 +75,7 @@ const HAVE =
 const FILLER = new Set([
   "po", "din", "rin", "pa", "na", "iba't", "ibang", "iba", "mga", "ng", "ang", "pong", "ding", "ring", "also", "the", "a", "an",
   "some", "other", "kayo", "ninyo", "sa", "at", "and", "team", "staff", "assistant", "tanong", "available",
+  "shop", "store", "listing", "listings", "item", "items", "style", "styles", "ngayon", "dito", "lang",
   // Counting words: "may two colors kami", "meron kaming tatlong sizes".
   "one", "two", "three", "four", "five", "several", "many", "isang", "dalawa", "dalawang", "tatlo", "tatlong", "apat", "apat na",
   "ilang", "colors", "colours", "kulay", "sizes", "size", "options", "variations", "choices",

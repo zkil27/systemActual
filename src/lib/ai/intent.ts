@@ -19,7 +19,7 @@ const OWN_ORDER =
   /\b(order|parcel|package|item)\s+(ko|namin|nyo|ninyo)\b|\bmy\s+(order|parcel|package)\b|\b(tracking|track)\b|\binorder\b|\bnaka-?order\b/i;
 const HYPOTHETICAL = /\b(pag|kapag|kung|if|once)\s+(po\s+)?(ako\s+)?(nag|mag|um)?-?\s*order/i;
 const RESTOCK =
-  /\b(re-?stock(ed|ing|s)?|replenish(ed|ment)?|back\s+in\s+stock|sold\s*out|out\s+of\s+stock|ubos\s+na|wala\s+na\s+(po\s+)?stock|magkaka-?stock|mag-?stock\s+ulit|babalik\s+(ang\s+)?stock)\b/i;
+  /\b(re-?stock(ed|ing|s)?|replenish(ed|ment)?|back\s+in\s+stock|sold\s*out|out\s+of\s+stock|ubos\s+na|wala\s+na\s+(po\s+)?stock|mag\s*-?\s*kaka\s*-?\s*stock|mag\s*-?\s*ka\s*-?\s*stock|mag\s*-?\s*re-?stock|mag-?stock\s+ulit|babalik\s+(ang\s+)?stock)\b/i;
 // How long shipping takes in general.
 const DURATION = /\b(ilang\s+araw|how\s+many\s+days|gaano\s+(po\s+)?katagal|how\s+long|lead\s+time)\b/i;
 const STOCK =
@@ -46,7 +46,7 @@ const OWNER_ONLY: RegExp[] = [
   // Changing an order already placed.
   /\b(pa-?change|change|palitan|pa-?palit|i-?update|edit)\b[^.!?]{0,30}\b(order|size|kulay|color|colour|address|item|design)\b/i,
   // Checking an order carefully before it ships.
-  /\b(pki|paki|pa)-?\s*check\b[^.!?]{0,20}\b(mabuti|maigi|maayos|ng\s+mabuti)\b/i,
+  /\b(pki|paki|pa)-?\s*check\b[^.!?]{0,20}\b(mabuti|maigi|maayos|ng\s+mabuti)\b|\bmake\s+sure\b[^.!?]{0,30}\b(damage|defect|tama|maayos|correct|good|check)\b/i,
   // Reviews, reselling, going live, bulk.
   /\b(review|reviews|5\s*-?\s*stars?|five\s+stars?|rating|reseller|resell|wholesale|bulk|maramihan|i-?live|mag-?live)\b/i,
   /\b(pwede|pwedi|pwd|can)\b[^.!?]{0,20}\blive\b/i,

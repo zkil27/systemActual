@@ -21,7 +21,9 @@ import {
   type AiTopic,
 } from "./settings";
 import { activeShopAnswers, getAiSettings } from "./settings-store";
-import { chatListings } from "./suggest";
+import { shouldIncludeCatalog } from "./listing";
+import { acquireReplyLock } from "./reply-lock";
+import { chatListings, shopCatalog } from "./suggest";
 
 const ACTOR = systemActor("chat-assistant");
 const WINDOW = 30;
@@ -205,219 +207,240 @@ export async function processPendingChatReplies(
     if (!gate.pending || (gate.hasMedia && !gate.buyerText)) continue;
 
     // Skip if this buyer message already produced a draft or an approval request.
-    const [existingDraft, existingApproval] = await Promise.all([
-      prisma.chatDraft.findFirst({
-        where: { conversationId: conv.id, basedOnMessageId: gate.lastBuyerMessageId },
-        select: { id: true },
-      }),
-      prisma.actionRequest.findUnique({
-        where: { dedupeKey: `chat.reply:${conv.id}:${gate.lastBuyerMessageId}` },
-        select: { id: true },
-      }),
-    ]);
-    if (existingDraft || existingApproval) continue;
+    const alreadyHandled = async () => {
+      const [existingDraft, existingApproval] = await Promise.all([
+        prisma.chatDraft.findFirst({
+          where: { conversationId: conv.id, basedOnMessageId: gate.lastBuyerMessageId },
+          select: { id: true },
+        }),
+        prisma.actionRequest.findUnique({
+          where: { dedupeKey: `chat.reply:${conv.id}:${gate.lastBuyerMessageId}` },
+          select: { id: true },
+        }),
+      ]);
+      return Boolean(existingDraft || existingApproval);
+    };
+    if (await alreadyHandled()) continue;
 
-    const order = await loadOrderPanel({
-      platform: conv.platform,
-      orderSn: conv.orderSn,
-      sampleOrder: conv.sampleOrder,
-      isDemo: conv.shopConnection.isDemo,
-    });
-    const topics = classifyIntents(gate.buyerTexts, { hasOrder: Boolean(order) }).filter(
-      (t) => topicMode(settings.topicModes, t) !== "off"
-    );
-    if (topics.length === 0) continue;
-    const topic: AiTopic = topics.includes("returns") ? "returns" : topics[0];
+    // Cross-process lock so overlapping webhooks / ticks / open Chats screens never burn duplicate AI calls.
+    const lock = await acquireReplyLock(conv.id, gate.lastBuyerMessageId);
+    if (!lock.acquired) continue;
 
-    out.checked++;
+    try {
+      if (await alreadyHandled()) continue;
 
-    const promptMessages: PromptMessage[] = rows.map((m) => ({
-      sender: m.sender,
-      kind: m.kind,
-      text: m.text,
-      card: toCard(m.cardData),
-      holding:
-        m.sender === "SELLER" &&
-        m.kind === "TEXT" &&
-        !m.clientKey &&
-        isHoldingReply(m.text),
-    }));
+      const order = await loadOrderPanel({
+        platform: conv.platform,
+        orderSn: conv.orderSn,
+        sampleOrder: conv.sampleOrder,
+        isDemo: conv.shopConnection.isDemo,
+      });
+      const topics = classifyIntents(gate.buyerTexts, { hasOrder: Boolean(order) }).filter(
+        (t) => topicMode(settings.topicModes, t) !== "off"
+      );
+      if (topics.length === 0) continue;
+      const topic: AiTopic = topics.includes("returns") ? "returns" : topics[0];
 
-    const listings = await chatListings(
-      conv.shopConnection,
-      conv.platform,
-      conv.orderSn,
-      promptMessages
-    );
+      out.checked++;
 
-    const generated = await generateReply(
-      {
-        answers,
-        order,
-        messages: promptMessages,
-        listings,
-        reservePct: settings.eveningReservePct,
-      },
-      opts.deps
-    );
+      const promptMessages: PromptMessage[] = rows.map((m) => ({
+        sender: m.sender,
+        kind: m.kind,
+        text: m.text,
+        card: toCard(m.cardData),
+        holding:
+          m.sender === "SELLER" &&
+          m.kind === "TEXT" &&
+          !m.clientKey &&
+          isHoldingReply(m.text),
+      }));
 
-    for (const b of generated.blocked) {
-      await prisma.aiEvent
-        .create({
-          data: {
-            conversationId: conv.id,
-            decision: "blocked",
-            intent: topic,
-            blockedReason: b.reason,
-            ...b.usage,
-          },
-        })
-        .catch(() => {});
-    }
+      const listings = await chatListings(
+        conv.shopConnection,
+        conv.platform,
+        conv.orderSn,
+        promptMessages
+      );
+      const catalog = shouldIncludeCatalog({
+        topics,
+        hasListings: listings.length > 0,
+        buyerText: gate.buyerText,
+      })
+        ? await shopCatalog(conv.shopConnection, conv.platform)
+        : [];
 
-    if (!generated.ok) {
-      if (generated.reason !== "blocked") {
+      const generated = await generateReply(
+        {
+          answers,
+          order,
+          messages: promptMessages,
+          listings,
+          catalog,
+          reservePct: settings.eveningReservePct,
+        },
+        opts.deps
+      );
+
+      for (const b of generated.blocked) {
         await prisma.aiEvent
           .create({
             data: {
               conversationId: conv.id,
-              decision: generated.reason === "quota_out" ? "quota_out" : "ai_failed",
+              decision: "blocked",
               intent: topic,
+              blockedReason: b.reason,
+              ...b.usage,
             },
           })
           .catch(() => {});
       }
-      continue;
-    }
 
-    const needsOwnerFlag = needsOwner(gate.buyerTexts);
-    const check =
-      generated.needsCheck ||
-      topic === "returns" ||
-      gate.handoff ||
-      needsOwnerFlag;
-
-    const action = decideChatAutomation({
-      settings,
-      platform: conv.platform === Platform.SHOPEE ? "SHOPEE" : "TIKTOK",
-      isDemo: conv.shopConnection.isDemo,
-      conversationExternalId: conv.externalId,
-      gate,
-      topics,
-      needsOwnerFlag,
-      generatedNeedsCheck: generated.needsCheck,
-    });
-
-    if (action === "skip") continue;
-
-    if (action === "auto_send") {
-      const labeledText = withAutoLabel(generated.text, settings.autoLabel);
-      try {
-        const sent = await sendChatMessage(
-          conv.id,
-          autoClientKey(conv.id, gate.lastBuyerMessageId),
-          { text: labeledText },
-          { isAutoReply: true }
-        );
-        if (sent.status !== "SENT") {
-          throw new Error("Reply send returned FAILED.");
+      if (!generated.ok) {
+        if (generated.reason !== "blocked") {
+          await prisma.aiEvent
+            .create({
+              data: {
+                conversationId: conv.id,
+                decision: generated.reason === "quota_out" ? "quota_out" : "ai_failed",
+                intent: topic,
+              },
+            })
+            .catch(() => {});
         }
-        await prisma.chatDraft.create({
-          data: {
-            conversationId: conv.id,
-            text: labeledText,
-            source: "AI",
-            intent: topic,
-            provider: generated.usage.provider,
-            model: generated.usage.model,
-            basedOnMessageId: gate.lastBuyerMessageId,
-            status: ChatDraftStatus.SENT,
-          },
-        });
-        await expirePending(conv.id);
+        continue;
+      }
+
+      const needsOwnerFlag = needsOwner(gate.buyerTexts);
+      const check =
+        generated.needsCheck ||
+        topic === "returns" ||
+        gate.handoff ||
+        needsOwnerFlag;
+
+      const action = decideChatAutomation({
+        settings,
+        platform: conv.platform === Platform.SHOPEE ? "SHOPEE" : "TIKTOK",
+        isDemo: conv.shopConnection.isDemo,
+        conversationExternalId: conv.externalId,
+        gate,
+        topics,
+        needsOwnerFlag,
+        generatedNeedsCheck: generated.needsCheck,
+      });
+
+      if (action === "skip") continue;
+
+      if (action === "auto_send") {
+        const labeledText = withAutoLabel(generated.text, settings.autoLabel);
+        try {
+          const sent = await sendChatMessage(
+            conv.id,
+            autoClientKey(conv.id, gate.lastBuyerMessageId),
+            { text: labeledText },
+            { isAutoReply: true }
+          );
+          if (sent.status !== "SENT") {
+            throw new Error("Reply send returned FAILED.");
+          }
+          await prisma.chatDraft.create({
+            data: {
+              conversationId: conv.id,
+              text: labeledText,
+              source: "AI",
+              intent: topic,
+              provider: generated.usage.provider,
+              model: generated.usage.model,
+              basedOnMessageId: gate.lastBuyerMessageId,
+              status: ChatDraftStatus.SENT,
+            },
+          });
+          await expirePending(conv.id);
+          await prisma.aiEvent
+            .create({
+              data: {
+                conversationId: conv.id,
+                decision: "auto_sent",
+                intent: topic,
+                ...generated.usage,
+              },
+            })
+            .catch(() => {});
+          const { recordAudit } = await import("@/lib/audit");
+          await recordAudit({
+            actor: ACTOR,
+            action: "chat.auto_replied",
+            entity: "ChatConversation",
+            entityId: conv.id,
+            after: {
+              topic,
+              messageId: sent.id,
+              preview: labeledText.slice(0, 120),
+            },
+          });
+          out.autoSent++;
+        } catch (err) {
+          console.error(
+            "[ai] auto-send failed",
+            conv.id,
+            err instanceof Error ? err.message : err
+          );
+        }
+        continue;
+      }
+
+      const draftRow = await prisma.chatDraft.create({
+        data: {
+          conversationId: conv.id,
+          text: generated.text,
+          source: "AI",
+          intent: topic,
+          provider: generated.usage.provider,
+          model: check
+            ? `${generated.usage.model}${NEEDS_CHECK_SUFFIX}`
+            : generated.usage.model,
+          basedOnMessageId: gate.lastBuyerMessageId,
+        },
+      });
+      await expirePending(conv.id, draftRow.id);
+
+      if (action === "approval_queue") {
         await prisma.aiEvent
           .create({
             data: {
               conversationId: conv.id,
-              decision: "auto_sent",
+              decision: "approval_queued",
               intent: topic,
               ...generated.usage,
             },
           })
           .catch(() => {});
-        const { recordAudit } = await import("@/lib/audit");
-        await recordAudit({
-          actor: ACTOR,
-          action: "chat.auto_replied",
-          entity: "ChatConversation",
-          entityId: conv.id,
-          after: {
-            topic,
-            messageId: sent.id,
-            preview: labeledText.slice(0, 120),
-          },
+        await createChatReplyApproval({
+          conversationId: conv.id,
+          draftId: draftRow.id,
+          buyerName: conv.buyerName,
+          buyerMessageId: gate.lastBuyerMessageId,
+          buyerPreview: gate.buyerText || "Buyer question",
+          replyText: generated.text,
+          topic,
+          needsCheck: check,
+          proposedBy: `assistant:${generated.usage.provider}`,
         });
-        out.autoSent++;
-      } catch (err) {
-        console.error(
-          "[ai] auto-send failed",
-          conv.id,
-          err instanceof Error ? err.message : err
-        );
+        out.queued++;
+      } else {
+        await prisma.aiEvent
+          .create({
+            data: {
+              conversationId: conv.id,
+              decision: "ai_draft",
+              intent: topic,
+              ...generated.usage,
+            },
+          })
+          .catch(() => {});
+        out.drafted++;
       }
-      continue;
-    }
-
-    const draftRow = await prisma.chatDraft.create({
-      data: {
-        conversationId: conv.id,
-        text: generated.text,
-        source: "AI",
-        intent: topic,
-        provider: generated.usage.provider,
-        model: check
-          ? `${generated.usage.model}${NEEDS_CHECK_SUFFIX}`
-          : generated.usage.model,
-        basedOnMessageId: gate.lastBuyerMessageId,
-      },
-    });
-    await expirePending(conv.id, draftRow.id);
-
-    if (action === "approval_queue") {
-      await prisma.aiEvent
-        .create({
-          data: {
-            conversationId: conv.id,
-            decision: "approval_queued",
-            intent: topic,
-            ...generated.usage,
-          },
-        })
-        .catch(() => {});
-      await createChatReplyApproval({
-        conversationId: conv.id,
-        draftId: draftRow.id,
-        buyerName: conv.buyerName,
-        buyerMessageId: gate.lastBuyerMessageId,
-        buyerPreview: gate.buyerText || "Buyer question",
-        replyText: generated.text,
-        topic,
-        needsCheck: check,
-        proposedBy: `assistant:${generated.usage.provider}`,
-      });
-      out.queued++;
-    } else {
-      await prisma.aiEvent
-        .create({
-          data: {
-            conversationId: conv.id,
-            decision: "ai_draft",
-            intent: topic,
-            ...generated.usage,
-          },
-        })
-        .catch(() => {});
-      out.drafted++;
+    } finally {
+      await lock.release();
     }
   }
 

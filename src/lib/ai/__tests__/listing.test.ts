@@ -1,19 +1,56 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const channelProductFindUnique = vi.fn(async () => ({
+  title: "Stored Skirt",
+  description: "<p>Soft ribbed fabric.</p><p>Length: 18 inches</p>",
+}));
+const channelProductFindMany = vi.fn(async () => [
+  {
+    listingId: "p1",
+    title: "Women's Palda Long with inner Mini Skirt",
+    categoryName: "Skirts",
+    status: "ACTIVATE",
+    description: "<p>Tiered Mini Skirt made from soft ribbed stretch fabric.</p><p>Length: 17 inches</p>",
+  },
+  {
+    listingId: "p2",
+    title: "High Waist Printed Skort",
+    categoryName: "Skirts",
+    status: "NORMAL",
+    description: "<p>Skorts with SLIT, embossed makapal fabric.</p>",
+  },
+  { listingId: "p3", title: "Old Draft Item", categoryName: "Tops", status: "DRAFT", description: null },
+  { listingId: "p4", title: "Deleted Item", categoryName: "Tops", status: "DELETED", description: null },
+]);
+
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     listingVariant: {
       findMany: vi.fn(async () => [
-        { name: "Stored Skirt", variationName: "Black, M (27-30)", availableStock: 3 },
-        { name: "Stored Skirt", variationName: "Black, L (31-34)", availableStock: 0 },
+        { name: "Stored Skirt", variationName: "Black, M (27-30)", availableStock: 3, pricePhp: "299.00" },
+        { name: "Stored Skirt", variationName: "Black, L (31-34)", availableStock: 0, pricePhp: "299.00" },
       ]),
+    },
+    channelProduct: {
+      findUnique: (...args: unknown[]) => channelProductFindUnique(...(args as [])),
+      findMany: (...args: unknown[]) => channelProductFindMany(...(args as [])),
     },
   },
 }));
 
 import { checkReply } from "../output-check";
-import { buildPrompt, groundingText } from "../prompt";
-import { cleanDescription, clearListingCache, getListingFacts, listingBlock, mapTikTokListing, stockWord } from "../listing";
+import { buildPrompt, groundingText, shopFactsText } from "../prompt";
+import {
+  catalogBlock,
+  cleanDescription,
+  clearListingCache,
+  getListingFacts,
+  getShopCatalog,
+  listingBlock,
+  mapTikTokListing,
+  shouldIncludeCatalog,
+  stockWord,
+} from "../listing";
 
 // Trimmed from a real Kyna TikTok listing (Get Product).
 const SKORTS = {
@@ -91,6 +128,39 @@ describe("listing facts", () => {
     expect(listingBlock(mapTikTokListing(ODD))).toContain("- Print #2: Medium (23-31) ₱349: available");
   });
 
+  it("compacts large multi-SKU listings by collapsing uniform stock and grouping identical colors", () => {
+    const colors = ["Black", "White", "Navy", "Army", "Brown", "Maroon", "Purple", "Red", "Blue", "Green"];
+    const big = {
+      productId: "big1",
+      title: "Big Skirt",
+      attributes: [],
+      description: "",
+      source: "live" as const,
+      skus: colors.flatMap((c) => {
+        if (c === "Purple" || c === "Red") {
+          return [
+            { color: c, size: "M (27-30)", pricePhp: 299, stock: 0 },
+            { color: c, size: "L (31-34)", pricePhp: 299, stock: 0 },
+          ];
+        }
+        if (c === "Blue") {
+          return [
+            { color: c, size: "M (27-30)", pricePhp: 299, stock: 20 },
+            { color: c, size: "L (31-34)", pricePhp: 299, stock: 3 },
+          ];
+        }
+        return [
+          { color: c, size: "M (27-30)", pricePhp: 299, stock: 50 },
+          { color: c, size: "L (31-34)", pricePhp: 299, stock: 40 },
+        ];
+      }),
+    };
+    const block = listingBlock(big);
+    expect(block).toContain("- Black / White / Navy / Army / Brown / Maroon / Green: M (27-30), L (31-34) — all available");
+    expect(block).toContain("- Purple / Red: M (27-30), L (31-34) — all sold out");
+    expect(block).toContain("- Blue: M (27-30): available, L (31-34): few left");
+  });
+
   it("reads live, caches, and falls back to the last stock import", async () => {
     const fetcher = vi.fn(async () => SKORTS);
     const a = await getListingFacts({ shopConnectionId: "s1", productId: SKORTS.id, fetcher, now: 1_000 });
@@ -105,11 +175,119 @@ describe("listing facts", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const stored = await getListingFacts({ shopConnectionId: "s1", productId: "other", fetcher: down });
     expect(stored).toMatchObject({ source: "stored", title: "Stored Skirt" });
+    expect(stored?.description).toContain("Length: 18 inches");
+    expect(stored?.skus[0]?.pricePhp).toBe(299);
     expect(stored?.skus.map((s) => [s.size, stockWord(s.stock)])).toEqual([
       ["M (27-30)", "few left"],
       ["L (31-34)", "sold out"],
     ]);
     expect(listingBlock(stored!)).toContain("from the last stock check");
+  });
+
+  it("keeps size guide and length lines when a long description is trimmed", () => {
+    const filler = Array.from({ length: 12 }, (_, i) => `<p>Feature line ${i + 1}: Soft breathable woven style for everyday outfits and weekend errands.</p>`).join("");
+    const longHtml = `${filler}<p>📏 Size Guide</p><p>Medium Waist: 25-30 inches, Length: 17 inches</p><p>XL Waist: 31-40 inches, Length: 18 inches</p>`;
+    const cleaned = cleanDescription(longHtml);
+    expect(cleaned.length).toBeLessThanOrEqual(900);
+    expect(cleaned).toContain("Length: 17 inches");
+    expect(cleaned).toContain("Length: 18 inches");
+  });
+
+  it("loads active catalog items with caching and respects the token budget cap", async () => {
+    channelProductFindMany.mockClear();
+    const a = await getShopCatalog("s1", 1_000);
+    const b = await getShopCatalog("s1", 60_000);
+    expect(a).toEqual([
+      {
+        productId: "p1",
+        title: "Women's Palda Long with inner Mini Skirt",
+        category: "Skirts",
+        description: "Tiered Mini Skirt made from soft ribbed stretch fabric.\nLength: 17 inches",
+      },
+      {
+        productId: "p2",
+        title: "High Waist Printed Skort",
+        category: "Skirts",
+        description: "Skorts with SLIT, embossed makapal fabric.",
+      },
+    ]);
+    expect(b).toBe(a);
+    expect(channelProductFindMany).toHaveBeenCalledTimes(1);
+
+    const many = Array.from({ length: 40 }, (_, i) => ({
+      productId: `id-${i}`,
+      title: `Kyna Sample Garment Style Number ${i + 1} Comfortable Everyday Wear for Women`,
+      category: "Skirts",
+      description: "Soft ribbed fabric.\nLength: 17 inches",
+    }));
+    const block = catalogBlock(many, "palda");
+    expect(block.length).toBeLessThanOrEqual(1400);
+    expect(block).toContain("- [Skirts] Kyna Sample Garment Style Number 1");
+    expect(block).toContain("Length: 17 inches");
+  });
+
+  it("smart-gates catalog inclusion to avoid peak token waste", () => {
+    // Skipped on order/shipping/cod/returns and single-item chats.
+    expect(shouldIncludeCatalog({ topics: ["order"], hasListings: false, buyerText: "asan na po order ko?" })).toBe(false);
+    expect(shouldIncludeCatalog({ topics: ["cod"], hasListings: false, buyerText: "pwede po COD?" })).toBe(false);
+    expect(shouldIncludeCatalog({ topics: ["returns"], hasListings: false, buyerText: "please make sure walang damage" })).toBe(false);
+    expect(shouldIncludeCatalog({ topics: ["stock"], hasListings: true, buyerText: "kelan po kya mag kaka stock ng purple?" })).toBe(false);
+    // Included when no listing is attached on product/size/stock/other questions, or when asking for another style/length.
+    expect(shouldIncludeCatalog({ topics: ["size"], hasListings: false, buyerText: "Wala bang hanggang binti na palda?" })).toBe(true);
+    expect(shouldIncludeCatalog({ topics: ["product"], hasListings: true, buyerText: "Wala bang mas mahaba na palda?" })).toBe(true);
+  });
+
+  it("attaches keyword-matched description snippets for matching items only", () => {
+    const items = [
+      { productId: "p1", title: "Plus size V-Neck Dress", category: "Dresses", description: "Knitted dress with pocket." },
+      {
+        productId: "p2",
+        title: "Women's Palda Long with inner Mini Skirt",
+        category: "Skirts",
+        description: "Tiered Mini Skirt.\nLength: 17 inches",
+      },
+    ];
+    const block = catalogBlock(items, "Seller Wala bang hanggang binti Ang haba nito na palda?");
+    expect(block).toContain("Women's Palda Long with inner Mini Skirt — Tiered Mini Skirt.; Length: 17 inches");
+    expect(block).not.toContain("Knitted dress with pocket");
+  });
+});
+
+describe("prompt and checks with shop catalog", () => {
+  const catalog = [
+    { productId: "p1", title: "Women's Palda Long with inner Mini Skirt", category: "Skirts" },
+    { productId: "p2", title: "High Waist Printed Skort Mini Skirt", category: "Skirts" },
+  ];
+  const answers = [{ topic: "cod", title: "COD", answer: "Yes po, available ang COD." }];
+  const messages = [{ sender: "BUYER" as const, kind: "TEXT" as const, text: "Wala bang hanggang binti na palda?", card: null }];
+
+  it("places SHOP CATALOG after SHOP FACTS and before ORDER", () => {
+    const [, user] = buildPrompt({ answers, order: null, messages, catalog });
+    expect(user.content).toMatch(/SHOP FACTS:[\s\S]*SHOP CATALOG[\s\S]*Women's Palda Long[\s\S]*ORDER:/);
+  });
+
+  it("grounds catalog item names without allowing stock guesses or uncarried items", () => {
+    const facts = groundingText({ answers, order: null, messages, catalog });
+    const shopFacts = shopFactsText({ answers, order: null, catalog });
+    expect(
+      checkReply("Meron po kaming Palda Long sa shop, paki-send po ang product para ma-check namin ang exact haba at stock.", {
+        facts,
+        shopFacts,
+        stockKnown: false,
+      })
+    ).toEqual({ ok: true });
+    // Still blocks guessing stock from the catalog summary alone.
+    expect(
+      checkReply("Opo, may stock pa po ang Palda Long!", { facts, shopFacts, stockKnown: false })
+    ).toMatchObject({ ok: false, reason: "stock" });
+    // Still blocks claiming an item that isn't in the catalog.
+    expect(
+      checkReply("May blazer po kami sa shop!", { facts, shopFacts, stockKnown: false })
+    ).toMatchObject({ ok: false, reason: "claim" });
+    // Blocks leaking the prompt section name.
+    expect(
+      checkReply("Based on SHOP CATALOG, wala po kaming blazer.", { facts, shopFacts, stockKnown: false })
+    ).toMatchObject({ ok: false, reason: "leak" });
   });
 });
 

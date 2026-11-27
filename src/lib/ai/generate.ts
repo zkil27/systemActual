@@ -1,6 +1,6 @@
 import type { OrderPanel } from "@/lib/chats/types";
 import { sizeRangesOf } from "./fact-check";
-import type { ListingFacts } from "./listing";
+import type { CatalogItem, ListingFacts } from "./listing";
 import { checkReply, type CheckReason } from "./output-check";
 import { buildPrompt, groundingText, hasTagalog, parseReply, replyLanguage, shopFactsText, type PromptAnswer, type PromptMessage } from "./prompt";
 import { complete, type Attempt, type CompletionDeps } from "./providers";
@@ -57,6 +57,7 @@ export async function generateReply(
     order: OrderPanel | null;
     messages: PromptMessage[];
     listings?: ListingFacts[];
+    catalog?: CatalogItem[];
     reservePct?: number;
     /** At most this share of each daily free limit (the test run leaves room for real buyers). */
     maxShare?: number;
@@ -64,19 +65,19 @@ export async function generateReply(
   deps: CompletionDeps = {}
 ): Promise<GenerateResult> {
   const listings = input.listings ?? [];
+  const catalog = input.catalog ?? [];
   const stockKnown = listings.some((l) => l.skus.some((s) => s.stock !== null));
-  const prompt = buildPrompt({ answers: input.answers, order: input.order, messages: input.messages, listings });
-  const facts = groundingText({ answers: input.answers, order: input.order, messages: input.messages, listings });
-  const shopFacts = shopFactsText({ answers: input.answers, order: input.order, listings });
-  const sizeRanges = sizeRangesOf(listings);
-  const wantLang = replyLanguage(input.messages);
-  // The buyer's messages since the shop last spoke.
   const lastShop = input.messages.map((m) => m.sender).lastIndexOf("SELLER");
   const buyerText = input.messages
     .slice(lastShop + 1)
     .filter((m) => m.sender === "BUYER" && m.text)
     .map((m) => m.text)
     .join("\n");
+  const prompt = buildPrompt({ answers: input.answers, order: input.order, messages: input.messages, listings, catalog });
+  const facts = groundingText({ answers: input.answers, order: input.order, messages: input.messages, listings, catalog });
+  const shopFacts = shopFactsText({ answers: input.answers, order: input.order, listings, catalog, buyerText });
+  const sizeRanges = sizeRangesOf(listings);
+  const wantLang = replyLanguage(input.messages);
   const blocked: BlockedReply[] = [];
   const attempts: Attempt[] = [];
 

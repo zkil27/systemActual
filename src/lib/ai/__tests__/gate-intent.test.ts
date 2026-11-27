@@ -1,7 +1,7 @@
 import { buyerWritesEnglish } from "@/lib/ai/drafts";
 import { describe, expect, it } from "vitest";
 import { needsAnswer, type GateMessage } from "@/lib/ai/gate";
-import { classifyIntent, classifyIntents, isAckOrGreeting, isHandoffNotice, isHoldingReply, splitQuestions } from "@/lib/ai/intent";
+import { classifyIntent, classifyIntents, isAckOrGreeting, isHandoffNotice, isHoldingReply, needsOwner, splitQuestions } from "@/lib/ai/intent";
 import { orderTemplate, shopAnswerTemplate, templateDraft, templateDraftFor } from "@/lib/ai/templates";
 import { basisLabel, draftId } from "@/lib/ai/drafts";
 import type { OrderPanel } from "@/lib/chats/types";
@@ -169,10 +169,15 @@ describe("templates", () => {
   it("reads restock questions as stock, not delivery", () => {
     expect(classifyIntents(["when will you restock the plus size plain colors?"])).toEqual(["stock"]);
     expect(classifyIntents(["kelan po mag restock ng M?"])).toEqual(["stock"]);
+    expect(classifyIntents(["kelan po kya mag kaka stock ng purple?"])).toEqual(["stock"]);
     expect(classifyIntents(["sold out na po ba yung black?"])).toEqual(["stock"]);
     // Delivery questions are unchanged.
     expect(classifyIntents(["when will my order arrive?"], { hasOrder: true })).toEqual(["order"]);
     expect(classifyIntents(["kelan po ma-ship pag nag order ako?"])).toEqual(["shipping"]);
+  });
+
+  it("flags 'make sure no damage' requests for the owner", () => {
+    expect(needsOwner(["hello please make sure na walang damage ang skirt"])).toBe(true);
   });
 
   it("skips Taglish shop answers for English questions", () => {
