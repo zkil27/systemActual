@@ -149,13 +149,15 @@ Problem: prices and listings were only edited in each Seller Center separately. 
 
 What exists:
 - **Database schema & migration (`prisma/schema.prisma`, `prisma/migrations/20261126060000_phase5_listings_and_prices/migration.sql`):** added `ChannelProduct` (parent title, description, category, images, price range per shop listing), `PriceChange` & `PriceChangeStatus`, and `ListingVariant` price push tracking (`channelProductId`, `pricePhp`, `pricePushedPhp`, `pricePushedAt`, `pricePushError`).
+- **Unified item creation & cross-shop publish (`prisma/migrations/20261127040000_item_publish/migration.sql`, `src/lib/listings/create-rules.ts`, `create-service.ts`, `src/components/listings/AddItemSheet.tsx`, `CategoryPickerSheet.tsx`, `RetryPublishSheet.tsx`):** owner adds a new item once (up to 9 phone photos via `POST /api/listings/photos`, single SKU or 1–2 tier variations, 1-tap category presets + searchable Shopee/TikTok category picker) and creates local `Garment` / `GarmentVariant` / `INITIAL` stock + pushes to TikTok (`AS_DRAFT` or `LISTING`) and Shopee (`UNLIST` or `NORMAL` + `init_tier_variation`), with auto-linked `ListingVariant`s and per-shop `ItemPublish` retry.
 - **Read-only catalog import enhancement (`src/lib/catalog/import.ts`, `import-map.ts`):** populates `ChannelProduct` metadata and per-variation prices during normal shop imports without modifying existing stock sync contracts.
-- **Channel connector write actions (`src/lib/channels/shopee.ts`, `tiktok.ts`):** `pushListingPrices` and `createDraftListing` (`UNLIST` on Shopee, `AS_DRAFT` on TikTok).
-- **Listings & prices screen & Approval Queue execution (`src/app/listings/page.tsx`, `src/app/api/listings/route.ts`, `src/lib/listings/*`, `src/lib/approvals/service.ts`):** owner compares Shopee/TikTok prices side by side, proposes a price update or cross-shop draft copy through the `ActionRequest` Approval Queue (in `/approvals` or 1-tap Telegram), pushes strictly when `ShopConnection.writesEnabled` is enabled, logs `PriceChange` + `AuditLog` history, and supports retrying failed/skipped pushes.
+- **Channel connector write actions (`src/lib/channels/shopee.ts`, `tiktok.ts`):** `pushListingPrices`, `createListing` (photos, logistics/warehouses, 1–2 tier variations, draft or live), `fetchCategories`, and `createDraftListing`.
+- **Listings & prices screen & Approval Queue execution (`src/app/listings/page.tsx`, `src/app/api/listings/route.ts`, `src/lib/listings/*`, `src/lib/approvals/service.ts`):** owner adds new items across both shops, compares Shopee/TikTok prices side by side, proposes a price update or cross-shop draft copy through the `ActionRequest` Approval Queue (in `/approvals` or 1-tap Telegram), pushes strictly when `ShopConnection.writesEnabled` is enabled, logs `PriceChange` + `AuditLog` history, and supports retrying failed/skipped pushes.
 
 Open:
 - [x] Apply `prisma/migrations/20261126060000_phase5_listings_and_prices/migration.sql` to Supabase Postgres (applied).
-- Optional future enhancement: searchable Shopee/TikTok category & attribute pickers instead of entering a destination category ID manually.
+- [x] Apply `prisma/migrations/20261127040000_item_publish/migration.sql` to Supabase Postgres (applied).
+- [x] Searchable Shopee/TikTok category pickers & 1-tap presets built (`GET /api/listings/categories`, `CategoryPickerSheet`). Optional future enhancement: category-specific mandatory attribute pickers for live publishing.
 
 ## Developer tools: `/dev` (done on dev)
 

@@ -64,6 +64,7 @@ export const RETENTION_RULES: Record<string, RetentionRule> = {
   PhysicalScan: { kind: "cascade", note: "With its return parcel (proof photos 90 days)" },
   ReturnItemCheck: { kind: "cascade", note: "With its return parcel" },
   PriceChange: { kind: "rule", note: "365 days" },
+  ItemPublish: { kind: "cascade", note: "With its garment; payload cleared once pushed" },
   PurchaseOrder: { kind: "rule", note: "Received/cancelled orders 730 days (2 years)" },
   PurchaseOrderLine: { kind: "cascade", note: "With its purchase order" },
 };

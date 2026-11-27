@@ -72,7 +72,12 @@ export function localChatPhotosDir(): string {
   return path.join(process.cwd(), "uploads", "chat-photos");
 }
 
+export function localListingPhotosDir(): string {
+  return path.join(process.cwd(), "uploads", "listing-photos");
+}
+
 export const SAFE_CHAT_PHOTO_FILE = /^chat-photo-\d+-[a-f0-9]+\.(jpg|png|webp)$/;
+export const SAFE_LISTING_PHOTO_FILE = /^listing-photo-\d+-[a-f0-9]+\.(jpg|png|webp)$/;
 
 /** Saves a photo the owner sends in a chat. Same checks as proof photos. */
 export async function saveChatPhoto(file: File): Promise<string> {
@@ -144,4 +149,66 @@ export async function saveProofPhoto(file: File): Promise<string> {
   const targetPath = path.join(uploadsDir, uniqueName);
   await writeFile(targetPath, buffer);
   return `/api/proofs/${uniqueName}`;
+}
+
+/** Saves a product photo uploaded for a new listing. Same checks as proof and chat photos. */
+export async function saveListingPhoto(file: File): Promise<string> {
+  const { buffer, format } = await readValidatedPhoto(file);
+  const uniqueName = `listing-photo-${Date.now()}-${crypto.randomBytes(16).toString("hex")}${format.ext}`;
+
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    const blob = await put(`listing-photos/${uniqueName}`, buffer, {
+      access: "public",
+      contentType: format.contentType,
+    });
+    return blob.url;
+  }
+
+  const dir = localListingPhotosDir();
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, uniqueName), buffer);
+  return `/api/listings/photos/${uniqueName}`;
+}
+
+/** Only our own Blob store's listing-photos folder; never fetch arbitrary URLs from the server. */
+export function isOwnListingBlobUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return (
+      u.protocol === "https:" &&
+      u.hostname.endsWith(".blob.vercel-storage.com") &&
+      u.pathname.includes("/listing-photos/")
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Reads back a listing photo saved by saveListingPhoto (to pass on to Shopee or TikTok). */
+export async function readListingPhoto(
+  url: string
+): Promise<{ buffer: Buffer; format: ImageFormat; fileName: string }> {
+  let buffer: Buffer;
+  let fileName: string;
+  const local = url.match(/^\/api\/listings\/photos\/([^/?#]+)$/);
+  if (local) {
+    fileName = local[1];
+    if (!SAFE_LISTING_PHOTO_FILE.test(fileName)) {
+      throw new InvalidProofPhotoError("Photo not found.");
+    }
+    buffer = await readFile(path.join(localListingPhotosDir(), fileName));
+  } else if (isOwnListingBlobUrl(url)) {
+    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) throw new InvalidProofPhotoError("Photo not found.");
+    buffer = Buffer.from(await res.arrayBuffer());
+    fileName = decodeURIComponent(new URL(url).pathname.split("/").pop() || "photo");
+  } else {
+    throw new InvalidProofPhotoError("Photo not found.");
+  }
+  if (buffer.length > MAX_PROOF_BYTES) {
+    throw new InvalidProofPhotoError("Photo must be 5 MB or smaller.");
+  }
+  const format = detectImageFormat(buffer);
+  if (!format) throw new InvalidProofPhotoError("Only JPEG, PNG, or WebP photos are allowed.");
+  return { buffer, format, fileName };
 }

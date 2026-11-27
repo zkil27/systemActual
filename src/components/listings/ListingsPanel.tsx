@@ -1,21 +1,26 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Copy, Pencil, Search } from "lucide-react";
+import { Copy, Pencil, Plus, RefreshCw, Search } from "lucide-react";
 import { Button, Group } from "@/components/ui/Button";
 import { ItemThumb } from "@/components/ui/ItemThumb";
 import type { ShopSummaryDto, UnifiedListingItemDto } from "@/lib/listings/service";
+import type { ItemPublishSummary } from "./RetryPublishSheet";
 
 export function ListingsPanel({
   items,
   shops,
+  onAddItem,
   onEditPrice,
   onCopyListing,
+  onRetryPublish,
 }: {
   items: UnifiedListingItemDto[];
   shops: ShopSummaryDto[];
+  onAddItem: () => void;
   onEditPrice: (item: UnifiedListingItemDto) => void;
   onCopyListing: (item: UnifiedListingItemDto) => void;
+  onRetryPublish: (item: UnifiedListingItemDto, publish: ItemPublishSummary) => void;
 }) {
   const [query, setQuery] = useState("");
   const [mismatchOnly, setMismatchOnly] = useState(false);
@@ -63,14 +68,29 @@ export function ListingsPanel({
             Price mismatch ({mismatchCount})
           </button>
         )}
+        <Button
+          variant="primary"
+          size="md"
+          onClick={onAddItem}
+          className="!h-11 !px-3.5 !text-[14px]"
+        >
+          <Plus className="h-4 w-4" />
+          Add item
+        </Button>
       </div>
 
       {!filtered.length ? (
-        <Group className="p-6 text-center space-y-1.5">
+        <Group className="p-6 text-center space-y-2.5">
           <p className="text-[16px] font-bold text-ink">No matching items</p>
           <p className="text-[14px] text-ink-2">
-            Run &ldquo;Read stock again&rdquo; in Items &amp; stock to sync your shop listings and prices.
+            Add a new item to both TikTok and Shopee, or run &ldquo;Read stock again&rdquo; in Items &amp; stock.
           </p>
+          <div className="pt-1">
+            <Button variant="primary" size="md" onClick={onAddItem} className="!h-11 !px-4">
+              <Plus className="h-4 w-4" />
+              Add item
+            </Button>
+          </div>
         </Group>
       ) : (
         <div className="space-y-3">
@@ -117,7 +137,7 @@ export function ListingsPanel({
                   </div>
                 </div>
 
-                {shopPrices.size > 0 && (
+                {(shopPrices.size > 0 || item.publishes.some((p) => p.status !== "PUSHED")) && (
                   <div className="flex flex-wrap gap-2">
                     {[...shopPrices.values()].map((sp) => (
                       <span
@@ -130,6 +150,24 @@ export function ListingsPanel({
                           : "No price synced"}
                       </span>
                     ))}
+                    {item.publishes
+                      .filter((p) => p.status !== "PUSHED")
+                      .map((pub) => (
+                        <button
+                          key={pub.id}
+                          type="button"
+                          onClick={() => onRetryPublish(item, pub)}
+                          className={`pressable inline-flex items-center gap-1 rounded-[var(--radius-control)] px-2.5 py-1 text-[12px] font-bold ${
+                            pub.status === "FAILED"
+                              ? "bg-missing-soft text-missing-ink"
+                              : "bg-amber-500/15 text-amber-800 dark:text-amber-300"
+                          }`}
+                        >
+                          <RefreshCw className="h-3 w-3" />
+                          {pub.platform === "SHOPEE" ? "Shopee" : "TikTok"}:{" "}
+                          {pub.status === "SKIPPED" ? "Not pushed · Push" : "Failed · Retry"}
+                        </button>
+                      ))}
                   </div>
                 )}
 

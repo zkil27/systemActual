@@ -145,6 +145,7 @@ export async function tiktokUploadRequest(opts: {
   field: string;
   file: Blob;
   fileName: string;
+  extraFields?: Record<string, string>;
   query?: Record<string, string>;
   fetchFn?: typeof fetch;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -161,6 +162,11 @@ export async function tiktokUploadRequest(opts: {
   const sign = signTikTokRequest({ appSecret: cfg.appSecret, path: opts.path, query });
   const form = new FormData();
   form.append(opts.field, opts.file, opts.fileName);
+  if (opts.extraFields) {
+    for (const [k, v] of Object.entries(opts.extraFields)) {
+      form.append(k, v);
+    }
+  }
   const res = await fetchWithRetry(
     `${cfg.apiBaseUrl}${opts.path}?${new URLSearchParams({ ...query, sign }).toString()}`,
     { method: "POST", headers: { "x-tts-access-token": accessToken }, body: form, signal: AbortSignal.timeout(30_000) },

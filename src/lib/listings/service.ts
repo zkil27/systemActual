@@ -68,6 +68,20 @@ export interface UnifiedListingItemDto {
     imageUrls: string[];
     variants: Array<{ label: string; pricePhp: number | null; stock: number }>;
   }>;
+  publishes: Array<{
+    id: string;
+    shopConnectionId: string;
+    shopName: string;
+    platform: "SHOPEE" | "TIKTOK";
+    publishMode: "DRAFT" | "LIVE";
+    status: "PENDING" | "PUSHED" | "FAILED" | "SKIPPED";
+    categoryId: string | null;
+    categoryName: string | null;
+    externalListingId: string | null;
+    error: string | null;
+    pushedAt: string | null;
+    updatedAt: string;
+  }>;
 }
 
 export interface PriceChangeHistoryDto {
@@ -137,6 +151,24 @@ export async function listUnifiedListings(): Promise<{
         name: true,
         imageUrl: true,
         sellingPricePhp: true,
+        publishes: {
+          where: { shopConnection: { isDemo: false } },
+          orderBy: { platform: "asc" },
+          select: {
+            id: true,
+            shopConnectionId: true,
+            platform: true,
+            publishMode: true,
+            status: true,
+            categoryId: true,
+            categoryName: true,
+            externalListingId: true,
+            error: true,
+            pushedAt: true,
+            updatedAt: true,
+            shopConnection: { select: { shopName: true } },
+          },
+        },
         variants: {
           orderBy: { label: "asc" },
           select: {
@@ -270,6 +302,20 @@ export async function listUnifiedListings(): Promise<{
       totalOnShelf,
       variants,
       sourceProducts: [...sourceMap.values()],
+      publishes: g.publishes.map((p) => ({
+        id: p.id,
+        shopConnectionId: p.shopConnectionId,
+        shopName: p.shopConnection.shopName,
+        platform: p.platform,
+        publishMode: p.publishMode,
+        status: p.status,
+        categoryId: p.categoryId,
+        categoryName: p.categoryName,
+        externalListingId: p.externalListingId,
+        error: p.error,
+        pushedAt: p.pushedAt ? p.pushedAt.toISOString() : null,
+        updatedAt: p.updatedAt.toISOString(),
+      })),
     };
   });
 

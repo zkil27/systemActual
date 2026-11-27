@@ -2,6 +2,7 @@ import {
   ActionRequestStatus,
   DigitalStatus,
   DisputeStatus,
+  ItemPublishStatus,
   Prisma,
   PrintJobStatus,
   PurchaseOrderStatus,
@@ -284,6 +285,20 @@ export async function pruneDailyData(
                 { lastUsedAt: { lt: new Date(now.getTime() - PUSH_SUBSCRIPTION_RETENTION_DAYS * 24 * 3600_000) } },
               ],
             },
+          })
+          .catch((err) => {
+            if (!isMissingTableError(err)) throw err;
+          }),
+        prisma.itemPublish
+          .updateMany({
+            where: {
+              payloadJson: { not: Prisma.JsonNull },
+              OR: [
+                { status: ItemPublishStatus.PUSHED },
+                { updatedAt: { lt: cutoff90d } },
+              ],
+            },
+            data: { payloadJson: Prisma.JsonNull },
           })
           .catch((err) => {
             if (!isMissingTableError(err)) throw err;

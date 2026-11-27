@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronRight, Link2, PackagePlus, RotateCw, Search, Sparkles, Star } from "lucide-react";
+import { ChevronRight, Link2, PackagePlus, Plus, RotateCw, Search, Sparkles, Star } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { StockHubNav } from "@/components/StockHubNav";
+import { AddItemSheet } from "@/components/listings/AddItemSheet";
 import { Button, Group } from "@/components/ui/Button";
 import { ComingSoonPill } from "@/components/ui/ComingSoon";
 import { useConfirm } from "@/components/ui/ConfirmSheet";
@@ -526,6 +527,7 @@ export default function ItemsPage() {
   const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [bumpSheetOpen, setBumpSheetOpen] = useState(false);
+  const [addItemOpen, setAddItemOpen] = useState(false);
   const [linkFrom, setLinkFrom] = useState<CatalogGarment | null>(null);
   const [linkTo, setLinkTo] = useState<CatalogGarment | null>(null);
   const [busy, setBusy] = useState(false);
@@ -675,6 +677,14 @@ export default function ItemsPage() {
                   Auto-link
                 </Button>
               )}
+              <Button
+                variant="primary"
+                onClick={() => setAddItemOpen(true)}
+                className="h-11 flex-1 whitespace-nowrap px-3.5 text-[14px] sm:flex-none"
+              >
+                <Plus className="h-4 w-4 shrink-0" />
+                Add item
+              </Button>
               <Link
                 href="/stock-in?from=items"
                 onClick={() => haptic("tap")}
@@ -1106,6 +1116,11 @@ export default function ItemsPage() {
           </div>
         )}
       </Sheet>
+      <AddItemSheet
+        open={addItemOpen}
+        onClose={() => setAddItemOpen(false)}
+        onCreated={load}
+      />
       {confirmSheet}
     </AppShell>
   );

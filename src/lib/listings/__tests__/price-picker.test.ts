@@ -11,6 +11,7 @@ function makeItem(overrides?: Partial<UnifiedListingItemDto>): UnifiedListingIte
     hasPriceMismatch: true,
     totalOnShelf: 24,
     sourceProducts: [],
+    publishes: [],
     variants: [
       {
         id: "v1",

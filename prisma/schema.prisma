@@ -145,6 +145,7 @@ model ShopConnection {
   orders             Order[]
   listings           ListingVariant[]
   channelProducts    ChannelProduct[]
+  itemPublishes      ItemPublish[]
   isDemo             Boolean             @default(false)
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
@@ -609,6 +610,7 @@ model Garment {
   imageUrl          String?
   variants          GarmentVariant[]
   priceChanges      PriceChange[]
+  publishes         ItemPublish[]
   /// Hidden from the Items list and stock alerts (discontinued). Stock keeps syncing.
   archivedAt        DateTime?
   /// Optional overrides; null = use the shop-wide default from Settings.
@@ -1074,6 +1076,47 @@ model PriceChange {
   @@index([garmentId, createdAt])
   @@index([actionRequestId])
   @@index([status, createdAt])
+}
+
+enum ItemPublishMode {
+  DRAFT
+  LIVE
+}
+
+enum ItemPublishStatus {
+  PENDING
+  PUSHED
+  FAILED
+  SKIPPED
+}
+
+/// Tracks pushing a Kyna Ops item to a connected marketplace shop, enabling
+/// per-shop status display and idempotent retry without re-entering fields.
+model ItemPublish {
+  id                String            @id @default(cuid())
+  garmentId         String
+  garment           Garment           @relation(fields: [garmentId], references: [id], onDelete: Cascade)
+  shopConnectionId  String
+  shopConnection    ShopConnection    @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
+  platform          Platform
+  publishMode       ItemPublishMode   @default(DRAFT)
+  status            ItemPublishStatus @default(PENDING)
+  categoryId        String?
+  categoryName      String?
+  /// Remote item_id / product_id once created; stored immediately so a Shopee
+  /// init_tier_variation retry never duplicates the base item.
+  externalListingId String?
+  /// Full publish snapshot (description, imageUrls, weightKg, dimensions, tiers,
+  /// variantPrices). Emptied automatically once status is PUSHED.
+  payloadJson       Json?
+  error             String?
+  pushedAt          DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@unique([garmentId, shopConnectionId])
+  @@index([status, updatedAt])
+  @@index([shopConnectionId])
 }
 
 /// Shop rules the assistant may quote (COD, shipping times, returns, sizes...).

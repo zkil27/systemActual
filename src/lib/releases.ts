@@ -20,6 +20,16 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    id: 15,
+    date: "2026-11-27",
+    title: "Add items to both shops",
+    changes: [
+      "Tap Add item in Listings & prices or Items & stock to create a new item once and push it to both TikTok and Shopee.",
+      "Upload up to 9 photos, add colors and sizes with prices and shelf stock, and choose Draft/Unlisted or Publish live.",
+      "Pick categories in one tap from your existing items or search each shop's categories, and retry any failed or skipped shop later.",
+    ],
+  },
+  {
     id: 14,
     date: "2026-11-27",
     title: "Phone alerts and smarter replies",

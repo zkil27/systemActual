@@ -4,9 +4,13 @@ import {
   InvalidProofPhotoError,
   MAX_PROOF_BYTES,
   isOwnBlobUrl,
+  isOwnListingBlobUrl,
   readChatPhoto,
+  readListingPhoto,
   SAFE_CHAT_PHOTO_FILE,
+  SAFE_LISTING_PHOTO_FILE,
   saveChatPhoto,
+  saveListingPhoto,
   saveProofPhoto,
 } from "@/lib/storage";
 
@@ -73,6 +77,34 @@ describe("saveProofPhoto", () => {
     const big = new File([new Uint8Array(MAX_PROOF_BYTES + 1)], "huge.jpg", {
       type: "image/jpeg",
     });
+    expect(big).toBeDefined();
     await expect(saveProofPhoto(big)).rejects.toThrow(InvalidProofPhotoError);
+  });
+});
+
+describe("saveListingPhoto", () => {
+  it("enforces image magic bytes and max size", async () => {
+    const fake = new File(["<svg></svg>"], "evil.jpg", { type: "image/jpeg" });
+    await expect(saveListingPhoto(fake)).rejects.toThrow(InvalidProofPhotoError);
+    const big = new File([new Uint8Array(MAX_PROOF_BYTES + 1)], "huge.jpg", { type: "image/jpeg" });
+    await expect(saveListingPhoto(big)).rejects.toThrow(InvalidProofPhotoError);
+  });
+
+  it("only reads back our own listing photos", async () => {
+    expect(
+      isOwnListingBlobUrl("https://abc.public.blob.vercel-storage.com/listing-photos/listing-photo-1-ab.jpg")
+    ).toBe(true);
+    expect(
+      isOwnListingBlobUrl("https://abc.public.blob.vercel-storage.com/chat-photos/a.jpg")
+    ).toBe(false);
+    expect(isOwnListingBlobUrl("https://evil.example/listing-photos/a.jpg")).toBe(false);
+    await expect(readListingPhoto("https://evil.example/x.jpg")).rejects.toThrow(
+      InvalidProofPhotoError
+    );
+    await expect(readListingPhoto("/api/listings/photos/..%2F.env")).rejects.toThrow(
+      InvalidProofPhotoError
+    );
+    expect(SAFE_LISTING_PHOTO_FILE.test("listing-photo-1732400000000-ab12cd.webp")).toBe(true);
+    expect(SAFE_LISTING_PHOTO_FILE.test("../.env")).toBe(false);
   });
 });

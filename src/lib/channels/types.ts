@@ -41,6 +41,61 @@ export interface ListingDraftResult {
   status: string;
 }
 
+export interface ListingTierInput {
+  name: string;
+  options: string[];
+}
+
+export interface ListingVariantInput {
+  garmentVariantId: string;
+  label: string;
+  tierValues: string[];
+  skuCode?: string | null;
+  pricePhp: number;
+  stock: number;
+}
+
+export interface CreateListingInput {
+  title: string;
+  description: string;
+  categoryId: string;
+  publishMode: "DRAFT" | "LIVE";
+  weightKg: number;
+  dimensionsCm?: { length: number; width: number; height: number } | null;
+  pricePhp: number;
+  stock: number;
+  imageUrls: string[];
+  tiers: ListingTierInput[];
+  variants: ListingVariantInput[];
+  /** When retrying Shopee after add_item already succeeded, resume init_tier_variation only. */
+  existingExternalListingId?: string | null;
+}
+
+export interface CreatedListingSku {
+  garmentVariantId: string;
+  variationId: string;
+  variationName: string | null;
+  warehouseId?: string | null;
+  pricePhp: number;
+  stock: number;
+}
+
+export interface CreateListingResult {
+  externalListingId: string;
+  status: string;
+  skus: CreatedListingSku[];
+  remoteImageUrls: string[];
+  /** Set when parent item was created before a later step (e.g. variations) failed. */
+  partialError?: string;
+}
+
+export interface ChannelCategoryOption {
+  id: string;
+  name: string;
+  path: string;
+  isLeaf: boolean;
+}
+
 /**
  * Unified marketplace channel boundary (orders, finance, stock push, tokens, Phase 5 listings/prices).
  * Adding a future channel (e.g. Lazada or Shopify) implements this contract and
@@ -64,4 +119,6 @@ export interface ChannelConnector {
   pushListingStock(shop: ShopConnection, token: string, rows: PushCandidate[]): Promise<StockPushResult>;
   pushListingPrices(shop: ShopConnection, token: string, rows: PricePushCandidate[]): Promise<PricePushResult>;
   createDraftListing(shop: ShopConnection, token: string, draft: ListingDraftInput): Promise<ListingDraftResult>;
+  createListing(shop: ShopConnection, token: string, input: CreateListingInput): Promise<CreateListingResult>;
+  fetchCategories(shop: ShopConnection, token: string): Promise<ChannelCategoryOption[]>;
 }

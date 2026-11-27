@@ -259,3 +259,60 @@ export async function shopeePostFile(
   }
   return Buffer.from(await res.arrayBuffer());
 }
+
+/**
+ * Signed Shopee Media Space image upload (multipart/form-data).
+ * Shop-level HMAC-SHA256 signs `${partnerId}${path}${timestamp}${accessToken}${shopId}`.
+ */
+export async function shopeeUploadImage(
+  shopId: string,
+  accessToken: string,
+  file: Blob,
+  fileName: string,
+  scene: "normal" | "desc" = "normal",
+  fetchFn: typeof fetch = fetch
+): Promise<{ imageId: string; imageUrl: string }> {
+  const token = decryptSecret(accessToken);
+  const cfg = getShopeeConfig();
+  const path = "/api/v2/media_space/upload_image";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const sign = signShopeeRequest({
+    partnerId: cfg.partnerId,
+    partnerKey: cfg.partnerKey,
+    path,
+    timestamp,
+    accessToken: token,
+    shopId,
+  });
+  const qs = new URLSearchParams({
+    partner_id: cfg.partnerId,
+    timestamp: String(timestamp),
+    access_token: token,
+    shop_id: shopId,
+    sign,
+  });
+  const form = new FormData();
+  form.append("image", file, fileName);
+  form.append("scene", scene);
+
+  const res = await fetchWithRetry(
+    `${cfg.baseUrl}${path}?${qs.toString()}`,
+    { method: "POST", body: form, signal: AbortSignal.timeout(30_000) },
+    { fetchFn }
+  );
+  const data = await readMarketplaceJson(res, "Shopee");
+  if (!res.ok || data.error) {
+    throwMarketplaceError(res, String(data.message || data.error || "Shopee image upload failed"));
+  }
+  const info = (data.response as Record<string, unknown> | undefined)?.image_info as
+    | Record<string, unknown>
+    | undefined;
+  const imageId = info?.image_id ? String(info.image_id) : "";
+  if (!imageId) {
+    throw new Error("Shopee didn't return an image ID.");
+  }
+  return {
+    imageId,
+    imageUrl: info?.image_url ? String(info.image_url) : "",
+  };
+}

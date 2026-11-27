@@ -8,10 +8,12 @@ import { StockHubNav } from "@/components/StockHubNav";
 import { Group } from "@/components/ui/Button";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { toast } from "@/components/ui/Toast";
+import { AddItemSheet } from "@/components/listings/AddItemSheet";
 import { CopyListingSheet } from "@/components/listings/CopyListingSheet";
 import { ListingsPanel } from "@/components/listings/ListingsPanel";
 import { PriceEditSheet } from "@/components/listings/PriceEditSheet";
 import { PriceHistoryPanel } from "@/components/listings/PriceHistoryPanel";
+import { RetryPublishSheet, type ItemPublishSummary } from "@/components/listings/RetryPublishSheet";
 import type {
   PriceChangeHistoryDto,
   ShopSummaryDto,
@@ -30,6 +32,11 @@ export default function ListingsPage() {
   const [loading, setLoading] = useState(true);
   const [priceItem, setPriceItem] = useState<UnifiedListingItemDto | null>(null);
   const [copyItem, setCopyItem] = useState<UnifiedListingItemDto | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [retryState, setRetryState] = useState<{
+    itemTitle: string;
+    publish: ItemPublishSummary;
+  } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -119,13 +126,31 @@ export default function ListingsPage() {
           <ListingsPanel
             items={items}
             shops={shops}
+            onAddItem={() => setAddOpen(true)}
             onEditPrice={setPriceItem}
             onCopyListing={setCopyItem}
+            onRetryPublish={(item, publish) =>
+              setRetryState({ itemTitle: item.garmentName, publish })
+            }
           />
         ) : (
           <PriceHistoryPanel history={history} onChanged={load} />
         )}
       </div>
+
+      <AddItemSheet
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onCreated={load}
+      />
+
+      <RetryPublishSheet
+        open={Boolean(retryState)}
+        onClose={() => setRetryState(null)}
+        itemTitle={retryState?.itemTitle ?? ""}
+        publish={retryState?.publish ?? null}
+        onRetried={load}
+      />
 
       <PriceEditSheet
         open={Boolean(priceItem)}
