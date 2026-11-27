@@ -23,6 +23,7 @@ const nextConfig: NextConfig = {
     // Server-only use (Developer screen); never read in client code.
     EXPECTED_MIGRATIONS: migrationNames(),
   },
+  serverExternalPackages: ["web-push"],
   images: {
     unoptimized: true,
   },

@@ -1,4 +1,4 @@
-import webpush from "web-push";
+import { sendNotification, setVapidDetails } from "web-push";
 import { prisma } from "@/lib/prisma";
 import { isMissingTableError } from "@/lib/dev/db-errors";
 import { formatPushFromAlert, sanitizePushUrl, type PushPayload } from "@/lib/push-format";
@@ -90,7 +90,7 @@ export async function sendOwnerPush(
 
   if (subs.length === 0) return { sent: 0, failed: 0, pruned: 0 };
 
-  webpush.setVapidDetails(cfg.subject, cfg.publicKey, cfg.privateKey);
+  setVapidDetails(cfg.subject, cfg.publicKey, cfg.privateKey);
   const body = JSON.stringify({
     title: payload.title,
     body: payload.body,
@@ -107,7 +107,7 @@ export async function sendOwnerPush(
   await Promise.all(
     subs.map(async (sub) => {
       try {
-        await webpush.sendNotification(
+        await sendNotification(
           {
             endpoint: sub.endpoint,
             keys: { p256dh: sub.p256dh, auth: sub.auth },
